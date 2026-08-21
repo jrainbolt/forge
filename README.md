@@ -2,8 +2,9 @@
 
 Forge is an early-stage, local-first AI coding assistant and software-development
 agent. Its long-term design keeps language models interchangeable and keeps the
-core useful without cloud services. The current implementation is only the
-Milestone A0 project and CLI bootstrap; it does not yet provide AI features.
+core useful without cloud services. The current implementation provides the
+project bootstrap and a generic, backend-independent model API with a
+deterministic test model. It does not yet perform real model inference.
 
 ## Development setup
 
@@ -31,7 +32,9 @@ ruff check .
 ruff format --check .
 ```
 
+The same test, lint, and formatting checks run in GitHub Actions for pushes and
+pull requests on Python 3.12.
+
 The architectural direction and milestone boundaries are described in
 [`docs/ROADMAP.md`](docs/ROADMAP.md). Current invariants are summarized in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-

@@ -15,6 +15,37 @@ Inference implementations sit behind an abstraction so the core does not care
 whether inference is local, remote, third-party, or eventually provided by
 Forge Runtime.
 
+## Forge Model API
+
+Forge Core communicates with language models only through the synchronous
+`Model` abstraction in `forge.models`. A request contains ordered conversation
+messages and generic generation configuration. A response contains generated
+text, a generic finish reason, model identity, and optional token usage.
+
+Model objects are already initialized when presented to Forge Core. They expose
+identity and capabilities without triggering loading, generate complete
+responses synchronously, and provide an explicit, idempotent `close` operation
+for releasing implementation-owned resources.
+
+## Model vs Backend
+
+A model is the language model serving a request. A backend is the engine that
+executes that model. `ModelIdentity` preserves both identifiers as distinct
+values so Forge can observe each without collapsing the concepts.
+
+## Backend-specific data
+
+Backend configuration, prompt rendering, native response dictionaries, model
+file details, device settings, tokens, and runtime handles do not cross the
+generic model boundary. Implementations translate between their native data
+and Forge's request and response value objects.
+
+## Capability discovery
+
+Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values
+instead of assuming that every model supports the same behavior. A1 declares
+only chat, system-message, and seeded-generation capabilities.
+
 ## Tool isolation
 
 Models cannot directly access the filesystem, shell, Git, network, compilers,
@@ -57,4 +88,3 @@ Platform-specific behavior belongs behind clear boundaries.
 Correct, tested behavior precedes optimization. This is especially important
 for the future native inference runtime, where reference implementations must
 anchor optimized CPU, SIMD, and GPU implementations.
-
