@@ -1,5 +1,15 @@
 """Generic language-model API and deterministic test implementation."""
 
+from forge.models.catalog import (
+    BackendDefinition,
+    BackendRegistry,
+    ModelCatalog,
+    ModelConfigurationError,
+    ModelProfile,
+    ModelSelectionError,
+    default_backend_registry,
+    load_model_catalog,
+)
 from forge.models.llama_cpp import LlamaCppConfig, LlamaCppModel
 from forge.models.mock import MockModel
 from forge.models.model import Model, ModelError
@@ -17,6 +27,8 @@ from forge.models.types import (
 )
 
 __all__ = [
+    "BackendDefinition",
+    "BackendRegistry",
     "FinishReason",
     "GenerationConfig",
     "Message",
@@ -25,11 +37,17 @@ __all__ = [
     "LlamaCppModel",
     "MockModel",
     "Model",
+    "ModelCatalog",
     "ModelCapabilities",
     "ModelCapability",
     "ModelError",
+    "ModelConfigurationError",
     "ModelIdentity",
     "ModelRequest",
     "ModelResponse",
+    "ModelProfile",
+    "ModelSelectionError",
     "ModelUsage",
+    "default_backend_registry",
+    "load_model_catalog",
 ]

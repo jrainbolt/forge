@@ -1,0 +1,21 @@
+# Copy this file outside the repository and replace both model paths.
+
+[models.qwen-small]
+backend = "llama.cpp"
+model_id = "Qwen2.5-Coder-7B-Instruct"
+
+[models.qwen-small.backend_config]
+model_path = "/path/to/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf"
+context_size = 8192
+gpu_layers = -1
+verbose = false
+
+[models.qwen-large]
+backend = "llama.cpp"
+model_id = "Qwen3-Coder-30B-A3B-Instruct"
+
+[models.qwen-large.backend_config]
+model_path = "/path/to/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf"
+context_size = 8192
+gpu_layers = -1
+verbose = false

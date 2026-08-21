@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
 
@@ -24,6 +25,18 @@ def test_non_verbose_environment_override(value: str) -> None:
 def test_invalid_environment_override_fails_clearly() -> None:
     with pytest.raises(ValueError, match="FORGE_VERBOSE"):
         ForgeConfig.from_environment({"FORGE_VERBOSE": "sometimes"})
+
+
+def test_model_configuration_environment_override() -> None:
+    config = ForgeConfig.from_environment({"FORGE_CONFIG": "~/forge.toml"})
+    assert config.model_config_path == Path("~/forge.toml").expanduser()
+
+
+def test_verbose_copy_preserves_model_configuration_path() -> None:
+    path = Path("/tmp/forge.toml")
+    assert ForgeConfig(model_config_path=path).with_verbose(True) == ForgeConfig(
+        verbose=True, model_config_path=path
+    )
 
 
 def test_configuration_is_immutable() -> None:

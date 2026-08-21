@@ -3,8 +3,8 @@
 Forge is an early-stage, local-first AI coding assistant and software-development
 agent. Its long-term design keeps language models interchangeable and keeps the
 core useful without cloud services. The current implementation provides the
-project bootstrap and a generic, backend-independent model API with a
-deterministic test model. It does not yet perform real model inference.
+project bootstrap, a generic backend-independent model API, named model
+profiles, and an optional llama.cpp adapter for real local inference.
 
 ## Development setup
 
@@ -70,7 +70,7 @@ Alternatively, a source build can enable Metal with
 Backend initialization logs are the source of truth for whether Metal and GPU
 offload are active.
 
-Download a compatible GGUF file manually and retain ownership of its location.
+Download compatible GGUF files manually and retain ownership of their location.
 Forge neither downloads nor modifies models. The A2 reference is
 `Qwen/Qwen2.5-Coder-7B-Instruct-GGUF`, Q4_K_M quantization, but the model and
 path are not hard-coded. Local `*.gguf` files are ignored by Git.
@@ -88,7 +88,33 @@ Or run the opt-in integration test:
 FORGE_TEST_MODEL=/path/to/model.gguf pytest -m integration
 ```
 
-A2 does not provide an interactive `forge chat` command.
+## Named model profiles
+
+Copy [`forge.example.toml`](forge.example.toml) to a location outside the
+repository and replace its model paths. The example contains the two A3
+reference profiles, `qwen-small` and `qwen-large`. Keep GGUF weights and the
+machine-specific configuration outside version control. A recommended local
+layout is `~/Models/forge/` for both the weights and an untracked `forge.toml`.
+
+Inspect profiles without loading model weights:
+
+```bash
+python scripts/list_models.py /path/to/forge.toml
+```
+
+Run the same A3 coding request through either profile. `--config` takes an
+explicit path; `FORGE_CONFIG` is the application-level environment override.
+
+```bash
+python scripts/smoke_profile.py qwen-small --config /path/to/forge.toml
+FORGE_CONFIG=/path/to/forge.toml python scripts/smoke_profile.py qwen-large
+```
+
+The catalog validates all profile and backend settings while loading TOML, but
+constructs only the selected model. Load and generation timings are written to
+standard error. A3 remains non-interactive and does not provide `forge chat`.
+The first two-profile observations are recorded in
+[`docs/MODEL_COMPARISON.md`](docs/MODEL_COMPARISON.md).
 
 The architectural direction and milestone boundaries are described in
 [`docs/ROADMAP.md`](docs/ROADMAP.md). Current invariants are summarized in

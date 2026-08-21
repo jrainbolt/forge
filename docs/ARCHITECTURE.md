@@ -40,6 +40,28 @@ file details, device settings, tokens, and runtime handles do not cross the
 generic model boundary. Implementations translate between their native data
 and Forge's request and response value objects.
 
+## Model selection and construction
+
+`ModelProfile` gives a stable name to a model identifier, backend identifier,
+and opaque backend-owned configuration. `ModelCatalog` provides immutable
+lookup and constructs only the selected profile. Listing profiles and reading
+their metadata never loads model weights.
+
+`BackendRegistry` is an explicit immutable dependency, not a process-global
+service locator. Each `BackendDefinition` owns both validation of its native
+settings and construction of its `Model` implementation. The default registry
+is created afresh at the application composition boundary. Adding a backend
+there does not add backend conditionals to Forge Core.
+
+```text
+application composition -> ModelCatalog -> BackendRegistry -> Model
+Forge Core -----------------------------------------------> Model
+```
+
+TOML is parsed with the Python standard library. Top-level application
+configuration (including the `FORGE_CONFIG` path override) remains separate
+from generic generation settings and backend-owned execution settings.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values
