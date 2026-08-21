@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forge-coding-assistant"
+dynamic = ["version"]
+description = "A local-first AI coding assistant with interchangeable language models"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "All rights reserved" }
+authors = [{ name = "Forge contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "ruff>=0.9,<1",
+]
+
+[project.scripts]
+forge = "forge.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "forge.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
