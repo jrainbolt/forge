@@ -46,6 +46,38 @@ Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values
 instead of assuming that every model supports the same behavior. A1 declares
 only chat, system-message, and seeded-generation capabilities.
 
+## Model adapter
+
+`LlamaCppModel` is the first real implementation of the generic Forge model
+API. It translates Forge messages and generation settings to
+`llama-cpp-python`, then normalizes generated text, finish state, identity, and
+available token counts into a `ModelResponse`.
+
+The dependency direction is strictly Forge Core to the generic Model API to the
+llama.cpp adapter. Forge Core never imports `llama_cpp`, and backend-native
+objects do not cross the model boundary.
+
+## Backend configuration
+
+`LlamaCppConfig` owns execution-specific settings: an explicit local model
+path, context size, GPU-layer request, optional thread count, diagnostics, and
+optional explicit model identifier. None of these settings are part of generic
+generation configuration. The adapter reads the supplied model file but does
+not discover, download, move, or modify models.
+
+## Chat formatting
+
+The adapter sends structured Forge messages to llama.cpp's chat-completion API.
+Chat-template adaptation belongs to the backend and model metadata. Forge does
+not render model-specific prompt markers, and the adapter rejects a GGUF model
+without chat-template metadata instead of allowing llama.cpp's fallback format.
+
+## Optional inference dependency
+
+`llama-cpp-python` is isolated in the `llama` installation extra and imported
+only when constructing the adapter. Base Forge installations, the CLI, unit
+tests, and hosted CI remain usable without the native inference dependency.
+
 ## Tool isolation
 
 Models cannot directly access the filesystem, shell, Git, network, compilers,

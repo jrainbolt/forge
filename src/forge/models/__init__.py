@@ -1,5 +1,6 @@
 """Generic language-model API and deterministic test implementation."""
 
+from forge.models.llama_cpp import LlamaCppConfig, LlamaCppModel
 from forge.models.mock import MockModel
 from forge.models.model import Model, ModelError
 from forge.models.types import (
@@ -20,6 +21,8 @@ __all__ = [
     "GenerationConfig",
     "Message",
     "MessageRole",
+    "LlamaCppConfig",
+    "LlamaCppModel",
     "MockModel",
     "Model",
     "ModelCapabilities",

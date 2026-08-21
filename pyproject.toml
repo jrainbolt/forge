@@ -17,6 +17,9 @@ dev = [
     "pytest>=8,<9",
     "ruff>=0.9,<1",
 ]
+llama = [
+    "llama-cpp-python>=0.3.35,<0.4",
+]
 
 [project.scripts]
 forge = "forge.cli:main"
@@ -30,6 +33,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
+markers = [
+    "integration: requires an explicitly configured local model",
+]
 
 [tool.ruff]
 target-version = "py312"
@@ -37,4 +43,3 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-
