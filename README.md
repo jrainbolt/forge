@@ -4,7 +4,8 @@ Forge is an early-stage, local-first AI coding assistant and software-developmen
 agent. Its long-term design keeps language models interchangeable and keeps the
 core useful without cloud services. The current implementation provides the
 project bootstrap, a generic backend-independent model API, named model
-profiles, and an optional llama.cpp adapter for real local inference.
+profiles, an optional llama.cpp adapter for real local inference, and ephemeral
+multi-turn chat sessions.
 
 ## Development setup
 
@@ -112,9 +113,40 @@ FORGE_CONFIG=/path/to/forge.toml python scripts/smoke_profile.py qwen-large
 
 The catalog validates all profile and backend settings while loading TOML, but
 constructs only the selected model. Load and generation timings are written to
-standard error. A3 remains non-interactive and does not provide `forge chat`.
+standard error.
 The first two-profile observations are recorded in
 [`docs/MODEL_COMPARISON.md`](docs/MODEL_COMPARISON.md).
+
+## Interactive chat
+
+Launch a local session with an explicit profile and configuration:
+
+```bash
+forge chat --model qwen-small --config ~/Models/forge/forge.toml
+FORGE_CONFIG=~/Models/forge/forge.toml forge chat --model qwen-large
+```
+
+Interactive generation defaults to 256 output tokens and temperature 0.4.
+Generic overrides are available through `--max-tokens`, `--temperature`, and
+`--seed`; `--no-system` omits the concise default Forge system message.
+
+The REPL supports:
+
+```text
+/help   show commands
+/clear  clear in-memory conversational turns without reloading the model
+/info   show profile, model, context, and estimated-budget information
+/exit   close the model and exit
+```
+
+Ctrl-D and Ctrl-C also exit cleanly. The selected model is loaded once and
+reused for every turn in the session. Responses are synchronous and appear
+after generation completes. Conversation history exists only in memory and is
+not saved or resumable.
+
+Forge chat currently has no tools, repository access, code-editing ability,
+shell execution, network access, or agent behavior. It is a general local
+conversation interface; model answers do not grant those capabilities.
 
 The architectural direction and milestone boundaries are described in
 [`docs/ROADMAP.md`](docs/ROADMAP.md). Current invariants are summarized in

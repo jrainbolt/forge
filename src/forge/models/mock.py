@@ -35,11 +35,18 @@ class MockModel(Model):
         *,
         identity: ModelIdentity = DEFAULT_MOCK_IDENTITY,
         capabilities: ModelCapabilities = DEFAULT_MOCK_CAPABILITIES,
+        context_capacity: int | None = 4096,
     ) -> None:
         if not isinstance(identity, ModelIdentity):
             raise TypeError("identity must be a ModelIdentity")
         if not isinstance(capabilities, ModelCapabilities):
             raise TypeError("capabilities must be ModelCapabilities")
+        if context_capacity is not None and (
+            isinstance(context_capacity, bool)
+            or not isinstance(context_capacity, int)
+            or context_capacity <= 0
+        ):
+            raise ValueError("context_capacity must be positive or None")
         try:
             response_values = tuple(responses)
         except TypeError as error:
@@ -52,6 +59,7 @@ class MockModel(Model):
         self._responses = response_values
         self._identity = identity
         self._capabilities = capabilities
+        self._context_capacity = context_capacity
         self._requests: list[ModelRequest] = []
         self._next_response = 0
         self._closed = False
@@ -63,6 +71,10 @@ class MockModel(Model):
     @property
     def capabilities(self) -> ModelCapabilities:
         return self._capabilities
+
+    @property
+    def context_capacity(self) -> int | None:
+        return self._context_capacity
 
     @property
     def requests(self) -> tuple[ModelRequest, ...]:

@@ -35,6 +35,11 @@ class Model(ABC):
     def capabilities(self) -> ModelCapabilities:
         """Return explicitly declared model capabilities."""
 
+    @property
+    @abstractmethod
+    def context_capacity(self) -> int | None:
+        """Return the configured context-token capacity when known."""
+
     @abstractmethod
     def generate(self, request: ModelRequest) -> ModelResponse:
         """Generate a complete response synchronously."""

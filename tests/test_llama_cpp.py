@@ -156,6 +156,7 @@ def test_model_maps_load_configuration(model_file: Path) -> None:
     ]
     assert model.identity.model_id == "explicit-model"
     assert model.identity.backend_id == "llama.cpp"
+    assert model.context_capacity == 8192
 
 
 def test_model_requires_metadata_chat_template(model_file: Path) -> None:

@@ -173,6 +173,7 @@ def test_mock_model_exposes_identity_and_capabilities() -> None:
 
     assert model.identity is identity
     assert model.capabilities is capabilities
+    assert model.context_capacity == 4096
 
 
 def test_mock_model_reports_exhaustion() -> None:

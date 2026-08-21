@@ -150,6 +150,10 @@ class LlamaCppModel(Model):
         return LLAMA_CAPABILITIES
 
     @property
+    def context_capacity(self) -> int:
+        return self._config.context_size
+
+    @property
     def closed(self) -> bool:
         """Return whether this adapter has released its model reference."""
         return self._llama is None

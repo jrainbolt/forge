@@ -62,6 +62,55 @@ TOML is parsed with the Python standard library. Top-level application
 configuration (including the `FORGE_CONFIG` path override) remains separate
 from generic generation settings and backend-owned execution settings.
 
+## Conversation
+
+`Conversation` owns ordered generic `Message` values as complete user/assistant
+turns plus an optional system message. It creates `ModelRequest` values but does
+not execute models or know about llama.cpp. Snapshots exposed to callers are
+immutable tuples, and `/clear` removes turns while retaining the configured
+system message.
+
+## Chat session
+
+`ChatSession` owns one generic `Model`, one `Conversation`, and generic
+`GenerationConfig` for its lifetime. It exposes identity and context metadata,
+executes requests synchronously, and closes the model explicitly. The CLI owns
+terminal interaction and profile composition; the session owns neither input
+nor output behavior.
+
+System messages are sent only when the model declares
+`ModelCapability.SYSTEM_MESSAGES`. Otherwise the session logs that the message
+was omitted. The default text is deliberately general and describes no tools
+or repository capabilities.
+
+## Context policy
+
+The generic `Model.context_capacity` property reports the configured capacity
+when known without exposing a backend tokenizer or native context object. Forge
+does not yet have a generic exact pre-generation tokenizer, so A4 labels its
+input accounting as a conservative estimate: UTF-8 byte length divided by
+three, rounded up, plus four tokens of per-message overhead.
+
+The available input budget is configured context capacity minus the requested
+maximum output and a 64-token safety reserve. A conservative 4,096-token
+capacity is used when a backend cannot report one. The system message and
+current user message must fit. Forge then includes the largest contiguous
+suffix of recent complete turns that fits; it never splits messages, truncates
+text, or leaves an orphan assistant response. After successful generation,
+omitted oldest turns are removed from stored in-memory history. `/info` reports
+the estimate method and number of omitted turns rather than claiming exact
+token precision.
+
+## Conversation failure and persistence
+
+Turns are transactional. Forge constructs a request and calls the model before
+committing either pending message. If generation fails, neither the user nor an
+assistant message is added, so history contains only completed exchanges.
+
+A4 conversation state is ephemeral and process-local. It is never written to
+disk and cannot be resumed. There is no streaming, summarization, retrieval,
+long-term memory, tool execution, or agent state in the session layer.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values

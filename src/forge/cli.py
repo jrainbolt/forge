@@ -4,11 +4,23 @@ from __future__ import annotations
 
 import argparse
 import logging
+import time
 from collections.abc import Sequence
+from pathlib import Path
 
 from forge import __version__
 from forge.config import ForgeConfig
 from forge.logging import configure_logging
+from forge.models import (
+    GenerationConfig,
+    ModelConfigurationError,
+    ModelError,
+    ModelSelectionError,
+    default_backend_registry,
+    load_model_catalog,
+)
+from forge.repl import run_repl
+from forge.session import DEFAULT_SYSTEM_MESSAGE, ChatSession
 
 LOGGER = logging.getLogger(__name__)
 
@@ -17,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the Forge argument parser without parsing process state."""
     parser = argparse.ArgumentParser(
         prog="forge",
-        description="Forge local-first AI coding assistant (project bootstrap)",
+        description="Forge local-first AI coding assistant",
     )
     parser.add_argument(
         "--version",
@@ -30,6 +42,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="enable debug logging",
     )
+    commands = parser.add_subparsers(dest="command")
+    chat = commands.add_parser("chat", help="start an interactive local chat")
+    chat.add_argument("--model", required=True, help="configured model profile name")
+    chat.add_argument(
+        "--config",
+        type=Path,
+        help="model configuration path (or set FORGE_CONFIG)",
+    )
+    chat.add_argument("--max-tokens", type=int, default=256)
+    chat.add_argument("--temperature", type=float, default=0.4)
+    chat.add_argument("--seed", type=int)
+    chat.add_argument(
+        "--no-system",
+        action="store_true",
+        help="omit Forge's default system message",
+    )
     return parser
 
 
@@ -41,4 +69,45 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = config.with_verbose(True)
     configure_logging(verbose=config.verbose)
     LOGGER.debug("Forge CLI initialized")
+    if args.command == "chat":
+        config_path = args.config or config.model_config_path
+        if config_path is None:
+            LOGGER.error("chat requires --config or FORGE_CONFIG")
+            return 2
+        try:
+            generation = GenerationConfig(
+                max_tokens=args.max_tokens,
+                temperature=args.temperature,
+                seed=args.seed,
+            )
+            catalog = load_model_catalog(config_path, default_backend_registry())
+            LOGGER.info("Selected model profile %s", args.model)
+            load_started = time.perf_counter()
+            model = catalog.create(args.model)
+            LOGGER.debug(
+                "Loaded model profile %s in %.2f seconds",
+                args.model,
+                time.perf_counter() - load_started,
+            )
+            with (
+                model,
+                ChatSession(
+                    args.model,
+                    model,
+                    generation=generation,
+                    system_message=(None if args.no_system else DEFAULT_SYSTEM_MESSAGE),
+                ) as session,
+            ):
+                return run_repl(session)
+        except (
+            ModelConfigurationError,
+            ModelSelectionError,
+            ModelError,
+            TypeError,
+            ValueError,
+        ) as error:
+            LOGGER.error("%s", error)
+            if config.verbose:
+                LOGGER.debug("Chat startup failed", exc_info=True)
+            return 2
     return 0
