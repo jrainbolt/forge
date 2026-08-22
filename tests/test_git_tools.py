@@ -27,6 +27,46 @@ from forge.tools.git import (
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="Git unavailable")
 
 
+def run_git(repository: Path, *arguments: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", "-C", str(repository), *arguments],
+        check=True,
+        capture_output=True,
+        shell=False,
+    )
+
+
+@pytest.fixture
+def git_repository(tmp_path: Path) -> Path:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    run_git(repository, "init", "--quiet")
+    run_git(repository, "config", "user.name", "Forge Test")
+    run_git(repository, "config", "user.email", "forge-test@example.invalid")
+    for name, content in (
+        ("modified.txt", "original modified\n"),
+        ("deleted.txt", "original deleted\n"),
+        ("working-one.txt", "original one\n"),
+        ("working-two.txt", "original two\n"),
+        ("staged.txt", "original staged\n"),
+    ):
+        (repository / name).write_text(content)
+    run_git(repository, "add", ".")
+    run_git(repository, "commit", "--quiet", "-m", "test fixture")
+    return repository
+
+
+def execute_git(
+    repository: Path, name: str, arguments: Mapping[str, object]
+) -> ToolResult:
+    return ToolExecutor(
+        create_readonly_repository_registry(), AllowAllPolicy()
+    ).execute(
+        ToolInvocation(f"real-{name}", name, arguments),
+        ExecutionContext(repository.resolve()),
+    )
+
+
 def output_mapping(result: ToolResult) -> Mapping[str, object]:
     output = result.output
     assert isinstance(output, Mapping)
@@ -145,6 +185,115 @@ def test_non_git_workspace_fails_through_executor(tmp_path: Path) -> None:
     )
     assert result.status is ToolResultStatus.FAILURE
     assert "Git command failed" in (result.error_message or "")
+
+
+def test_real_git_status_reports_clean_repository(git_repository: Path) -> None:
+    result = execute_git(git_repository, "git.status", {})
+    output = output_mapping(result)
+
+    assert result.status is ToolResultStatus.SUCCESS
+    assert output["clean"] is True
+    assert output["entries"] == ()
+    assert isinstance(output["branch"], str)
+
+
+def test_real_git_status_distinguishes_mixed_repository_states(
+    git_repository: Path,
+) -> None:
+    (git_repository / "modified.txt").write_text("worktree modified\n")
+    (git_repository / "untracked.txt").write_text("untracked\n")
+    (git_repository / "staged-new.txt").write_text("staged new\n")
+    (git_repository / "deleted.txt").unlink()
+    run_git(git_repository, "add", "staged-new.txt")
+
+    result = execute_git(git_repository, "git.status", {})
+    output = output_mapping(result)
+    entries = {entry["path"]: entry for entry in output["entries"]}  # type: ignore[index]
+
+    assert result.status is ToolResultStatus.SUCCESS
+    assert output["clean"] is False
+    assert entries["modified.txt"] == {
+        "path": "modified.txt",
+        "kind": "modified",
+        "index_status": None,
+        "worktree_status": "M",
+        "staged": False,
+        "worktree": True,
+    }
+    assert entries["untracked.txt"] == {
+        "path": "untracked.txt",
+        "kind": "untracked",
+        "index_status": None,
+        "worktree_status": "?",
+        "staged": False,
+        "worktree": True,
+    }
+    assert entries["staged-new.txt"] == {
+        "path": "staged-new.txt",
+        "kind": "added",
+        "index_status": "A",
+        "worktree_status": None,
+        "staged": True,
+        "worktree": False,
+    }
+    assert entries["deleted.txt"] == {
+        "path": "deleted.txt",
+        "kind": "deleted",
+        "index_status": None,
+        "worktree_status": "D",
+        "staged": False,
+        "worktree": True,
+    }
+
+
+def test_real_git_diff_is_empty_for_clean_repository(git_repository: Path) -> None:
+    working = execute_git(git_repository, "git.diff", {"staged": False})
+    staged = execute_git(git_repository, "git.diff", {"staged": True})
+
+    assert output_mapping(working) == {
+        "staged": False,
+        "diff": "",
+        "truncated": False,
+    }
+    assert output_mapping(staged) == {
+        "staged": True,
+        "diff": "",
+        "truncated": False,
+    }
+
+
+def test_real_git_diff_keeps_worktree_and_staged_scopes_distinct(
+    git_repository: Path,
+) -> None:
+    (git_repository / "working-one.txt").write_text("working one changed\n")
+    (git_repository / "working-two.txt").write_text("working two changed\n")
+    (git_repository / "staged.txt").write_text("staged changed\n")
+    run_git(git_repository, "add", "staged.txt")
+
+    working = execute_git(git_repository, "git.diff", {"staged": False})
+    staged = execute_git(git_repository, "git.diff", {"staged": True})
+    working_output = output_mapping(working)
+    staged_output = output_mapping(staged)
+    working_diff = working_output["diff"]
+    staged_diff = staged_output["diff"]
+
+    assert working.status is ToolResultStatus.SUCCESS
+    assert staged.status is ToolResultStatus.SUCCESS
+    assert isinstance(working_diff, str)
+    assert isinstance(staged_diff, str)
+    assert working_output["staged"] is False
+    assert staged_output["staged"] is True
+    assert working_output["truncated"] is False
+    assert staged_output["truncated"] is False
+    assert "diff --git a/working-one.txt b/working-one.txt" in working_diff
+    assert "diff --git a/working-two.txt b/working-two.txt" in working_diff
+    assert "+working one changed" in working_diff
+    assert "+working two changed" in working_diff
+    assert "staged.txt" not in working_diff
+    assert "diff --git a/staged.txt b/staged.txt" in staged_diff
+    assert "+staged changed" in staged_diff
+    assert "working-one.txt" not in staged_diff
+    assert "working-two.txt" not in staged_diff
 
 
 def test_real_git_status_and_diff_pipeline_do_not_mutate_workspace_state() -> None:
