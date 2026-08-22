@@ -148,6 +148,12 @@ Forge chat currently has no tools, repository access, code-editing ability,
 shell execution, network access, or agent behavior. It is a general local
 conversation interface; model answers do not grant those capabilities.
 
+Forge now contains an internal, deny-by-default tool registry, permission
+policy, invocation-specific approval, workspace context, and central execution
+framework for future capabilities. A5 exposes no tools to chat and adds no real
+external actions: repository and filesystem access, Git integration, shell or
+process execution, and network access remain unavailable.
+
 The architectural direction and milestone boundaries are described in
 [`docs/ROADMAP.md`](docs/ROADMAP.md). Current invariants are summarized in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

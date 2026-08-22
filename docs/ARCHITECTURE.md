@@ -111,6 +111,76 @@ A4 conversation state is ephemeral and process-local. It is never written to
 disk and cannot be resumed. There is no streaming, summarization, retrieval,
 long-term memory, tool execution, or agent state in the session layer.
 
+## Tool execution boundary
+
+Forge tools are inference-independent capabilities. Models and future agents
+may eventually propose `ToolInvocation` values, but they never call a tool
+implementation directly. Every invocation follows one central sequence:
+
+```text
+registry lookup
+    -> argument validation
+    -> permission decision
+    -> invocation-specific approval enforcement
+    -> tool execution
+    -> structured result
+```
+
+`ToolRegistry` is explicitly constructed, rejects duplicate stable names, and
+lists immutable safe metadata without execution. There is no global registry,
+module scanning, entry-point discovery, or implicit capability import.
+
+## Tool arguments and results
+
+`ArgumentSchema` supports a deliberately small contract of required or optional
+string, integer, and Boolean arguments. Unknown fields, missing required fields,
+and incorrect types fail before permission evaluation or execution. Validation
+returns a new immutable mapping and never mutates invocation-owned data.
+
+Every invocation carries a caller-visible correlation ID, stable tool name, and
+structured arguments. `ToolResult` preserves that correlation and distinguishes
+success, execution failure, permission denial, and approval required. Expected
+tool failures and unexpected implementation exceptions become structured
+failure results at the executor boundary; native exception objects do not cross
+it. Outputs are limited to scalar values or immutable mappings of text keys to
+scalar values.
+
+## Tool permission and approval
+
+`PermissionPolicy` returns exactly `ALLOW`, `ASK`, or `DENY`. Rule-based policy
+is deny-by-default: a tool without an explicit rule cannot silently execute.
+`DENY` never executes. `ASK` also never executes unless the caller supplies an
+explicit `InvocationApproval` matching the exact invocation ID, tool name, and
+reviewed arguments. Approval does not mutate policy state, persist, authorize a
+tool generally, cross invocation IDs, or survive changed arguments.
+
+## Tool execution context and observability
+
+`ExecutionContext` contains an explicit, normalized, absolute workspace
+directory. It is immutable and independent of later process working-directory
+changes. A5 establishes this ownership boundary only; path confinement and
+repository access arrive with real read-only tools in A6.
+
+The synchronous executor records the permission decision and monotonic duration
+in generic metadata. Logs identify the tool, invocation, decision, and outcome,
+but omit argument payloads by default because future arguments may contain
+sensitive paths, contents, or commands.
+
+The security invariants for every future tool are:
+
+1. Models never directly execute tools.
+2. Missing permission rules deny execution.
+3. Approval is explicit and invocation-specific.
+4. Arguments are validated before permission and execution.
+5. A workspace is supplied explicitly rather than inferred globally.
+6. `DENY` and unapproved `ASK` decisions cannot execute tools.
+7. Results and failure states are structured and correlated.
+8. Sensitive argument payloads are not logged by default.
+
+A5 provides framework machinery and deterministic, harmless test tools only.
+There are no production filesystem, repository, Git, shell, process, network,
+web, or external-application tools, and chat is not connected to this framework.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values
