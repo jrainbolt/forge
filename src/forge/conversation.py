@@ -113,12 +113,22 @@ class Conversation:
         *,
         context_capacity: int | None,
         safety_reserve: int = 64,
+        temporary_messages: tuple[Message, ...] = (),
     ) -> RequestPlan:
-        """Build a request from the newest complete turns that fit."""
+        """Build a request with bounded history and ephemeral turn messages."""
         if not isinstance(generation, GenerationConfig):
             raise TypeError("generation must be a GenerationConfig")
+        try:
+            temporary = tuple(temporary_messages)
+        except TypeError as error:
+            raise TypeError("temporary_messages must be iterable") from error
+        if not all(isinstance(message, Message) for message in temporary):
+            raise TypeError("temporary_messages must contain only Message objects")
         user = Message(MessageRole.USER, user_text)
-        required = ([self._system] if self._system is not None else []) + [user]
+        required = ([self._system] if self._system is not None else []) + [
+            user,
+            *temporary,
+        ]
 
         effective_capacity = context_capacity or 4096
         if effective_capacity <= generation.max_tokens + safety_reserve:
@@ -149,6 +159,7 @@ class Conversation:
         for turn in selected:
             messages.extend((turn.user, turn.assistant))
         messages.append(user)
+        messages.extend(temporary)
         estimate = sum(self._estimator.estimate(item) for item in messages)
         return RequestPlan(
             ModelRequest(tuple(messages), generation),

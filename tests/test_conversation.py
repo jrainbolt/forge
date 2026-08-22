@@ -106,3 +106,20 @@ def test_estimate_is_explicitly_labeled_as_estimated() -> None:
     )
     assert "estimated" in conversation.estimator_label
     assert plan.estimated_input_tokens > 0
+
+
+def test_temporary_orchestration_messages_are_budgeted_but_not_persisted() -> None:
+    conversation = Conversation(system_message="System")
+    temporary = (
+        Message(MessageRole.ASSISTANT, "tool request"),
+        Message(MessageRole.USER, "tool result"),
+    )
+    plan = conversation.plan_request(
+        "question",
+        GenerationConfig(max_tokens=20),
+        context_capacity=1000,
+        temporary_messages=temporary,
+    )
+    assert plan.request.messages[-2:] == temporary
+    assert conversation.turns == ()
+    assert conversation.messages == (Message(MessageRole.SYSTEM, "System"),)

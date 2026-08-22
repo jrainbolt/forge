@@ -70,7 +70,9 @@ def test_chat_help_succeeds_without_constructing_model(
     with pytest.raises(SystemExit) as exit_info:
         main(["chat", "--help"])
     assert exit_info.value.code == 0
-    assert "--model" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "--model" in output
+    assert "--workspace" in output
 
 
 def test_chat_requires_explicit_model(capsys: pytest.CaptureFixture[str]) -> None:
@@ -125,3 +127,58 @@ def test_chat_constructs_once_and_closes_model(
     )
     assert construction_count == 1
     assert model.closed
+
+
+def test_chat_workspace_constructs_repository_session_explicitly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = MockModel(("unused",))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class Catalog:
+        def create(self, _name: str) -> MockModel:
+            return model
+
+    observed: dict[str, object] = {}
+
+    def inspect_session(session: object) -> int:
+        observed["session"] = session
+        observed["workspace"] = session.info.workspace  # type: ignore[attr-defined]
+        return 0
+
+    monkeypatch.setattr("forge.cli.load_model_catalog", lambda *_args: Catalog())
+    monkeypatch.setattr("forge.cli.run_repl", inspect_session)
+    result = main(
+        [
+            "chat",
+            "--model",
+            "fixture",
+            "--config",
+            str(tmp_path / "forge.toml"),
+            "--workspace",
+            str(workspace),
+        ]
+    )
+    assert result == 0
+    assert observed["workspace"] == workspace.resolve()
+    assert observed["session"].info.repository_mode is True  # type: ignore[attr-defined]
+    assert model.closed
+
+
+def test_repository_chat_rejects_missing_workspace_and_no_system(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = MockModel(("unused",))
+
+    class Catalog:
+        def create(self, _name: str) -> MockModel:
+            return model
+
+    monkeypatch.setattr("forge.cli.load_model_catalog", lambda *_args: Catalog())
+    base = ["chat", "--model", "fixture", "--config", str(tmp_path / "forge.toml")]
+    assert main([*base, "--workspace", str(tmp_path / "missing")]) == 2
+    assert "workspace does not exist" in caplog.text
+    caplog.clear()
+    assert main([*base, "--workspace", str(tmp_path), "--no-system"]) == 2
+    assert "cannot be used" in caplog.text

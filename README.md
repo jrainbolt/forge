@@ -5,8 +5,8 @@ agent. Its long-term design keeps language models interchangeable and keeps the
 core useful without cloud services. The current implementation provides the
 project bootstrap, a generic backend-independent model API, named model
 profiles, an optional llama.cpp adapter for real local inference, ephemeral
-multi-turn chat sessions, and an internal permission-controlled layer of
-workspace-confined read-only repository tools.
+multi-turn chat sessions, and permission-controlled repository-aware chat using
+workspace-confined read-only tools.
 
 ## Development setup
 
@@ -145,18 +145,40 @@ reused for every turn in the session. Responses are synchronous and appear
 after generation completes. Conversation history exists only in memory and is
 not saved or resumable.
 
-Forge chat currently has no tools, repository access, code-editing ability,
-shell execution, network access, or agent behavior. It is a general local
-conversation interface; model answers do not grant those capabilities.
+Without an explicit workspace, Forge chat has no tools or repository access.
+It remains a general local conversation interface; model answers do not grant
+external capabilities.
 
-Forge now contains an internal, deny-by-default tool registry, permission
-policy, invocation-specific approval, workspace context, and central execution
-framework. Its internal A6 registry provides bounded, workspace-confined
-directory listing, UTF-8 file reading, lexical file search, Git status, and Git
-diff capabilities. Every invocation passes through the same permission and
-approval boundary; no arbitrary shell, write, or network capability exists.
-These tools are not yet connected to chat—that repository-aware integration is
-reserved for A7.
+To enable repository-aware chat, select the workspace explicitly:
+
+```bash
+forge chat \
+  --model qwen-small \
+  --config ~/Models/forge/forge.toml \
+  --workspace .
+```
+
+Without `--workspace`, chat retains its normal tool-free behavior. With a
+workspace, Forge may list directories, read bounded UTF-8 files, perform bounded
+lexical searches, inspect Git status, and read working-tree or staged diffs.
+The model uses a strict backend-independent protocol, while every request still
+passes through the deny-by-default permission policy and central executor.
+Internal tool calls and repository contents are ephemeral and are not saved in
+conversation history or on disk. Repository mode requires model-requested tool
+evidence before accepting a final answer and permits only one bounded protocol
+correction per turn.
+
+Repository mode is read-only. Forge still cannot edit files, apply patches, run
+shell commands, builds or tests, mutate Git, access the network, or use the web.
+
+An opt-in non-interactive repository smoke request is also available:
+
+```bash
+python scripts/smoke_repo_chat.py qwen-small \
+  --config ~/Models/forge/forge.toml \
+  --workspace . \
+  --question "Where is the generic Model abstraction defined?"
+```
 
 The architectural direction and milestone boundaries are described in
 [`docs/ROADMAP.md`](docs/ROADMAP.md). Current invariants are summarized in

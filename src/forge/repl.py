@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from forge.models import ModelError
+from forge.orchestration import RepositoryChatSession, RepositoryResponse
 from forge.session import ChatSession
 
 InputFunction = Callable[[str], str]
@@ -19,7 +20,7 @@ HELP_TEXT = (
 
 
 def run_repl(
-    session: ChatSession,
+    session: ChatSession | RepositoryChatSession,
     *,
     input_fn: InputFunction = input,
     output_fn: OutputFunction = print,
@@ -27,6 +28,9 @@ def run_repl(
     """Run a synchronous chat loop against one already-loaded session."""
     info = session.info
     output_fn(f"Forge [{info.profile_name}]")
+    if isinstance(session, RepositoryChatSession):
+        output_fn(f"Workspace: {info.workspace}")
+        output_fn("Repository access: read-only")
     output_fn("Type /help for commands.")
     while True:
         try:
@@ -48,10 +52,18 @@ def run_repl(
         except (ModelError, ValueError, RuntimeError) as error:
             output_fn(f"Error: {error}")
             continue
+        if isinstance(response, RepositoryResponse):
+            for activity in response.tool_activity:
+                path = f": {activity.path}" if activity.path is not None else ""
+                output_fn(f"[tool] {activity.tool_name}{path} ({activity.status})")
         output_fn(f"\n{response.text}")
 
 
-def _run_command(command: str, session: ChatSession, output_fn: OutputFunction) -> bool:
+def _run_command(
+    command: str,
+    session: ChatSession | RepositoryChatSession,
+    output_fn: OutputFunction,
+) -> bool:
     if command == "/help":
         output_fn(HELP_TEXT)
     elif command == "/clear":
@@ -67,7 +79,7 @@ def _run_command(command: str, session: ChatSession, output_fn: OutputFunction) 
             if info.last_estimated_input_tokens is not None
             else "unavailable"
         )
-        output_fn(
+        rendered = (
             f"profile: {info.profile_name}\n"
             f"model: {info.identity.model_id}\n"
             f"backend: {info.identity.backend_id}\n"
@@ -78,6 +90,14 @@ def _run_command(command: str, session: ChatSession, output_fn: OutputFunction) 
             f"estimate method: {info.estimate_method}\n"
             f"last omitted turns: {info.last_omitted_turns}"
         )
+        if isinstance(session, RepositoryChatSession):
+            rendered += (
+                "\nrepository mode: read-only"
+                f"\nworkspace: {info.workspace}"
+                f"\navailable tools: {info.available_tools}"
+                f"\nlast tool count: {info.last_tool_count}"
+            )
+        output_fn(rendered)
     elif command == "/exit":
         output_fn("Goodbye.")
         return True

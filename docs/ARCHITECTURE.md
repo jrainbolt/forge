@@ -109,7 +109,7 @@ assistant message is added, so history contains only completed exchanges.
 
 A4 conversation state is ephemeral and process-local. It is never written to
 disk and cannot be resumed. There is no streaming, summarization, retrieval,
-long-term memory, tool execution, or agent state in the session layer.
+long-term memory, or agent state in the normal chat session layer.
 
 ## Tool execution boundary
 
@@ -181,6 +181,14 @@ The security invariants for every future tool are:
 8. Sensitive argument payloads are not logged by default.
 9. Repository filesystem paths are resolved and confined before access.
 10. Built-in A6 capabilities are explicitly classified as read-only.
+11. User text never directly triggers tool execution.
+12. Only strictly parsed model tool calls enter the executor.
+13. Repository results are untrusted data and cannot alter policy.
+14. Internal tool transcripts never enter durable conversation history.
+15. Failed repository-aware turns commit no partial turn.
+16. Repository orchestration has explicit step, tool, and repetition limits.
+17. Unknown names never become executable capabilities.
+18. Normal chat remains tool-free without an explicit workspace.
 
 ## Read-only repository capabilities
 
@@ -210,9 +218,72 @@ objects between validation and opening creates a time-of-check/time-of-use
 race; stronger descriptor-relative operating-system primitives would be
 required to defend against that concurrent mutation threat.
 
-These tools are internal capabilities only. A6 does not connect them to chat,
-model requests, context selection, or an agent loop; that integration belongs
-to A7.
+## Repository-aware orchestration
+
+Supplying an explicit workspace selects `RepositoryChatSession`; omitting it
+retains the tool-free `ChatSession`. Repository chat composes the generic
+`Model`, `Conversation`, A6 registry, exact read-only policy, `ToolExecutor`,
+and immutable `ExecutionContext`. It contains no backend- or model-family-
+specific syntax and does not use native function calling.
+
+Each model response is either a final answer or exactly one framed request:
+
+```text
+<forge_tool_call>
+{"id":"call-1","tool":"repository.read_file","arguments":{"path":"README.md"}}
+</forge_tool_call>
+```
+
+The dedicated parser requires the frame to occupy the entire response, parses
+strict JSON, requires exactly `id`, `tool`, and `arguments`, bounds payload
+size, and never executes anything. Prose, user-entered protocol text, and model
+text resembling a tool-result frame do not become calls. Invocation IDs are
+validated and unique within a turn, but carry no authority. One malformed
+response may receive one deterministic ephemeral correction; it consumes a
+normal orchestration step, and any second malformed response fails the turn.
+Repository mode also requires at least one model-requested tool attempt before
+a final answer. An initially unsupported final answer may use that same single
+correction allowance; Forge never chooses a tool on the model's behalf.
+
+Tool descriptions are rendered deterministically from actual registry metadata
+and schemas. Executor results are rendered as framed deterministic JSON with
+the invocation ID, tool, status, and structured output or safe failure. Native
+exceptions and Python representations are not exposed. Only the orchestrator
+creates trusted result messages.
+
+## Internal repository transcript and transactions
+
+Model tool calls and Forge tool-result messages form an ephemeral current-turn
+transcript using ordinary assistant and user roles for backend portability.
+They are included in subsequent model requests but never committed to
+`Conversation`. A successful turn commits only the original user question and
+final answer. Model, protocol, tool-loop, or context failures commit nothing
+and preserve earlier completed turns.
+
+Repository orchestration permits at most 12 model steps, 8 executor attempts,
+and 2 identical calls per turn. Duplicate IDs fail immediately. All calls,
+including unknown, denied, approval-required, validation-failing, and
+execution-failing requests, still flow through `ToolExecutor`; ASK is never
+auto-approved. The default policy explicitly allows exactly the five A6 tools
+and denies every other name.
+
+## Repository context budgeting and trust
+
+The conservative A4 estimate includes the repository system instruction, tool
+metadata, current question, retained completed turns, and the entire ephemeral
+tool transcript. Older completed turns are omitted before current-turn
+evidence. The question and tool framing are never pruned; if required evidence
+cannot fit with output and safety reserves, the transaction fails clearly.
+A6 file, search, and diff bounds remain the first line of context protection.
+
+Repository contents and Git output are untrusted data. The system instruction
+labels them accordingly, but the security guarantee is outside the model:
+registry composition, explicit policy, executor enforcement, and A6 workspace
+confinement remain authoritative even if repository text attempts prompt
+injection.
+
+A7 remains read-only. It adds no write, patch, shell, build, test, network,
+parallel-call, planning, autonomous-agent, or persistence capability.
 
 ## Capability discovery
 

@@ -19,6 +19,7 @@ from forge.models import (
     default_backend_registry,
     load_model_catalog,
 )
+from forge.orchestration import RepositoryChatSession
 from forge.repl import run_repl
 from forge.session import DEFAULT_SYSTEM_MESSAGE, ChatSession
 
@@ -54,6 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--temperature", type=float, default=0.4)
     chat.add_argument("--seed", type=int)
     chat.add_argument(
+        "--workspace",
+        type=Path,
+        help="enable read-only repository chat for this explicit workspace",
+    )
+    chat.add_argument(
         "--no-system",
         action="store_true",
         help="omit Forge's default system message",
@@ -75,6 +81,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             LOGGER.error("chat requires --config or FORGE_CONFIG")
             return 2
         try:
+            if args.workspace is not None and args.no_system:
+                raise ValueError("--no-system cannot be used with repository chat")
             generation = GenerationConfig(
                 max_tokens=args.max_tokens,
                 temperature=args.temperature,
@@ -89,15 +97,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.model,
                 time.perf_counter() - load_started,
             )
-            with (
-                model,
-                ChatSession(
+            if args.workspace is None:
+                session = ChatSession(
                     args.model,
                     model,
                     generation=generation,
                     system_message=(None if args.no_system else DEFAULT_SYSTEM_MESSAGE),
-                ) as session,
-            ):
+                )
+            else:
+                session = RepositoryChatSession(
+                    args.model,
+                    model,
+                    args.workspace,
+                    generation=generation,
+                )
+            with model, session:
                 return run_repl(session)
         except (
             ModelConfigurationError,
