@@ -4,8 +4,9 @@ Forge is an early-stage, local-first AI coding assistant and software-developmen
 agent. Its long-term design keeps language models interchangeable and keeps the
 core useful without cloud services. The current implementation provides the
 project bootstrap, a generic backend-independent model API, named model
-profiles, an optional llama.cpp adapter for real local inference, and ephemeral
-multi-turn chat sessions.
+profiles, an optional llama.cpp adapter for real local inference, ephemeral
+multi-turn chat sessions, and an internal permission-controlled layer of
+workspace-confined read-only repository tools.
 
 ## Development setup
 
@@ -150,9 +151,12 @@ conversation interface; model answers do not grant those capabilities.
 
 Forge now contains an internal, deny-by-default tool registry, permission
 policy, invocation-specific approval, workspace context, and central execution
-framework for future capabilities. A5 exposes no tools to chat and adds no real
-external actions: repository and filesystem access, Git integration, shell or
-process execution, and network access remain unavailable.
+framework. Its internal A6 registry provides bounded, workspace-confined
+directory listing, UTF-8 file reading, lexical file search, Git status, and Git
+diff capabilities. Every invocation passes through the same permission and
+approval boundary; no arbitrary shell, write, or network capability exists.
+These tools are not yet connected to chat—that repository-aware integration is
+reserved for A7.
 
 The architectural direction and milestone boundaries are described in
 [`docs/ROADMAP.md`](docs/ROADMAP.md). Current invariants are summarized in

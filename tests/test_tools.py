@@ -20,11 +20,13 @@ from forge.tools import (
     Tool,
     ToolError,
     ToolErrorKind,
+    ToolExecutionMetadata,
     ToolExecutor,
     ToolInvocation,
     ToolMetadata,
     ToolRegistrationError,
     ToolRegistry,
+    ToolResult,
     ToolResultStatus,
     ToolValidationError,
 )
@@ -66,7 +68,7 @@ class CountingTool(Tool):
         if self.behavior == "unexpected":
             raise RuntimeError("sensitive native detail")
         if self.behavior == "bad-output":
-            return ["unsupported"]
+            return {"unsupported"}
         if self.behavior == "add":
             return {"sum": int(arguments["a"]) + int(arguments["b"])}
         return arguments["text"]
@@ -358,6 +360,21 @@ def test_add_tool_returns_immutable_structured_output(tmp_path: Path) -> None:
     assert dict(result.output) == {"sum": 5}  # type: ignore[arg-type]
     with pytest.raises(TypeError):
         result.output["sum"] = 6  # type: ignore[index]
+
+
+def test_tool_result_recursively_freezes_nested_structured_output() -> None:
+    source = {"items": [{"name": "before"}]}
+    result = ToolResult(
+        "nested-1",
+        "test.nested",
+        ToolResultStatus.SUCCESS,
+        ToolExecutionMetadata(PermissionDecision.ALLOW, 0.0),
+        source,
+    )
+    source["items"][0]["name"] = "after"
+    assert result.output["items"][0]["name"] == "before"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        result.output["items"][0]["name"] = "changed"  # type: ignore[index]
 
 
 def test_validated_arguments_do_not_mutate_invocation_arguments(tmp_path: Path) -> None:

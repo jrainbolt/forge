@@ -142,8 +142,8 @@ structured arguments. `ToolResult` preserves that correlation and distinguishes
 success, execution failure, permission denial, and approval required. Expected
 tool failures and unexpected implementation exceptions become structured
 failure results at the executor boundary; native exception objects do not cross
-it. Outputs are limited to scalar values or immutable mappings of text keys to
-scalar values.
+it. Outputs are recursively immutable JSON-like values: scalars, sequences,
+and text-keyed mappings may be nested without exposing mutable tool-owned data.
 
 ## Tool permission and approval
 
@@ -158,8 +158,11 @@ tool generally, cross invocation IDs, or survive changed arguments.
 
 `ExecutionContext` contains an explicit, normalized, absolute workspace
 directory. It is immutable and independent of later process working-directory
-changes. A5 establishes this ownership boundary only; path confinement and
-repository access arrive with real read-only tools in A6.
+changes. Repository paths are relative to that workspace. A central resolver
+rejects absolute paths, resolves existing paths and symlinks strictly, and
+uses path ancestry (not string prefixes) to reject traversal or symlink escape.
+Internal symlinks may be followed only when their final target remains within
+the workspace. Results expose workspace-relative paths.
 
 The synchronous executor records the permission decision and monotonic duration
 in generic metadata. Logs identify the tool, invocation, decision, and outcome,
@@ -176,10 +179,40 @@ The security invariants for every future tool are:
 6. `DENY` and unapproved `ASK` decisions cannot execute tools.
 7. Results and failure states are structured and correlated.
 8. Sensitive argument payloads are not logged by default.
+9. Repository filesystem paths are resolved and confined before access.
+10. Built-in A6 capabilities are explicitly classified as read-only.
 
-A5 provides framework machinery and deterministic, harmless test tools only.
-There are no production filesystem, repository, Git, shell, process, network,
-web, or external-application tools, and chat is not connected to this framework.
+## Read-only repository capabilities
+
+A6 supplies an explicitly composed registry containing only
+`repository.list_directory`, `repository.read_file`,
+`repository.search_files`, `git.status`, and `git.diff`. These capabilities
+still pass through registry lookup, argument validation, policy evaluation,
+approval enforcement, and the central executor. There is no arbitrary shell
+tool, dynamic command construction, network capability, or write operation.
+
+File reads and lexical search are bounded to 256 KiB per file. Search returns
+at most 100 matches, truncates displayed matching lines at 500 characters,
+skips common generated or metadata directories, and reports skipped files.
+Directory listings are non-recursive and deterministic. Missing paths, special
+files, invalid UTF-8, and paths that resolve outside the workspace become
+structured tool failures.
+
+Git tools use fixed argument arrays with `shell=False`, disable optional Git
+locks and interactive prompting, disable pagers, and bound captured output to
+256 KiB. Callers can choose only working-tree versus staged diff; they cannot
+supply Git flags or commands. Git failures, including non-repository
+workspaces, become structured tool failures.
+
+Resolved-path confinement prevents stable traversal and symlink escapes. As
+with ordinary path-based APIs, a hostile process that can replace filesystem
+objects between validation and opening creates a time-of-check/time-of-use
+race; stronger descriptor-relative operating-system primitives would be
+required to defend against that concurrent mutation threat.
+
+These tools are internal capabilities only. A6 does not connect them to chat,
+model requests, context selection, or an agent loop; that integration belongs
+to A7.
 
 ## Capability discovery
 
@@ -232,8 +265,9 @@ outside model instructions. Authority must not be inferred from model output.
 
 ## Workspace confinement
 
-Future code execution and file mutation must be bounded to explicitly selected
-workspaces. Access to one workspace must not imply access elsewhere.
+Read-only repository access is bounded to explicitly selected workspaces.
+Future code execution and file mutation must preserve or strengthen that
+boundary. Access to one workspace must not imply access elsewhere.
 
 ## Observable execution
 

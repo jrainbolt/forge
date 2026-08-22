@@ -12,8 +12,10 @@ from types import MappingProxyType
 TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
 ARGUMENT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
-ScalarValue = str | int | bool | None
-StructuredValue = ScalarValue | Mapping[str, ScalarValue]
+type ScalarValue = str | int | bool | None
+type StructuredValue = (
+    ScalarValue | tuple[StructuredValue, ...] | Mapping[str, StructuredValue]
+)
 
 
 class ArgumentType(Enum):
@@ -40,6 +42,11 @@ class PermissionDecision(Enum):
     ALLOW = "allow"
     ASK = "ask"
     DENY = "deny"
+
+
+class ToolRisk(Enum):
+    UNSPECIFIED = "unspecified"
+    READ_ONLY = "read_only"
 
 
 class ToolValidationError(ValueError):
@@ -115,12 +122,15 @@ class ToolMetadata:
     name: str
     description: str
     argument_schema: ArgumentSchema
+    risk: ToolRisk = ToolRisk.UNSPECIFIED
 
     def __post_init__(self) -> None:
         validate_tool_name(self.name)
         _validate_description(self.description, "tool description")
         if not isinstance(self.argument_schema, ArgumentSchema):
             raise TypeError("argument_schema must be an ArgumentSchema")
+        if not isinstance(self.risk, ToolRisk):
+            raise TypeError("risk must be a ToolRisk")
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,16 +220,7 @@ class ToolResult:
             raise TypeError("status must be a ToolResultStatus")
         if not isinstance(self.metadata, ToolExecutionMetadata):
             raise TypeError("metadata must be ToolExecutionMetadata")
-        if isinstance(self.output, Mapping):
-            output = dict(self.output)
-            if not all(
-                isinstance(key, str) and _is_scalar(value)
-                for key, value in output.items()
-            ):
-                raise TypeError("structured output must map text keys to scalar values")
-            object.__setattr__(self, "output", MappingProxyType(output))
-        elif not _is_scalar(self.output):
-            raise TypeError("output must be a scalar or scalar mapping")
+        object.__setattr__(self, "output", freeze_structured_value(self.output))
         if self.error_kind is not None and not isinstance(
             self.error_kind, ToolErrorKind
         ):
@@ -250,3 +251,18 @@ def _matches_type(value: object, value_type: ArgumentType) -> bool:
 
 def _is_scalar(value: object) -> bool:
     return value is None or isinstance(value, (str, int, bool))
+
+
+def freeze_structured_value(value: object) -> StructuredValue:
+    """Validate and recursively freeze a JSON-like structured value."""
+    if _is_scalar(value):
+        return value  # type: ignore[return-value]
+    if isinstance(value, (list, tuple)):
+        return tuple(freeze_structured_value(item) for item in value)
+    if isinstance(value, Mapping):
+        if not all(isinstance(key, str) for key in value):
+            raise TypeError("structured output mapping keys must be text")
+        return MappingProxyType(
+            {key: freeze_structured_value(item) for key, item in value.items()}
+        )
+    raise TypeError("output must contain only JSON-like structured values")
