@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 
 
 class MessageRole(Enum):
@@ -56,12 +58,43 @@ class GenerationConfig:
             raise TypeError("seed must be an integer or None")
 
 
+class ResponseFormat(Enum):
+    """Backend-independent response representation requested by a caller."""
+
+    TEXT = "text"
+    JSON = "json"
+
+
+type JsonValue = (
+    str | int | bool | None | tuple[JsonValue, ...] | Mapping[str, JsonValue]
+)
+
+
+@dataclass(frozen=True, slots=True)
+class OutputSpecification:
+    """A generic output format with an optional standard JSON schema."""
+
+    format: ResponseFormat = ResponseFormat.TEXT
+    schema: Mapping[str, JsonValue] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.format, ResponseFormat):
+            raise TypeError("format must be a ResponseFormat")
+        if self.format is ResponseFormat.TEXT and self.schema is not None:
+            raise ValueError("text output cannot define a JSON schema")
+        if self.schema is not None:
+            if not isinstance(self.schema, Mapping):
+                raise TypeError("schema must be a mapping or None")
+            object.__setattr__(self, "schema", _freeze_json(self.schema))
+
+
 @dataclass(frozen=True, slots=True)
 class ModelRequest:
     """An ordered conversation and its generation controls."""
 
     messages: tuple[Message, ...]
     generation: GenerationConfig = field(default_factory=GenerationConfig)
+    output: OutputSpecification = field(default_factory=OutputSpecification)
 
     def __post_init__(self) -> None:
         try:
@@ -76,6 +109,8 @@ class ModelRequest:
             raise TypeError("messages must contain only Message objects")
         if not isinstance(self.generation, GenerationConfig):
             raise TypeError("generation must be a GenerationConfig")
+        if not isinstance(self.output, OutputSpecification):
+            raise TypeError("output must be an OutputSpecification")
         object.__setattr__(self, "messages", messages)
 
 
@@ -112,6 +147,7 @@ class ModelCapability(Enum):
     CHAT = "chat"
     SYSTEM_MESSAGES = "system_messages"
     SEEDED_GENERATION = "seeded_generation"
+    STRUCTURED_OUTPUT = "structured_output"
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,3 +210,17 @@ class ModelResponse:
             raise TypeError("identity must be a ModelIdentity")
         if not isinstance(self.usage, ModelUsage):
             raise TypeError("usage must be ModelUsage")
+
+
+def _freeze_json(value: object) -> JsonValue:
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(item) for item in value)
+    if isinstance(value, Mapping):
+        if not all(isinstance(key, str) for key in value):
+            raise TypeError("JSON mapping keys must be text")
+        return MappingProxyType(
+            {key: _freeze_json(item) for key, item in value.items()}
+        )
+    raise TypeError("JSON values must contain only scalar, sequence, or mapping data")

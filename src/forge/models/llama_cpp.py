@@ -17,6 +17,7 @@ from forge.models.types import (
     ModelRequest,
     ModelResponse,
     ModelUsage,
+    ResponseFormat,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ LLAMA_CAPABILITIES = ModelCapabilities(
             ModelCapability.CHAT,
             ModelCapability.SYSTEM_MESSAGES,
             ModelCapability.SEEDED_GENERATION,
+            ModelCapability.STRUCTURED_OUTPUT,
         }
     )
 )
@@ -169,14 +171,20 @@ class LlamaCppModel(Model):
             for message in request.messages
         ]
         generation = request.generation
+        options: dict[str, object] = {
+            "messages": messages,
+            "max_tokens": generation.max_tokens,
+            "temperature": float(generation.temperature),
+            "seed": generation.seed,
+            "stream": False,
+        }
+        if request.output.format is ResponseFormat.JSON:
+            response_format: dict[str, object] = {"type": "json_object"}
+            if request.output.schema is not None:
+                response_format["schema"] = _mutable_json(request.output.schema)
+            options["response_format"] = response_format
         try:
-            native_response = self._llama.create_chat_completion(
-                messages=messages,
-                max_tokens=generation.max_tokens,
-                temperature=float(generation.temperature),
-                seed=generation.seed,
-                stream=False,
-            )
+            native_response = self._llama.create_chat_completion(**options)
             return _translate_response(native_response, self.identity)
         except ModelError:
             raise
@@ -254,4 +262,12 @@ def _translate_usage(usage: object) -> ModelUsage:
 def _optional_token_count(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
+    return value
+
+
+def _mutable_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _mutable_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_mutable_json(item) for item in value]
     return value

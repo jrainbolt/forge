@@ -76,12 +76,15 @@ def test_repository_repl_shows_workspace_tools_and_extended_info(
     workspace.mkdir()
     model = MockModel(
         (
-            '<forge_tool_call>\n{"id":"one","tool":"repository.list_directory",'
-            '"arguments":{"path":"."}}\n</forge_tool_call>',
-            "The repository is empty.",
+            '{"type":"tool_call","id":"one","tool":"repository.read_file",'
+            '"arguments":{"path":"evidence.txt"}}',
+            '{"type":"final","answer":"The repository has evidence."}',
         )
     )
-    session = RepositoryChatSession("fixture", model, workspace)
+    (workspace / "evidence.txt").write_text("evidence")
+    session = RepositoryChatSession(
+        "fixture", model, workspace, require_relevant_source=False
+    )
     output: list[str] = []
     result = run_repl(
         session,
@@ -92,7 +95,7 @@ def test_repository_repl_shows_workspace_tools_and_extended_info(
     assert result == 0
     assert f"Workspace: {workspace.resolve()}" in rendered
     assert "Repository access: read-only" in rendered
-    assert "[tool] repository.list_directory: . (success)" in rendered
+    assert "[tool] repository.read_file: evidence.txt (success)" in rendered
     assert "repository mode: read-only" in rendered
     assert "available tools: 5" in rendered
     assert "last tool count: 1" in rendered

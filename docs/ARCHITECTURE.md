@@ -226,27 +226,34 @@ retains the tool-free `ChatSession`. Repository chat composes the generic
 and immutable `ExecutionContext`. It contains no backend- or model-family-
 specific syntax and does not use native function calling.
 
-Each model response is either a final answer or exactly one framed request:
+Each model response is exactly one strict JSON envelope:
 
-```text
-<forge_tool_call>
-{"id":"call-1","tool":"repository.read_file","arguments":{"path":"README.md"}}
-</forge_tool_call>
+```json
+{"type":"tool_call","id":"call-1","tool":"repository.read_file","arguments":{"path":"README.md"}}
 ```
 
-The dedicated parser requires the frame to occupy the entire response, parses
-strict JSON, requires exactly `id`, `tool`, and `arguments`, bounds payload
-size, and never executes anything. Prose, user-entered protocol text, and model
-text resembling a tool-result frame do not become calls. Invocation IDs are
-validated and unique within a turn, but carry no authority. One malformed
-response may receive one deterministic ephemeral correction; it consumes a
-normal orchestration step, and any second malformed response fails the turn.
-Repository mode also requires at least one model-requested tool attempt before
-a final answer. An initially unsupported final answer may use that same single
-correction allowance; Forge never chooses a tool on the model's behalf.
+Final answers use `{"type":"final","answer":"..."}`. The dedicated parser
+requires the JSON object to occupy the entire response, validates its exact
+fields, bounds payload size, and never executes anything. Prose, code fences,
+multiple objects, user-entered protocol text, and model text resembling a tool
+result do not become calls. Invocation IDs are validated and unique within a
+turn, but carry no authority. One malformed or premature response may receive
+one deterministic ephemeral correction; it consumes a normal orchestration
+step, and any second violation fails the turn. Forge never chooses a tool on
+the model's behalf.
+
+Structured output is a generic model capability. A `ModelRequest` may carry an
+immutable, backend-neutral JSON output specification. Repository orchestration
+requires that capability and constructs its response schema from the actual
+tool registry. The schema permits only registered tool names and their declared
+argument types. It withholds final answers until evidence requirements are met,
+withholds file reads until discovery returns candidate files, and constrains
+paths and search terms to discovered or question-derived provenance. The
+llama.cpp adapter alone translates this specification to its native
+`response_format`; ordinary text requests remain unchanged.
 
 Tool descriptions are rendered deterministically from actual registry metadata
-and schemas. Executor results are rendered as framed deterministic JSON with
+and schemas. Executor results are rendered as deterministic JSON with
 the invocation ID, tool, status, and structured output or safe failure. Native
 exceptions and Python representations are not exposed. Only the orchestrator
 creates trusted result messages.
@@ -275,6 +282,20 @@ tool transcript. Older completed turns are omitted before current-turn
 evidence. The question and tool framing are never pruned; if required evidence
 cannot fit with output and safety reserves, the transaction fails clearly.
 A6 file, search, and diff bounds remain the first line of context protection.
+
+Model-visible results add tighter deterministic caps for file and diff text,
+search matches and line text, and directory entries, with explicit truncation
+flags. Search results prefer distinct files so one noisy file cannot consume
+the entire evidence window.
+
+Tool metadata classifies evidence as discovery, source content, Git working
+state, or none. Directory listings and searches locate candidates but do not
+prove implementation behavior. Git status and diffs describe only current
+working state. Successful reads of relevant implementation source provide the
+evidence required for a final answer; documentation reads remain discovery.
+Questions about mechanisms or safety require distinct relevant source files so
+the answer traces behavior across the implementation rather than relying on a
+single incidental match. Failed reads and fabricated model text never count.
 
 Repository contents and Git output are untrusted data. The system instruction
 labels them accordingly, but the security guarantee is outside the model:

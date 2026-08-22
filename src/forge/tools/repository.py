@@ -19,6 +19,7 @@ from forge.tools.types import (
     ArgumentType,
     ExecutionContext,
     StructuredValue,
+    ToolEvidence,
     ToolMetadata,
     ToolRisk,
 )
@@ -46,7 +47,8 @@ IGNORED_SEARCH_DIRECTORIES = frozenset(
 class ListDirectoryTool(Tool):
     _metadata = ToolMetadata(
         "repository.list_directory",
-        "List entries in one directory inside the active workspace.",
+        "Discover candidate files and directories in one workspace directory; "
+        "this does not inspect file contents.",
         ArgumentSchema(
             (
                 ArgumentSpec(
@@ -55,6 +57,7 @@ class ListDirectoryTool(Tool):
             )
         ),
         ToolRisk.READ_ONLY,
+        ToolEvidence.DISCOVERY,
     )
 
     @property
@@ -92,11 +95,13 @@ class ListDirectoryTool(Tool):
 class ReadFileTool(Tool):
     _metadata = ToolMetadata(
         "repository.read_file",
-        "Read bounded UTF-8 text from a regular file inside the active workspace.",
+        "Inspect the actual bounded UTF-8 source or text contents of one workspace "
+        "file; use this before answering implementation questions.",
         ArgumentSchema(
             (ArgumentSpec("path", ArgumentType.STRING, "Workspace-relative file."),)
         ),
         ToolRisk.READ_ONLY,
+        ToolEvidence.SOURCE_CONTENT,
     )
 
     @property
@@ -135,7 +140,8 @@ class ReadFileTool(Tool):
 class SearchFilesTool(Tool):
     _metadata = ToolMetadata(
         "repository.search_files",
-        "Search UTF-8 repository text for a bounded lexical query.",
+        "Discover candidate source locations by bounded lexical text matching; "
+        "read likely files before explaining their implementation.",
         ArgumentSchema(
             (
                 ArgumentSpec("query", ArgumentType.STRING, "Text to search for."),
@@ -160,6 +166,7 @@ class SearchFilesTool(Tool):
             )
         ),
         ToolRisk.READ_ONLY,
+        ToolEvidence.DISCOVERY,
     )
 
     @property

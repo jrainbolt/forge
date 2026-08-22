@@ -24,6 +24,8 @@ from forge.models.types import (
     ModelRequest,
     ModelResponse,
     ModelUsage,
+    OutputSpecification,
+    ResponseFormat,
 )
 
 __all__ = [
@@ -48,6 +50,8 @@ __all__ = [
     "ModelProfile",
     "ModelSelectionError",
     "ModelUsage",
+    "OutputSpecification",
+    "ResponseFormat",
     "default_backend_registry",
     "load_model_catalog",
 ]

@@ -17,6 +17,8 @@ from forge.models import (
     ModelError,
     ModelRequest,
     ModelUsage,
+    OutputSpecification,
+    ResponseFormat,
 )
 from forge.models import llama_cpp as adapter
 
@@ -173,6 +175,7 @@ def test_model_declares_only_implemented_capabilities(model_file: Path) -> None:
     assert model.capabilities.supports(ModelCapability.CHAT)
     assert model.capabilities.supports(ModelCapability.SYSTEM_MESSAGES)
     assert model.capabilities.supports(ModelCapability.SEEDED_GENERATION)
+    assert model.capabilities.supports(ModelCapability.STRUCTURED_OUTPUT)
 
 
 def test_request_translation_maps_messages_and_generation(model_file: Path) -> None:
@@ -193,6 +196,23 @@ def test_request_translation_maps_messages_and_generation(model_file: Path) -> N
             "stream": False,
         }
     ]
+
+
+def test_structured_output_translation_is_adapter_local(model_file: Path) -> None:
+    fake = FakeLlama()
+    model = LlamaCppModel(LlamaCppConfig(model_file), _llama_factory=Factory(fake))
+    schema = {"type": "object", "required": ["answer"]}
+    structured = ModelRequest(
+        (Message(MessageRole.USER, "Answer as JSON"),),
+        output=OutputSpecification(ResponseFormat.JSON, schema),
+    )
+
+    model.generate(structured)
+
+    assert fake.calls[0]["response_format"] == {
+        "type": "json_object",
+        "schema": schema,
+    }
 
 
 @pytest.mark.parametrize(

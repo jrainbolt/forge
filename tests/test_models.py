@@ -18,6 +18,8 @@ from forge.models import (
     ModelRequest,
     ModelResponse,
     ModelUsage,
+    OutputSpecification,
+    ResponseFormat,
 )
 
 
@@ -86,6 +88,7 @@ def test_request_preserves_order_and_associates_configuration() -> None:
 
     assert request.messages == tuple(messages)
     assert request.generation is generation
+    assert request.output == OutputSpecification()
     messages.reverse()
     assert request.messages[0].role is MessageRole.SYSTEM
 
@@ -98,6 +101,21 @@ def test_request_rejects_empty_messages() -> None:
 def test_request_rejects_non_message_member() -> None:
     with pytest.raises(TypeError, match="Message"):
         ModelRequest(("hello",))  # type: ignore[arg-type]
+
+
+def test_structured_output_specification_is_generic_immutable_json() -> None:
+    source = {"type": "object", "required": ["answer"]}
+    specification = OutputSpecification(ResponseFormat.JSON, source)
+    source["required"].append("changed")
+    assert specification.schema is not None
+    assert specification.schema["required"] == ("answer",)
+    with pytest.raises(TypeError):
+        specification.schema["type"] = "array"  # type: ignore[index]
+
+
+def test_text_output_rejects_schema() -> None:
+    with pytest.raises(ValueError, match="text"):
+        OutputSpecification(ResponseFormat.TEXT, {"type": "object"})
 
 
 def test_response_contains_generic_result_data() -> None:
@@ -166,6 +184,17 @@ def test_mock_model_records_exact_request() -> None:
     assert model.requests[0] is request
 
 
+def test_mock_model_records_structured_output_request_without_parsing_it() -> None:
+    specification = OutputSpecification(ResponseFormat.JSON, {"type": "object"})
+    request = ModelRequest(
+        (Message(MessageRole.USER, "Return JSON"),),
+        output=specification,
+    )
+    model = MockModel(("not parsed by mock",))
+    assert model.generate(request).text == "not parsed by mock"
+    assert model.requests[0].output is specification
+
+
 def test_mock_model_exposes_identity_and_capabilities() -> None:
     identity = ModelIdentity("fixture-model", "fixture-backend")
     capabilities = ModelCapabilities(frozenset({ModelCapability.CHAT}))
@@ -174,6 +203,11 @@ def test_mock_model_exposes_identity_and_capabilities() -> None:
     assert model.identity is identity
     assert model.capabilities is capabilities
     assert model.context_capacity == 4096
+
+
+def test_default_mock_declares_structured_output_capability() -> None:
+    model = MockModel(("response",))
+    assert model.capabilities.supports(ModelCapability.STRUCTURED_OUTPUT)
 
 
 def test_mock_model_reports_exhaustion() -> None:

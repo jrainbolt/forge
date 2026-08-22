@@ -49,6 +49,13 @@ class ToolRisk(Enum):
     READ_ONLY = "read_only"
 
 
+class ToolEvidence(Enum):
+    NONE = "none"
+    DISCOVERY = "discovery"
+    SOURCE_CONTENT = "source_content"
+    GIT_WORKING_STATE = "git_working_state"
+
+
 class ToolValidationError(ValueError):
     """Tool metadata or invocation arguments violate their contract."""
 
@@ -123,6 +130,7 @@ class ToolMetadata:
     description: str
     argument_schema: ArgumentSchema
     risk: ToolRisk = ToolRisk.UNSPECIFIED
+    evidence: ToolEvidence = ToolEvidence.NONE
 
     def __post_init__(self) -> None:
         validate_tool_name(self.name)
@@ -131,6 +139,8 @@ class ToolMetadata:
             raise TypeError("argument_schema must be an ArgumentSchema")
         if not isinstance(self.risk, ToolRisk):
             raise TypeError("risk must be a ToolRisk")
+        if not isinstance(self.evidence, ToolEvidence):
+            raise TypeError("evidence must be a ToolEvidence")
 
 
 @dataclass(frozen=True, slots=True)

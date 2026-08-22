@@ -14,6 +14,7 @@ from forge.tools.types import (
     ArgumentType,
     ExecutionContext,
     StructuredValue,
+    ToolEvidence,
     ToolMetadata,
     ToolRisk,
 )
@@ -25,9 +26,11 @@ GitRunner = Callable[[Path, Sequence[str]], bytes]
 class GitStatusTool(Tool):
     _metadata = ToolMetadata(
         "git.status",
-        "Inspect structured local Git status for the active workspace.",
+        "Inspect only the current Git working-tree and index state; this does not "
+        "inspect implementation source.",
         ArgumentSchema(),
         ToolRisk.READ_ONLY,
+        ToolEvidence.GIT_WORKING_STATE,
     )
 
     def __init__(self, *, runner: GitRunner | None = None) -> None:
@@ -52,7 +55,8 @@ class GitStatusTool(Tool):
 class GitDiffTool(Tool):
     _metadata = ToolMetadata(
         "git.diff",
-        "Read a bounded working-tree or staged diff in the active workspace.",
+        "Read only current working-tree or staged changes as a bounded diff; this is "
+        "not a general source-code lookup tool.",
         ArgumentSchema(
             (
                 ArgumentSpec(
@@ -64,6 +68,7 @@ class GitDiffTool(Tool):
             )
         ),
         ToolRisk.READ_ONLY,
+        ToolEvidence.GIT_WORKING_STATE,
     )
 
     def __init__(self, *, runner: GitRunner | None = None) -> None:

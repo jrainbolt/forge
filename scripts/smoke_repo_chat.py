@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from forge.models import GenerationConfig, default_backend_registry, load_model_catalog
-from forge.orchestration import RepositoryChatSession
+from forge.orchestration import RepositoryChatSession, ToolActivity
 
 
 def main() -> int:
@@ -20,6 +20,11 @@ def main() -> int:
 
     catalog = load_model_catalog(args.config, default_backend_registry())
     model = catalog.create(args.profile)
+
+    def show_activity(activity: ToolActivity) -> None:
+        path = f": {activity.path}" if activity.path is not None else ""
+        print(f"[tool] {activity.tool_name}{path} ({activity.status})", flush=True)
+
     with (
         model,
         RepositoryChatSession(
@@ -27,12 +32,10 @@ def main() -> int:
             model,
             args.workspace,
             generation=GenerationConfig(max_tokens=args.max_tokens, temperature=0.0),
+            activity_callback=show_activity,
         ) as session,
     ):
         response = session.ask(args.question)
-        for activity in response.tool_activity:
-            path = f": {activity.path}" if activity.path is not None else ""
-            print(f"[tool] {activity.tool_name}{path} ({activity.status})")
         if response.protocol_corrections:
             print(f"[protocol] corrections: {response.protocol_corrections}")
         print(response.text)

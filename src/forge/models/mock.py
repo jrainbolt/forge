@@ -21,6 +21,7 @@ DEFAULT_MOCK_CAPABILITIES = ModelCapabilities(
             ModelCapability.CHAT,
             ModelCapability.SYSTEM_MESSAGES,
             ModelCapability.SEEDED_GENERATION,
+            ModelCapability.STRUCTURED_OUTPUT,
         }
     )
 )

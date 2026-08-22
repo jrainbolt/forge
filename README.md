@@ -161,8 +161,11 @@ forge chat \
 Without `--workspace`, chat retains its normal tool-free behavior. With a
 workspace, Forge may list directories, read bounded UTF-8 files, perform bounded
 lexical searches, inspect Git status, and read working-tree or staged diffs.
-The model uses a strict backend-independent protocol, while every request still
-passes through the deny-by-default permission policy and central executor.
+The model uses strict backend-independent JSON output specifications, while
+every request still passes through the deny-by-default permission policy and
+central executor. Discovery results identify candidates; implementation claims
+require relevant source-file evidence, and Git output counts only as working-
+state evidence.
 Internal tool calls and repository contents are ephemeral and are not saved in
 conversation history or on disk. Repository mode requires model-requested tool
 evidence before accepting a final answer and permits only one bounded protocol
