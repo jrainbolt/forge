@@ -12,7 +12,7 @@ from types import MappingProxyType
 TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
 ARGUMENT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
-type ScalarValue = str | int | bool | None
+type ScalarValue = str | int | float | bool | None
 type StructuredValue = (
     ScalarValue | tuple[StructuredValue, ...] | Mapping[str, StructuredValue]
 )
@@ -49,6 +49,7 @@ class ToolRisk(Enum):
     UNSPECIFIED = "unspecified"
     READ_ONLY = "read_only"
     WRITE = "write"
+    EXECUTE = "execute"
 
 
 class ToolEvidence(Enum):
@@ -58,6 +59,8 @@ class ToolEvidence(Enum):
     GIT_WORKING_STATE = "git_working_state"
     WRITE_SUCCESS = "write_success"
     PATCH_SUCCESS = "patch_success"
+    BUILD_RESULT = "build_result"
+    TEST_RESULT = "test_result"
 
 
 class ToolValidationError(ValueError):
@@ -281,7 +284,7 @@ def _freeze_argument(value: object, value_type: ArgumentType) -> object:
 
 
 def _is_scalar(value: object) -> bool:
-    return value is None or isinstance(value, (str, int, bool))
+    return value is None or isinstance(value, (str, int, float, bool))
 
 
 def freeze_structured_value(value: object) -> StructuredValue:

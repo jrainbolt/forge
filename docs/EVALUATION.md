@@ -97,6 +97,7 @@ when a backend does not report them. The first fixture is intentionally small
 and Python-only. It measures read-only repository reasoning before controlled
 writes arrive; it does not execute fixture tests or evaluate repairs.
 
-`coding-v1` remains the frozen pre-write, read-only baseline after A9. Evaluation
-runs continue to construct the read-only registry and policy; assist-mode write
-tools are not exposed, and the fixture is never mutated.
+`coding-v1` remains the frozen pre-execution, read-only baseline after A10.
+Evaluation runs continue to construct the read-only registry and policy;
+assist-mode write, build, and test tools are not exposed, and the fixture is
+never mutated or executed.

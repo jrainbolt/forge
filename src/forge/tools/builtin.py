@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from forge.project_config import ProjectCommands
 from forge.tools.git import GitDiffTool, GitStatusTool
 from forge.tools.permissions import RuleBasedPolicy
+from forge.tools.project import ProjectCommandTool
 from forge.tools.registry import ToolRegistry
 from forge.tools.repository import ListDirectoryTool, ReadFileTool, SearchFilesTool
 from forge.tools.repository_write import ApplyPatchTool, WriteFileTool
@@ -17,6 +19,7 @@ READ_ONLY_TOOL_NAMES = (
     "repository.search_files",
 )
 WRITE_TOOL_NAMES = ("repository.apply_patch", "repository.write_file")
+PROJECT_TOOL_NAMES = ("project.build", "project.test")
 
 
 def create_readonly_repository_registry() -> ToolRegistry:
@@ -39,8 +42,11 @@ def create_readonly_repository_policy(
     return RuleBasedPolicy({name: decision for name in READ_ONLY_TOOL_NAMES})
 
 
-def create_assist_repository_registry() -> ToolRegistry:
+def create_assist_repository_registry(
+    commands: ProjectCommands | None = None,
+) -> ToolRegistry:
     """Create the explicit A6 read plus A9 controlled-write registry."""
+    configured = commands or ProjectCommands()
     return ToolRegistry(
         (
             ListDirectoryTool(),
@@ -50,6 +56,8 @@ def create_assist_repository_registry() -> ToolRegistry:
             GitDiffTool(),
             WriteFileTool(),
             ApplyPatchTool(),
+            ProjectCommandTool("build", configured.build),
+            ProjectCommandTool("test", configured.test),
         )
     )
 
@@ -58,4 +66,5 @@ def create_assist_repository_policy() -> RuleBasedPolicy:
     """Allow reads, require approval for writes, and deny unknown tools."""
     rules = {name: PermissionDecision.ALLOW for name in READ_ONLY_TOOL_NAMES}
     rules.update({name: PermissionDecision.ASK for name in WRITE_TOOL_NAMES})
+    rules.update({name: PermissionDecision.ASK for name in PROJECT_TOOL_NAMES})
     return RuleBasedPolicy(rules)

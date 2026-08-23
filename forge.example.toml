@@ -1,5 +1,15 @@
 # Copy this file outside the repository and replace both model paths.
 
+# Optional trusted local project commands. Forge exposes only these two named
+# operations in assist mode; argv is never supplied by the model or shell-parsed.
+[project.commands.build]
+argv = ["python", "-m", "compileall", "src"]
+timeout_seconds = 120
+
+[project.commands.test]
+argv = ["python", "-m", "pytest"]
+timeout_seconds = 300
+
 [models.qwen-small]
 backend = "llama.cpp"
 model_id = "Qwen2.5-Coder-7B-Instruct"

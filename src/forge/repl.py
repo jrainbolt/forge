@@ -7,7 +7,7 @@ from collections.abc import Callable
 from forge.models import ModelError
 from forge.orchestration import RepositoryChatSession, RepositoryResponse
 from forge.session import ChatSession
-from forge.tools import MutationPreview, ToolInvocation
+from forge.tools import MutationPreview, PreparedProjectCommand, ToolInvocation
 
 InputFunction = Callable[[str], str]
 OutputFunction = Callable[[str], None]
@@ -31,7 +31,11 @@ def run_repl(
     output_fn(f"Forge [{info.profile_name}]")
     if isinstance(session, RepositoryChatSession):
         output_fn(f"Workspace: {info.workspace}")
-        mode = "assist (writes require approval)" if info.assist_mode else "read-only"
+        mode = (
+            "assist (writes and project execution require approval)"
+            if info.assist_mode
+            else "read-only"
+        )
         output_fn(f"Repository access: {mode}")
         if info.assist_mode:
             session.set_approval_callback(
@@ -113,6 +117,9 @@ def _run_command(
                 f"\nworkspace: {info.workspace}"
                 f"\navailable tools: {info.available_tools}"
                 f"\nlast tool count: {info.last_tool_count}"
+                f"\nbuild configured: {'yes' if info.build_configured else 'no'}"
+                f"\ntest configured: {'yes' if info.test_configured else 'no'}"
+                f"\nmutation generation: {info.mutation_generation}"
             )
         output_fn(rendered)
     elif command == "/exit":
@@ -125,18 +132,33 @@ def _run_command(
 
 def _approval_prompt(
     *, input_fn: InputFunction, output_fn: OutputFunction
-) -> Callable[[ToolInvocation, MutationPreview], bool]:
-    def approve(invocation: ToolInvocation, preview: MutationPreview) -> bool:
-        output_fn(f"[proposed] {invocation.tool_name}: {preview.path}")
-        output_fn(preview.diff)
+) -> Callable[[ToolInvocation, MutationPreview | PreparedProjectCommand], bool]:
+    def approve(
+        invocation: ToolInvocation,
+        preview: MutationPreview | PreparedProjectCommand,
+    ) -> bool:
+        if isinstance(preview, MutationPreview):
+            output_fn(f"[proposed] {invocation.tool_name}: {preview.path}")
+            output_fn(preview.diff)
+            prompt = "Approve? [y/N] "
+            rejection = "Write rejected."
+        else:
+            output_fn(f"[proposed] {invocation.tool_name}")
+            output_fn(f"Workspace: {preview.workspace}")
+            output_fn("Command argv:")
+            for argument in preview.argv:
+                output_fn(f"  {argument!r}")
+            output_fn(f"Timeout: {preview.timeout_seconds:g} seconds")
+            prompt = "Approve execution? [y/N] "
+            rejection = "Execution rejected."
         try:
-            answer = input_fn("Approve? [y/N] ").strip().casefold()
+            answer = input_fn(prompt).strip().casefold()
         except (EOFError, KeyboardInterrupt):
-            output_fn("Write rejected.")
+            output_fn(rejection)
             return False
         if answer in {"y", "yes"}:
             return True
-        output_fn("Write rejected.")
+        output_fn(rejection)
         return False
 
     return approve

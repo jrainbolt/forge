@@ -391,6 +391,78 @@ fails, while the conversation remains transactionally uncommitted; the REPL
 reports that persisted state. A9 verifies file bytes and hashes only. It cannot
 claim compilation, tests, or code correctness.
 
+## Project command boundary
+
+A10 adds exactly `project.build` and `project.test` as named verification
+capabilities. Their zero-argument model schemas cannot carry a command, argv,
+working directory, environment, timeout, or executable. Optional definitions in
+the same trusted local TOML configuration use immutable argument arrays and a
+positive bounded timeout. Missing definitions fail as `command_not_configured`;
+Forge never discovers a build system or invents a default command.
+
+Trusted configuration is user-owned local authority. Repository contents and model
+output remain untrusted and cannot edit or replace the parsed command snapshot.
+Forge discourages configuring shell executables but does not pretend trusted users
+cannot do so. There is no generic shell, arbitrary named-command tool, package
+installer, or model-controlled configuration interface.
+
+## Controlled execution safety
+
+Both tools run through the central `ToolExecutor` with the selected
+`ExecutionContext.workspace` as `cwd`, an argv array, `shell=False`, and
+`stdin=DEVNULL`. A copied environment sets noninteractive pager, Git-prompt, CI,
+and unbuffered-Python controls; the model cannot inject environment variables.
+The environment is not a security sandbox and may contain process-level values,
+which Forge does not include in results. Forge itself initiates no network action,
+but configured programs may have their own network behavior; A10 makes no network
+sandbox claim.
+
+On macOS and Linux each command starts a new session. Timeout sends SIGTERM to its
+process group, waits briefly, then uses SIGKILL if necessary, covering descendants
+that remain in that group. Every command has a configured or conservative default
+timeout. Start failure, timeout, nonzero exit, and zero exit are distinct structured
+outcomes; only a launched, non-timed-out zero exit is verification success.
+
+Dedicated readers continuously drain stdout and stderr to avoid pipe deadlock while
+retaining only the last 256 KiB of each stream. Truncation flags make discarded
+prefixes explicit. Diagnostic bytes decode as UTF-8 with replacement, and common
+ANSI control sequences are stripped. Results include operation, outcome, exit code,
+timeout, duration, bounded streams, and per-stream truncation. Full output is not
+logged; only execution metadata is logged.
+
+## Execution permission and snapshot
+
+Ordinary repository mode still registers only the five A6 read tools. Assist mode
+registers reads, A9 writes, and the two A10 project tools: reads are `ALLOW`; writes,
+build, and test are `ASK`; everything else is `DENY`. The terminal previews the exact
+configured argv, workspace, and timeout. Only `y` or `yes` approves; default input,
+rejection, EOF, interruption, missing callbacks, or a mismatched invocation starts no
+process. Exact A5 approval remains bound to invocation ID, tool name, and frozen empty
+arguments. The tool's immutable parsed command is the preview/execution snapshot, so
+configuration is not reparsed between approval and launch.
+
+## Verification evidence and staleness
+
+`build_result` and `test_result` are distinct from source, Git-state, and mutation
+evidence. Failed execution remains observed diagnostic evidence but never verifies
+the project. Successful build/test evidence records the current Forge mutation
+generation. Every successful Forge write or patch advances that generation and marks
+prior verification stale; a later successful run verifies the new generation.
+External human edits cannot all be detected, so this is not workspace snapshot
+isolation. Existing write hash preconditions still guard Forge's own mutations.
+
+Process output is untrusted data exactly like repository text. Strings resembling
+instructions or tool calls cannot grant permission or directly trigger a tool; only a
+subsequent valid model envelope can propose another registered operation, still under
+policy and approval. Final-answer guidance distinguishes file mutation, build success,
+test success, and failure, and permits verification claims only from successful
+current-generation evidence.
+
+A10 permits sequential user-approved actions within one bounded assist turn, such as
+a write followed by a proposed test. It does not automatically run verification,
+repair failures, retry, plan, or create an autonomous fix/test loop; those remain
+later milestones.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values

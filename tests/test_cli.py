@@ -304,5 +304,5 @@ def test_assist_requires_workspace_and_is_explicitly_write_capable(
         )
         == 0
     )
-    assert observed == {"assist": True, "tools": 7}
+    assert observed == {"assist": True, "tools": 9}
     assert second.closed

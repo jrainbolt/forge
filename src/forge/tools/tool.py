@@ -11,6 +11,10 @@ from forge.tools.types import ExecutionContext, StructuredValue, ToolMetadata
 class ToolError(Exception):
     """An expected failure reported by a tool implementation."""
 
+    def __init__(self, message: str, *, output: StructuredValue = None) -> None:
+        super().__init__(message)
+        self.output = output
+
 
 class Tool(ABC):
     """A synchronous capability with explicit metadata and arguments."""

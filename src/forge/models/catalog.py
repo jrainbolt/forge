@@ -10,6 +10,11 @@ from types import MappingProxyType
 
 from forge.models.llama_cpp import BACKEND_ID, LlamaCppConfig, LlamaCppModel
 from forge.models.model import Model
+from forge.project_config import (
+    ProjectCommands,
+    ProjectConfigurationError,
+    parse_project_commands,
+)
 
 BackendConfigParser = Callable[[str, Mapping[str, object]], object]
 BackendBuilder = Callable[[object], Model]
@@ -83,7 +88,10 @@ class ModelCatalog:
     """Immutable profiles with lazy, selected-only model construction."""
 
     def __init__(
-        self, profiles: Iterable[ModelProfile], registry: BackendRegistry
+        self,
+        profiles: Iterable[ModelProfile],
+        registry: BackendRegistry,
+        project_commands: ProjectCommands | None = None,
     ) -> None:
         copied: dict[str, ModelProfile] = {}
         for profile in profiles:
@@ -98,6 +106,11 @@ class ModelCatalog:
             raise ModelConfigurationError("model catalog must contain a profile")
         self._profiles = MappingProxyType(copied)
         self._registry = registry
+        self._project_commands = project_commands or ProjectCommands()
+
+    @property
+    def project_commands(self) -> ProjectCommands:
+        return self._project_commands
 
     @property
     def profile_names(self) -> tuple[str, ...]:
@@ -140,7 +153,7 @@ def load_model_catalog(path: Path, registry: BackendRegistry) -> ModelCatalog:
             f"cannot load model configuration {config_path}: {error}"
         ) from error
 
-    unknown_root = set(document) - {"models"}
+    unknown_root = set(document) - {"models", "project"}
     if unknown_root:
         raise ModelConfigurationError(
             f"unknown top-level configuration keys: {_format_keys(unknown_root)}"
@@ -156,7 +169,13 @@ def load_model_catalog(path: Path, registry: BackendRegistry) -> ModelCatalog:
         if not isinstance(raw_profile, dict):
             raise ModelConfigurationError(f"profile {name!r} must be a TOML table")
         profiles.append(_parse_profile(name, raw_profile, registry))
-    return ModelCatalog(profiles, registry)
+    try:
+        project_commands = parse_project_commands(document)
+    except ProjectConfigurationError as error:
+        raise ModelConfigurationError(
+            f"invalid project configuration: {error}"
+        ) from error
+    return ModelCatalog(profiles, registry, project_commands)
 
 
 def _parse_profile(

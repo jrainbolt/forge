@@ -6,7 +6,7 @@ core useful without cloud services. The current implementation provides the
 project bootstrap, a generic backend-independent model API, named model
 profiles, an optional llama.cpp adapter for real local inference, ephemeral
 multi-turn chat sessions, and permission-controlled repository-aware chat using
-workspace-confined read-only tools.
+workspace-confined read, controlled-write, and configured build/test tools.
 
 ## Development setup
 
@@ -172,9 +172,10 @@ evidence before accepting a final answer and permits only one bounded protocol
 correction per turn.
 
 Repository mode is read-only. Forge still cannot edit files, apply patches, run
-shell commands, builds or tests, mutate Git, access the network, or use the web.
+configured builds or tests, mutate Git, access the network, or use the web.
 
-Explicit assist mode adds previewed, individually approved file mutations:
+Explicit assist mode adds previewed, individually approved file mutations and
+configured project verification:
 
 ```bash
 forge chat \
@@ -185,12 +186,33 @@ forge chat \
 ```
 
 Normal `--workspace` mode remains read-only. In assist mode, reads are allowed,
-while every `repository.write_file` or `repository.apply_patch` proposal shows
-its target and deterministic diff before a default-no approval prompt. Existing
-files require the SHA-256 returned by a current-turn read; approving one exact
-invocation never approves changed content or another path. Forge verifies the
-resulting file bytes but A9 still cannot run builds or tests, so mutation success
-is not a code-correctness claim.
+while every write, patch, build, or test proposal receives a separate default-no
+approval prompt. Writes show their target and deterministic diff. Existing files
+require the SHA-256 returned by a current-turn read; approving one exact invocation
+never approves changed content or another path.
+
+`project.build` and `project.test` accept no model arguments. Their immutable argv
+arrays and timeouts come from the trusted local TOML configuration:
+
+```toml
+[project.commands.build]
+argv = ["python", "-m", "compileall", "src"]
+timeout_seconds = 120
+
+[project.commands.test]
+argv = ["python", "-m", "pytest"]
+timeout_seconds = 300
+```
+
+Each approval preview displays the exact argv snapshot, workspace, and timeout.
+Execution uses no shell, receives closed stdin, runs inside the selected workspace,
+has bounded output and a timeout, and returns exit-status-based evidence. A later
+Forge write makes earlier build/test evidence stale. Project configuration is a
+trusted user-owned boundary: configured programs may themselves access the network,
+and A10 does not provide an environment or network sandbox.
+
+Forge still has no arbitrary shell execution or autonomous fix/test loop. Mutation
+success alone is not a code-correctness claim, and tests are never run automatically.
 
 Run the controlled read-only coding evaluation locally with:
 

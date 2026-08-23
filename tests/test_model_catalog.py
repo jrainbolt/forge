@@ -73,6 +73,24 @@ def test_loads_multiple_typed_profiles_without_constructing_models(
     )
 
 
+def test_loads_project_commands_beside_models(tmp_path: Path) -> None:
+    config = _valid_config(tmp_path)
+    config.write_text(
+        config.read_text()
+        + "\n[project.commands.build]\nargv = ['python', '-m', 'compileall', 'src']\n"
+        + "\n[project.commands.test]\nargv = ['python', '-m', 'pytest']\n"
+        + "timeout_seconds = 42\n"
+    )
+    catalog = load_model_catalog(config, default_backend_registry())
+    assert catalog.project_commands.build.argv == (
+        "python",
+        "-m",
+        "compileall",
+        "src",
+    )
+    assert catalog.project_commands.test.timeout_seconds == 42
+
+
 def test_selected_profile_is_the_only_model_constructed() -> None:
     built: list[object] = []
 

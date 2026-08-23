@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 
 from forge.models import MockModel
 from forge.orchestration import RepositoryChatSession
+from forge.project_config import ProjectCommand, ProjectCommands
 from forge.repl import run_repl
 from forge.session import ChatSession
 from forge.tools import (
@@ -228,3 +230,59 @@ def test_assist_repl_reports_persisted_mutation_after_conversation_failure(
     )
     assert target.read_bytes() == b"VALUE = 2\n"
     assert any("Mutation remains on disk" in line for line in output)
+
+
+@pytest.mark.parametrize("exception", (EOFError, KeyboardInterrupt))
+def test_project_execution_preview_eof_or_interrupt_rejects(
+    tmp_path: Path, exception: type[BaseException]
+) -> None:
+    workspace = tmp_path / "repository"
+    workspace.mkdir()
+    marker = workspace / "ran"
+    model = MockModel(
+        (
+            json.dumps(
+                {
+                    "type": "tool_call",
+                    "id": "test",
+                    "tool": "project.test",
+                    "arguments": {},
+                }
+            ),
+            json.dumps({"type": "final", "answer": "Execution rejected."}),
+        )
+    )
+    session = RepositoryChatSession(
+        "fixture",
+        model,
+        workspace,
+        registry=create_assist_repository_registry(
+            ProjectCommands(
+                test=ProjectCommand(
+                    (
+                        sys.executable,
+                        "-c",
+                        f"from pathlib import Path; Path({str(marker)!r}).touch()",
+                    ),
+                    5,
+                )
+            )
+        ),
+        policy=create_assist_repository_policy(),
+        require_relevant_source=False,
+    )
+    inputs = iter(("Run tests", "/info", "/exit"))
+
+    def read(prompt: str) -> str:
+        if prompt.startswith("Approve execution?"):
+            raise exception
+        return next(inputs)
+
+    output: list[str] = []
+    run_repl(session, input_fn=read, output_fn=output.append)
+    rendered = "\n".join(output)
+    assert "Command argv:" in rendered
+    assert repr(sys.executable) in rendered
+    assert "Execution rejected." in rendered
+    assert "test configured: yes" in rendered
+    assert not marker.exists()

@@ -28,6 +28,7 @@ from forge.models import (
     load_model_catalog,
 )
 from forge.orchestration import RepositoryChatSession
+from forge.project_config import ProjectCommands
 from forge.repl import run_repl
 from forge.session import DEFAULT_SYSTEM_MESSAGE, ChatSession
 from forge.tools import (
@@ -69,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument(
         "--workspace",
         type=Path,
-        help="enable read-only repository chat for this explicit workspace",
+        help=("select an explicit repository workspace (read-only unless --assist)"),
     )
     chat.add_argument(
         "--no-system",
@@ -79,7 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument(
         "--assist",
         action="store_true",
-        help="allow previewed repository writes with explicit approval",
+        help=(
+            "enable user-approved repository writes and configured build/test execution"
+        ),
     )
     evaluation = commands.add_parser(
         "eval", help="run a controlled read-only coding evaluation"
@@ -142,7 +145,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.workspace,
                     generation=generation,
                     registry=(
-                        create_assist_repository_registry() if args.assist else None
+                        create_assist_repository_registry(
+                            getattr(catalog, "project_commands", ProjectCommands())
+                        )
+                        if args.assist
+                        else None
                     ),
                     policy=(create_assist_repository_policy() if args.assist else None),
                 )

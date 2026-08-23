@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 
 from forge.models import MockModel
 from forge.orchestration import RepositoryChatSession, RepositoryOrchestrationError
+from forge.project_config import ProjectCommand, ProjectCommands
 from forge.tools import (
     MutationPreview,
     ToolInvocation,
@@ -264,3 +266,120 @@ def test_successful_mutation_remains_real_if_later_generation_fails(
     assert (workspace / "src/value.py").read_bytes() == b"VALUE = 2\n"
     assert observed[-1].evidence == "patch_success"
     assert session.conversation.turns == ()
+
+
+def test_project_test_rejection_starts_no_process(workspace: Path) -> None:
+    marker = workspace / "ran"
+    model = MockModel(
+        (
+            call("test", "project.test", {}),
+            final("The test was rejected."),
+        )
+    )
+    commands = ProjectCommands(
+        test=ProjectCommand(
+            (
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')",
+            ),
+            5,
+        )
+    )
+    session = RepositoryChatSession(
+        "fixture",
+        model,
+        workspace,
+        registry=create_assist_repository_registry(commands),
+        policy=create_assist_repository_policy(),
+        require_relevant_source=False,
+        approval_callback=lambda *_args: False,
+    )
+    response = session.ask("Run tests")
+    assert response.tool_activity[0].status == "approval_required"
+    assert response.tool_activity[0].evidence == "test_result"
+    assert not marker.exists()
+
+
+def test_project_approval_uses_configured_snapshot(workspace: Path) -> None:
+    first = workspace / "first"
+    second = workspace / "second"
+    commands = ProjectCommands(
+        test=ProjectCommand(
+            (
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(first)!r}).write_text('A')",
+            ),
+            5,
+        )
+    )
+    previews = []
+
+    def approve(_invocation: object, preview: object) -> bool:
+        previews.append(preview)
+        commands = ProjectCommands(  # noqa: F841 - proves source rebinding is inert
+            test=ProjectCommand(
+                (
+                    sys.executable,
+                    "-c",
+                    f"from pathlib import Path; Path({str(second)!r}).write_text('B')",
+                ),
+                5,
+            )
+        )
+        return True
+
+    model = MockModel((call("test", "project.test", {}), final("Tests pass.")))
+    response = RepositoryChatSession(
+        "fixture",
+        model,
+        workspace,
+        registry=create_assist_repository_registry(commands),
+        policy=create_assist_repository_policy(),
+        require_relevant_source=False,
+        approval_callback=approve,
+    ).ask("Run tests")
+    assert response.tool_activity[0].status == "success"
+    assert previews[0].argv == commands.test.argv
+    assert first.read_text() == "A"
+    assert not second.exists()
+
+
+def test_mutation_invalidates_verification_generation_then_retest_refreshes(
+    workspace: Path,
+) -> None:
+    test_command = ProjectCommand(
+        (
+            sys.executable,
+            "-c",
+            "from pathlib import Path; assert Path('src/value.py').is_file()",
+        ),
+        5,
+    )
+    model = MockModel(
+        (
+            call("test-before", "project.test", {}),
+            call("read", "repository.read_file", {"path": "src/value.py"}),
+            call("patch", "repository.apply_patch", patch_arguments()),
+            call("test-after", "project.test", {}),
+            final("The current tests pass."),
+        )
+    )
+    response = RepositoryChatSession(
+        "fixture",
+        model,
+        workspace,
+        registry=create_assist_repository_registry(ProjectCommands(test=test_command)),
+        policy=create_assist_repository_policy(),
+        require_relevant_source=False,
+        approval_callback=lambda *_args: True,
+    ).ask("Change VALUE and test")
+    before, _read, patch, after = response.tool_activity
+    assert before.status == "success"
+    assert before.current_verification is False
+    assert before.generation == 0
+    assert patch.generation == 1
+    assert after.status == "success"
+    assert after.generation == 1
+    assert after.current_verification is True

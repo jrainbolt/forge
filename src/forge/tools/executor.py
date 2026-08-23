@@ -134,6 +134,7 @@ class ToolExecutor:
                 decision,
                 ToolErrorKind.TOOL_FAILURE,
                 str(error),
+                output=error.output,
             )
         except Exception:
             LOGGER.error(
@@ -162,6 +163,8 @@ class ToolExecutor:
         decision: PermissionDecision,
         kind: ToolErrorKind,
         message: str,
+        *,
+        output: object = None,
     ) -> ToolResult:
         return self._result(
             invocation,
@@ -170,6 +173,7 @@ class ToolExecutor:
             ToolResultStatus.FAILURE,
             error_kind=kind,
             error_message=message,
+            output=output,
         )
 
     def _result(

@@ -1,6 +1,7 @@
 """Permission-controlled generic Forge tool framework."""
 
 from forge.tools.builtin import (
+    PROJECT_TOOL_NAMES,
     READ_ONLY_TOOL_NAMES,
     WRITE_TOOL_NAMES,
     create_assist_repository_policy,
@@ -21,6 +22,11 @@ from forge.tools.permissions import (
     DenyAllPolicy,
     PermissionPolicy,
     RuleBasedPolicy,
+)
+from forge.tools.project import (
+    MAX_PROCESS_OUTPUT_BYTES,
+    PreparedProjectCommand,
+    ProjectCommandTool,
 )
 from forge.tools.registry import ToolRegistrationError, ToolRegistry
 from forge.tools.repository import (
@@ -78,6 +84,10 @@ __all__ = [
     "PermissionPolicy",
     "RuleBasedPolicy",
     "READ_ONLY_TOOL_NAMES",
+    "PROJECT_TOOL_NAMES",
+    "MAX_PROCESS_OUTPUT_BYTES",
+    "PreparedProjectCommand",
+    "ProjectCommandTool",
     "WRITE_TOOL_NAMES",
     "ReadFileTool",
     "SearchFilesTool",
