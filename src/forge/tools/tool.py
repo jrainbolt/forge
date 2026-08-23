@@ -23,7 +23,7 @@ class Tool(ABC):
     @abstractmethod
     def execute(
         self,
-        arguments: Mapping[str, str | int | bool],
+        arguments: Mapping[str, object],
         context: ExecutionContext,
     ) -> StructuredValue:
         """Execute using validated arguments and an explicit context."""

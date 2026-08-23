@@ -30,6 +30,10 @@ from forge.models import (
 from forge.orchestration import RepositoryChatSession
 from forge.repl import run_repl
 from forge.session import DEFAULT_SYSTEM_MESSAGE, ChatSession
+from forge.tools import (
+    create_assist_repository_policy,
+    create_assist_repository_registry,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -72,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="omit Forge's default system message",
     )
+    chat.add_argument(
+        "--assist",
+        action="store_true",
+        help="allow previewed repository writes with explicit approval",
+    )
     evaluation = commands.add_parser(
         "eval", help="run a controlled read-only coding evaluation"
     )
@@ -103,6 +112,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             if args.workspace is not None and args.no_system:
                 raise ValueError("--no-system cannot be used with repository chat")
+            if args.assist and args.workspace is None:
+                raise ValueError("--assist requires --workspace")
             generation = GenerationConfig(
                 max_tokens=args.max_tokens,
                 temperature=args.temperature,
@@ -130,6 +141,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     model,
                     args.workspace,
                     generation=generation,
+                    registry=(
+                        create_assist_repository_registry() if args.assist else None
+                    ),
+                    policy=(create_assist_repository_policy() if args.assist else None),
                 )
             with model, session:
                 return run_repl(session)

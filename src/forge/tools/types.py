@@ -22,6 +22,7 @@ class ArgumentType(Enum):
     STRING = "string"
     INTEGER = "integer"
     BOOLEAN = "boolean"
+    TEXT_EDITS = "text_edits"
 
 
 class ToolResultStatus(Enum):
@@ -47,6 +48,7 @@ class PermissionDecision(Enum):
 class ToolRisk(Enum):
     UNSPECIFIED = "unspecified"
     READ_ONLY = "read_only"
+    WRITE = "write"
 
 
 class ToolEvidence(Enum):
@@ -54,6 +56,8 @@ class ToolEvidence(Enum):
     DISCOVERY = "discovery"
     SOURCE_CONTENT = "source_content"
     GIT_WORKING_STATE = "git_working_state"
+    WRITE_SUCCESS = "write_success"
+    PATCH_SUCCESS = "patch_success"
 
 
 class ToolValidationError(ValueError):
@@ -95,7 +99,7 @@ class ArgumentSchema:
             raise ToolValidationError("duplicate argument definitions are not allowed")
         object.__setattr__(self, "arguments", arguments)
 
-    def validate(self, values: Mapping[str, object]) -> Mapping[str, str | int | bool]:
+    def validate(self, values: Mapping[str, object]) -> Mapping[str, object]:
         if not isinstance(values, Mapping):
             raise ToolValidationError("tool arguments must be a mapping")
         supplied = dict(values)
@@ -113,14 +117,14 @@ class ArgumentSchema:
             raise ToolValidationError(
                 f"missing required arguments: {', '.join(sorted(missing))}"
             )
-        validated: dict[str, str | int | bool] = {}
+        validated: dict[str, object] = {}
         for name, value in supplied.items():
             specification = specifications[name]
             if not _matches_type(value, specification.value_type):
                 raise ToolValidationError(
                     f"argument {name!r} must be {specification.value_type.value}"
                 )
-            validated[name] = value  # type: ignore[assignment]
+            validated[name] = _freeze_argument(value, specification.value_type)
         return MappingProxyType(validated)
 
 
@@ -155,7 +159,9 @@ class ToolInvocation:
         validate_tool_name(self.tool_name)
         if not isinstance(self.arguments, Mapping):
             raise ToolValidationError("arguments must be a mapping")
-        object.__setattr__(self, "arguments", MappingProxyType(dict(self.arguments)))
+        frozen = freeze_structured_value(dict(self.arguments))
+        assert isinstance(frozen, Mapping)
+        object.__setattr__(self, "arguments", frozen)
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,7 +262,22 @@ def _matches_type(value: object, value_type: ArgumentType) -> bool:
         return isinstance(value, int) and not isinstance(value, bool)
     if value_type is ArgumentType.BOOLEAN:
         return isinstance(value, bool)
+    if value_type is ArgumentType.TEXT_EDITS:
+        return isinstance(value, (list, tuple)) and all(
+            isinstance(edit, Mapping)
+            and set(edit) == {"old", "new"}
+            and isinstance(edit["old"], str)
+            and isinstance(edit["new"], str)
+            for edit in value
+        )
     return False
+
+
+def _freeze_argument(value: object, value_type: ArgumentType) -> object:
+    if value_type is ArgumentType.TEXT_EDITS:
+        assert isinstance(value, (list, tuple))
+        return tuple(MappingProxyType(dict(edit)) for edit in value)
+    return value
 
 
 def _is_scalar(value: object) -> bool:

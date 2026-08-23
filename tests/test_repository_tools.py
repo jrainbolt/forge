@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -222,6 +223,12 @@ def test_read_file_handles_utf8_empty_bom_nested_and_internal_symlink(
         result = invoke(workspace, "repository.read_file", {"path": requested})
         assert result.status is ToolResultStatus.SUCCESS
         assert output_mapping(result)["content"] == expected
+        assert (
+            output_mapping(result)["sha256"]
+            == hashlib.sha256(
+                (workspace / requested).resolve().read_bytes()
+            ).hexdigest()
+        )
     assert (
         output_mapping(
             invoke(workspace, "repository.read_file", {"path": "source-link"})

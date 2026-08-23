@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import stat
 from collections.abc import Iterator, Mapping
@@ -134,6 +135,7 @@ class ReadFileTool(Tool):
             "path": workspace_relative_path(context.workspace, path),
             "content": text,
             "size_bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
         }
 
 

@@ -75,6 +75,7 @@ def test_chat_help_succeeds_without_constructing_model(
     output = capsys.readouterr().out
     assert "--model" in output
     assert "--workspace" in output
+    assert "--assist" in output
 
 
 def test_eval_help_succeeds_without_constructing_model(
@@ -255,3 +256,53 @@ def test_repository_chat_rejects_missing_workspace_and_no_system(
     caplog.clear()
     assert main([*base, "--workspace", str(tmp_path), "--no-system"]) == 2
     assert "cannot be used" in caplog.text
+
+
+def test_assist_requires_workspace_and_is_explicitly_write_capable(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = MockModel(("unused",))
+
+    class Catalog:
+        def create(self, _name: str) -> MockModel:
+            return model
+
+    monkeypatch.setattr("forge.cli.load_model_catalog", lambda *_args: Catalog())
+    config = str(tmp_path / "forge.toml")
+    assert main(["chat", "--model", "fixture", "--config", config, "--assist"]) == 2
+    assert "--assist requires --workspace" in caplog.text
+
+    observed: dict[str, object] = {}
+
+    def inspect(session: object) -> int:
+        observed["assist"] = session.info.assist_mode  # type: ignore[attr-defined]
+        observed["tools"] = session.info.available_tools  # type: ignore[attr-defined]
+        return 0
+
+    second = MockModel(("unused",))
+
+    class SecondCatalog:
+        def create(self, _name: str) -> MockModel:
+            return second
+
+    monkeypatch.setattr("forge.cli.load_model_catalog", lambda *_args: SecondCatalog())
+    monkeypatch.setattr("forge.cli.run_repl", inspect)
+    assert (
+        main(
+            [
+                "chat",
+                "--model",
+                "fixture",
+                "--config",
+                config,
+                "--workspace",
+                str(tmp_path),
+                "--assist",
+            ]
+        )
+        == 0
+    )
+    assert observed == {"assist": True, "tools": 7}
+    assert second.closed

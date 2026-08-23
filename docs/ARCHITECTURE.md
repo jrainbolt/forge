@@ -333,6 +333,64 @@ models and future orchestration changes with identical prompts and scoring.
 Normal CI exercises only deterministic scripted-model harness tests; it loads
 no GGUF model and enforces no real-model score threshold.
 
+## Controlled write capability boundary
+
+A9 adds exactly `repository.write_file` and `repository.apply_patch`. They are
+ordinary tool implementations behind registry lookup, argument validation,
+permission evaluation, invocation-specific approval, structured results, and
+the explicit workspace context. There is no generic filesystem writer, delete,
+rename, directory creation, shell, build/test execution, or Git mutation.
+
+Ordinary repository chat still composes only the five read-only tools. Explicit
+assist mode composes those reads plus the two mutation tools under a separate
+policy: reads are `ALLOW`, writes are `ASK`, and everything else is `DENY`.
+Reading establishes provenance but never permission or approval. The terminal
+shows a deterministic diff and target before asking `Approve? [y/N]`; only
+explicit `y` or `yes` creates an approval bound to the exact invocation ID,
+tool, and frozen arguments. Rejection, EOF, interruption, absent callbacks, and
+changed invocations perform no mutation.
+
+Existing-file replacement and patching require the lowercase SHA-256 of the
+exact bytes returned by a successful current-turn read of that same path.
+`repository.read_file` now reports this hash without changing its previous
+fields. Stale or mismatched hashes fail before mutation. Creation has an
+explicit `create` mode, rejects existing targets, requires an existing parent
+and current-turn parent or related-source inspection, and never creates
+directories. Replacement has an explicit `replace` mode and rejects missing or
+non-regular targets. Both modes accept exact UTF-8 text up to 256 KiB without
+newline normalization.
+
+Patch arguments contain an ordered non-empty sequence of `{old, new}` text
+edits for one file. Each old value must be non-empty and occur exactly once in
+the incrementally proposed content. Missing, ambiguous, unchanged, malformed,
+or oversized edits fail as a whole; there is no whitespace tolerance, fuzzy
+matching, semantic patching, or multi-file transaction.
+
+New files use exclusive creation. Existing files and patches are fully rendered
+to a securely named same-directory temporary file, flushed, assigned the prior
+file's mode bits, and atomically replaced with `os.replace`. Temporary files are
+cleaned on failure. Forge then rereads the destination and verifies both exact
+bytes and the new SHA-256 before returning success. Ownership, ACLs, and extended
+attributes are not explicitly preserved. Common races are reduced by exclusive
+creation and compare-before-write, but A9 does not claim descriptor-relative or
+adversarial concurrent-filesystem hardening.
+
+Write resolution extends the A6 path boundary for nonexistent final targets by
+strictly resolving the existing parent and proving its ancestry. Absolute
+paths, traversal and similar-prefix escapes, external or nested symlink-parent
+escapes, final symlink targets, directories and special files are rejected.
+Internal symlink parents may be used only when their resolved target remains in
+the workspace. Any lexical or resolved path under `.git` is protected from
+repository tools.
+
+Successful mutation evidence is distinct from inspected source evidence. A
+write invalidates prior read evidence and hash provenance for its path; a later
+source explanation must reread it. At most one mutation proposal is exposed per
+turn. The successful filesystem change is real even if later model generation
+fails, while the conversation remains transactionally uncommitted; the REPL
+reports that persisted state. A9 verifies file bytes and hashes only. It cannot
+claim compilation, tests, or code correctness.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values

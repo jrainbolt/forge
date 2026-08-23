@@ -68,13 +68,27 @@ def build_repository_output(
     candidate_files: set[str],
     candidate_directories: set[str],
     candidate_queries: set[str],
+    observed_hashes: Mapping[str, str] | None = None,
+    allow_mutations: bool = False,
 ) -> OutputSpecification:
     """Build a strict schema from registered tools and discovered path provenance."""
     branches: list[dict[str, object]] = []
+    hashes = observed_hashes or {}
     for metadata in registry.metadata:
         if metadata.name == "repository.read_file" and not candidate_files:
             continue
         if metadata.name == "repository.search_files" and not candidate_queries:
+            continue
+        if (
+            metadata.evidence
+            in {
+                ToolEvidence.WRITE_SUCCESS,
+                ToolEvidence.PATCH_SUCCESS,
+            }
+            and not allow_mutations
+        ):
+            continue
+        if metadata.name == "repository.apply_patch" and not hashes:
             continue
         properties: dict[str, object] = {}
         required = []
@@ -82,18 +96,42 @@ def build_repository_output(
             property_schema: dict[str, object] = {
                 "type": _json_schema_type(argument.value_type)
             }
+            if argument.value_type is ArgumentType.TEXT_EDITS:
+                property_schema.update(
+                    {
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old": {"type": "string"},
+                                "new": {"type": "string"},
+                            },
+                            "required": ["old", "new"],
+                            "additionalProperties": False,
+                        },
+                        "minItems": 1,
+                    }
+                )
             if argument.name == "path":
                 if metadata.name == "repository.read_file":
                     candidates = candidate_files
+                elif metadata.name == "repository.apply_patch":
+                    candidates = set(hashes)
                 elif metadata.name == "repository.search_files":
                     candidates = {"."}
-                else:
+                elif metadata.name == "repository.list_directory":
                     candidates = candidate_directories
-                property_schema["enum"] = sorted(candidates)
+                else:
+                    candidates = set()
+                if candidates:
+                    property_schema["enum"] = sorted(candidates)
             elif (
                 metadata.name == "repository.search_files" and argument.name == "query"
             ):
                 property_schema["enum"] = sorted(candidate_queries)
+            elif argument.name == "mode":
+                property_schema["enum"] = ["create", "replace"]
+            elif argument.name == "expected_sha256" and hashes:
+                property_schema["enum"] = sorted(set(hashes.values()))
             properties[argument.name] = property_schema
             if argument.required:
                 required.append(argument.name)
@@ -129,6 +167,8 @@ def _json_schema_type(argument_type: ArgumentType) -> str:
         return "integer"
     if argument_type is ArgumentType.BOOLEAN:
         return "boolean"
+    if argument_type is ArgumentType.TEXT_EDITS:
+        return "array"
     raise TypeError("unsupported argument type")
 
 
@@ -272,6 +312,11 @@ def render_tool_result(
                 "the evidence answers the question, return final JSON; otherwise "
                 "inspect a distinct relevant source file."
             )
+        elif evidence in {ToolEvidence.WRITE_SUCCESS, ToolEvidence.PATCH_SUCCESS}:
+            payload["guidance"] = (
+                "File bytes and SHA-256 were verified. Report the mutation accurately, "
+                "but state that builds and tests were not run."
+            )
     else:
         payload["error"] = {
             "kind": result.error_kind.value if result.error_kind is not None else None,
@@ -281,6 +326,11 @@ def render_tool_result(
             payload["guidance"] = (
                 "No source was inspected. Do not invent a path; search again or copy "
                 "an exact existing path from discovery results."
+            )
+        elif result.status.value == "approval_required":
+            payload["guidance"] = (
+                "Mutation was not executed because exact user approval was not "
+                "granted. Do not claim the file changed."
             )
     return json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")

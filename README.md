@@ -174,6 +174,24 @@ correction per turn.
 Repository mode is read-only. Forge still cannot edit files, apply patches, run
 shell commands, builds or tests, mutate Git, access the network, or use the web.
 
+Explicit assist mode adds previewed, individually approved file mutations:
+
+```bash
+forge chat \
+  --model qwen-large \
+  --config ~/Models/forge/forge.toml \
+  --workspace . \
+  --assist
+```
+
+Normal `--workspace` mode remains read-only. In assist mode, reads are allowed,
+while every `repository.write_file` or `repository.apply_patch` proposal shows
+its target and deterministic diff before a default-no approval prompt. Existing
+files require the SHA-256 returned by a current-turn read; approving one exact
+invocation never approves changed content or another path. Forge verifies the
+resulting file bytes but A9 still cannot run builds or tests, so mutation success
+is not a code-correctness claim.
+
 Run the controlled read-only coding evaluation locally with:
 
 ```bash

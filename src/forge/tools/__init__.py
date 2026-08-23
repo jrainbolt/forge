@@ -2,6 +2,9 @@
 
 from forge.tools.builtin import (
     READ_ONLY_TOOL_NAMES,
+    WRITE_TOOL_NAMES,
+    create_assist_repository_policy,
+    create_assist_repository_registry,
     create_readonly_repository_policy,
     create_readonly_repository_registry,
 )
@@ -10,6 +13,7 @@ from forge.tools.git import GitDiffTool, GitStatusTool
 from forge.tools.paths import (
     WorkspacePathError,
     resolve_workspace_path,
+    resolve_workspace_write_path,
     workspace_relative_path,
 )
 from forge.tools.permissions import (
@@ -26,6 +30,13 @@ from forge.tools.repository import (
     ListDirectoryTool,
     ReadFileTool,
     SearchFilesTool,
+)
+from forge.tools.repository_write import (
+    MAX_WRITE_BYTES,
+    ApplyPatchTool,
+    MutationPreview,
+    WriteFileTool,
+    preview_repository_mutation,
 )
 from forge.tools.tool import Tool, ToolError
 from forge.tools.types import (
@@ -51,6 +62,7 @@ __all__ = [
     "ArgumentSchema",
     "ArgumentSpec",
     "ArgumentType",
+    "ApplyPatchTool",
     "DenyAllPolicy",
     "ExecutionContext",
     "InvocationApproval",
@@ -60,10 +72,13 @@ __all__ = [
     "MAX_READ_BYTES",
     "MAX_SEARCH_FILE_BYTES",
     "MAX_SEARCH_RESULTS",
+    "MAX_WRITE_BYTES",
+    "MutationPreview",
     "PermissionDecision",
     "PermissionPolicy",
     "RuleBasedPolicy",
     "READ_ONLY_TOOL_NAMES",
+    "WRITE_TOOL_NAMES",
     "ReadFileTool",
     "SearchFilesTool",
     "Tool",
@@ -81,8 +96,13 @@ __all__ = [
     "ToolRisk",
     "ToolValidationError",
     "WorkspacePathError",
+    "WriteFileTool",
+    "create_assist_repository_policy",
+    "create_assist_repository_registry",
     "create_readonly_repository_policy",
     "create_readonly_repository_registry",
     "resolve_workspace_path",
+    "resolve_workspace_write_path",
+    "preview_repository_mutation",
     "workspace_relative_path",
 ]

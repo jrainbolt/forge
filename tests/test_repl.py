@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Iterator
 from pathlib import Path
+
+import pytest
 
 from forge.models import MockModel
 from forge.orchestration import RepositoryChatSession
 from forge.repl import run_repl
 from forge.session import ChatSession
+from forge.tools import (
+    create_assist_repository_policy,
+    create_assist_repository_registry,
+)
 
 
 def _input(values: Iterator[str]):
@@ -101,3 +109,122 @@ def test_repository_repl_shows_workspace_tools_and_extended_info(
     assert "last tool count: 1" in rendered
     assert session.info.completed_turns == 0
     assert session.info.workspace == workspace.resolve()
+
+
+def _assist_session(workspace: Path, model: MockModel) -> RepositoryChatSession:
+    return RepositoryChatSession(
+        "fixture",
+        model,
+        workspace,
+        registry=create_assist_repository_registry(),
+        policy=create_assist_repository_policy(),
+        minimum_source_files=1,
+        require_relevant_source=False,
+    )
+
+
+def _assist_responses() -> tuple[str, ...]:
+    digest = hashlib.sha256(b"VALUE = 1\n").hexdigest()
+    return (
+        json.dumps(
+            {
+                "type": "tool_call",
+                "id": "read",
+                "tool": "repository.read_file",
+                "arguments": {"path": "value.py"},
+            }
+        ),
+        json.dumps(
+            {
+                "type": "tool_call",
+                "id": "patch",
+                "tool": "repository.apply_patch",
+                "arguments": {
+                    "path": "value.py",
+                    "expected_sha256": digest,
+                    "edits": [{"old": "VALUE = 1", "new": "VALUE = 2"}],
+                },
+            }
+        ),
+        json.dumps({"type": "final", "answer": "Mutation handling complete."}),
+    )
+
+
+def test_assist_repl_previews_then_explicit_yes_approves(tmp_path: Path) -> None:
+    workspace = tmp_path / "repository"
+    workspace.mkdir()
+    target = workspace / "value.py"
+    target.write_bytes(b"VALUE = 1\n")
+    output: list[str] = []
+    session = _assist_session(workspace, MockModel(_assist_responses()))
+    result = run_repl(
+        session,
+        input_fn=_input(iter(("Change VALUE", "y", "/exit"))),
+        output_fn=output.append,
+    )
+    rendered = "\n".join(output)
+    assert result == 0
+    assert "Repository access: assist" in rendered
+    assert "[proposed] repository.apply_patch: value.py" in rendered
+    assert "-VALUE = 1" in rendered and "+VALUE = 2" in rendered
+    assert "[tool] repository.apply_patch: value.py (success)" in rendered
+    assert target.read_bytes() == b"VALUE = 2\n"
+
+
+def test_assist_repl_default_no_rejects_without_mutation(tmp_path: Path) -> None:
+    workspace = tmp_path / "repository"
+    workspace.mkdir()
+    target = workspace / "value.py"
+    target.write_bytes(b"VALUE = 1\n")
+    output: list[str] = []
+    session = _assist_session(workspace, MockModel(_assist_responses()))
+    run_repl(
+        session,
+        input_fn=_input(iter(("Change VALUE", "", "/exit"))),
+        output_fn=output.append,
+    )
+    assert "Write rejected." in output
+    assert target.read_bytes() == b"VALUE = 1\n"
+
+
+@pytest.mark.parametrize("exception", (EOFError, KeyboardInterrupt))
+def test_assist_repl_eof_or_interrupt_during_approval_rejects(
+    tmp_path: Path, exception: type[BaseException]
+) -> None:
+    workspace = tmp_path / "repository"
+    workspace.mkdir()
+    target = workspace / "value.py"
+    target.write_bytes(b"VALUE = 1\n")
+    main_inputs = iter(("Change VALUE", "/exit"))
+
+    def read(prompt: str) -> str:
+        if prompt.startswith("Approve?"):
+            raise exception
+        return next(main_inputs)
+
+    output: list[str] = []
+    run_repl(
+        _assist_session(workspace, MockModel(_assist_responses())),
+        input_fn=read,
+        output_fn=output.append,
+    )
+    assert "Write rejected." in output
+    assert target.read_bytes() == b"VALUE = 1\n"
+
+
+def test_assist_repl_reports_persisted_mutation_after_conversation_failure(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "repository"
+    workspace.mkdir()
+    target = workspace / "value.py"
+    target.write_bytes(b"VALUE = 1\n")
+    responses = (*_assist_responses()[:2], "not json", "still not json")
+    output: list[str] = []
+    run_repl(
+        _assist_session(workspace, MockModel(responses)),
+        input_fn=_input(iter(("Change VALUE", "y", "/exit"))),
+        output_fn=output.append,
+    )
+    assert target.read_bytes() == b"VALUE = 2\n"
+    assert any("Mutation remains on disk" in line for line in output)

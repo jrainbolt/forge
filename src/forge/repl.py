@@ -7,6 +7,7 @@ from collections.abc import Callable
 from forge.models import ModelError
 from forge.orchestration import RepositoryChatSession, RepositoryResponse
 from forge.session import ChatSession
+from forge.tools import MutationPreview, ToolInvocation
 
 InputFunction = Callable[[str], str]
 OutputFunction = Callable[[str], None]
@@ -30,7 +31,12 @@ def run_repl(
     output_fn(f"Forge [{info.profile_name}]")
     if isinstance(session, RepositoryChatSession):
         output_fn(f"Workspace: {info.workspace}")
-        output_fn("Repository access: read-only")
+        mode = "assist (writes require approval)" if info.assist_mode else "read-only"
+        output_fn(f"Repository access: {mode}")
+        if info.assist_mode:
+            session.set_approval_callback(
+                _approval_prompt(input_fn=input_fn, output_fn=output_fn)
+            )
     output_fn("Type /help for commands.")
     while True:
         try:
@@ -51,6 +57,16 @@ def run_repl(
             response = session.ask(text)
         except (ModelError, ValueError, RuntimeError) as error:
             output_fn(f"Error: {error}")
+            if isinstance(session, RepositoryChatSession):
+                for activity in session.last_activity:
+                    if activity.status == "success" and activity.evidence in {
+                        "write_success",
+                        "patch_success",
+                    }:
+                        output_fn(
+                            "Mutation remains on disk despite conversation failure: "
+                            f"{activity.path}. Code correctness was not tested."
+                        )
             continue
         if isinstance(response, RepositoryResponse):
             for activity in response.tool_activity:
@@ -91,8 +107,9 @@ def _run_command(
             f"last omitted turns: {info.last_omitted_turns}"
         )
         if isinstance(session, RepositoryChatSession):
+            repository_mode = "assist" if info.assist_mode else "read-only"
             rendered += (
-                "\nrepository mode: read-only"
+                f"\nrepository mode: {repository_mode}"
                 f"\nworkspace: {info.workspace}"
                 f"\navailable tools: {info.available_tools}"
                 f"\nlast tool count: {info.last_tool_count}"
@@ -104,3 +121,22 @@ def _run_command(
     else:
         output_fn(f"Unknown command: {command}. Type /help for commands.")
     return False
+
+
+def _approval_prompt(
+    *, input_fn: InputFunction, output_fn: OutputFunction
+) -> Callable[[ToolInvocation, MutationPreview], bool]:
+    def approve(invocation: ToolInvocation, preview: MutationPreview) -> bool:
+        output_fn(f"[proposed] {invocation.tool_name}: {preview.path}")
+        output_fn(preview.diff)
+        try:
+            answer = input_fn("Approve? [y/N] ").strip().casefold()
+        except (EOFError, KeyboardInterrupt):
+            output_fn("Write rejected.")
+            return False
+        if answer in {"y", "yes"}:
+            return True
+        output_fn("Write rejected.")
+        return False
+
+    return approve
