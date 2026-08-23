@@ -21,6 +21,7 @@ from forge.models import (
     ModelResponse,
     ModelUsage,
 )
+from forge.orchestration.coding_task import CodingTaskResult, CodingTaskState
 from forge.orchestration.protocol import (
     ToolCallOutcome,
     build_repository_output,
@@ -111,6 +112,7 @@ class RepositoryResponse:
     protocol_corrections: int = 0
     orchestration_steps: int = 1
     usage: ModelUsage = ModelUsage()
+    coding_task: CodingTaskResult | None = None
 
     @property
     def text(self) -> str:
@@ -215,6 +217,8 @@ class RepositoryChatSession:
         self._last_plan: RequestPlan | None = None
         self._last_activity: tuple[ToolActivity, ...] = ()
         self._mutation_generation = 0
+        self._active_coding_task: CodingTaskState | None = None
+        self._last_coding_task: CodingTaskResult | None = None
 
     @property
     def conversation(self) -> Conversation:
@@ -223,6 +227,10 @@ class RepositoryChatSession:
     @property
     def last_activity(self) -> tuple[ToolActivity, ...]:
         return self._last_activity
+
+    @property
+    def last_coding_task(self) -> CodingTaskResult | None:
+        return self._last_coding_task
 
     @property
     def info(self) -> RepositorySessionInfo:
@@ -260,6 +268,31 @@ class RepositoryChatSession:
 
     def ask(self, user_text: str) -> RepositoryResponse:
         """Run one bounded transaction and commit only its final answer."""
+        return (
+            self.execute_task(user_text) if self._assist_mode else self._ask(user_text)
+        )
+
+    def execute_task(self, user_text: str) -> RepositoryResponse:
+        """Execute one bounded, single-mutation coding task in assist mode."""
+        if not self._assist_mode:
+            raise RepositoryOrchestrationError(
+                "coding tasks require explicit assist mode"
+            )
+        self._active_coding_task = CodingTaskState(self._mutation_generation)
+        self._last_coding_task = None
+        try:
+            response = self._ask(user_text)
+        except Exception:
+            self._active_coding_task.fail_after_mutation()
+            self._last_coding_task = self._active_coding_task.finish(
+                "Coding task orchestration failed."
+            )
+            raise
+        self._last_coding_task = response.coding_task
+        return response
+
+    def _ask(self, user_text: str) -> RepositoryResponse:
+        """Run the shared repository orchestration transaction."""
         if self._closed:
             raise RepositoryOrchestrationError("repository chat session is closed")
         self._last_activity = ()
@@ -275,6 +308,7 @@ class RepositoryChatSession:
         observed_hashes: dict[str, str] = {}
         observed_directories: set[str] = set()
         mutation_proposed = False
+        coding_task = self._active_coding_task if self._assist_mode else None
         required_source_files = self._minimum_source_files or _required_source_files(
             user_text
         )
@@ -298,6 +332,9 @@ class RepositoryChatSession:
                     candidate_queries=candidate_queries,
                     observed_hashes=observed_hashes,
                     allow_mutations=self._assist_mode and not mutation_proposed,
+                    allow_verification=(
+                        coding_task.may_verify if coding_task is not None else True
+                    ),
                 ),
             )
             response = self._model.generate(structured_request)
@@ -343,12 +380,16 @@ class RepositoryChatSession:
                 self._conversation.commit(user_text, parsed.text)
                 self._last_plan = plan
                 self._last_activity = tuple(activities)
+                task_result = (
+                    coding_task.finish(parsed.text) if coding_task is not None else None
+                )
                 return RepositoryResponse(
                     answer_response,
                     tuple(activities),
                     protocol_corrections,
                     len(response_usages),
                     _aggregate_usage(response_usages),
+                    task_result,
                 )
 
             call = parsed.tool_call
@@ -368,59 +409,50 @@ class RepositoryChatSession:
             invocation = ToolInvocation(
                 call.invocation_id, call.tool_name, call.arguments
             )
+            if coding_task is not None:
+                coding_task.record_tool(call.tool_name)
             result = self._executor.execute(invocation, self._context)
+            if (
+                coding_task is not None
+                and result.error_kind is ToolErrorKind.UNKNOWN_TOOL
+            ):
+                coding_task.fail_after_mutation()
             if self._assist_mode and call.tool_name in {
                 "repository.write_file",
                 "repository.apply_patch",
             }:
                 mutation_proposed = True
-                provenance_error = _mutation_provenance_error(
-                    invocation, observed_hashes, observed_directories
-                )
-                if provenance_error is not None:
-                    result = _provenance_failure(result, provenance_error)
-                elif result.status is ToolResultStatus.APPROVAL_REQUIRED:
-                    try:
-                        preview = preview_repository_mutation(
-                            call.tool_name, call.arguments, self._context
-                        )
-                    except ToolError as error:
-                        result = _provenance_failure(result, str(error))
-                    else:
-                        approved = (
-                            self._approval_callback(invocation, preview)
-                            if self._approval_callback is not None
-                            else False
-                        )
-                        if approved:
-                            result = self._executor.execute(
-                                invocation,
-                                self._context,
-                                approval=InvocationApproval.for_invocation(invocation),
-                            )
+                if coding_task is not None and not coding_task.mutation_proposed():
+                    result = _state_policy_failure(
+                        result, "one successful mutation is allowed per coding task"
+                    )
+                else:
+                    result = self._execute_mutation_proposal(
+                        invocation,
+                        call.arguments,
+                        result,
+                        observed_hashes,
+                        observed_directories,
+                    )
             elif (
                 self._assist_mode
                 and call.tool_name in {"project.build", "project.test"}
                 and result.status is ToolResultStatus.APPROVAL_REQUIRED
             ):
-                tool = self._registry.get(call.tool_name)
-                assert isinstance(tool, ProjectCommandTool)
-                try:
-                    preview = tool.prepare(self._context)
-                except ToolError as error:
-                    result = _tool_failure_with_output(result, error)
-                else:
-                    approved = (
-                        self._approval_callback(invocation, preview)
-                        if self._approval_callback is not None
-                        else False
+                operation = call.tool_name.removeprefix("project.")
+                allowed = (
+                    coding_task.verification_requested(operation)
+                    if coding_task is not None
+                    else True
+                )
+                if not allowed:
+                    result = _state_policy_failure(
+                        result,
+                        "verification may run once per operation and workspace "
+                        "generation",
                     )
-                    if approved:
-                        result = self._executor.execute(
-                            invocation,
-                            self._context,
-                            approval=InvocationApproval.for_invocation(invocation),
-                        )
+                else:
+                    result = self._execute_project_proposal(invocation, result)
             if (
                 call.tool_name == "repository.read_file"
                 and result.status is ToolResultStatus.SUCCESS
@@ -481,6 +513,27 @@ class RepositoryChatSession:
                 activities[-1] = replace(
                     activities[-1], generation=self._mutation_generation
                 )
+                if coding_task is not None and isinstance(result.output, Mapping):
+                    coding_task.mutation_succeeded(
+                        call.tool_name, result.output, self._mutation_generation
+                    )
+            elif coding_task is not None and evidence in {
+                ToolEvidence.WRITE_SUCCESS,
+                ToolEvidence.PATCH_SUCCESS,
+            }:
+                if result.status is ToolResultStatus.APPROVAL_REQUIRED:
+                    coding_task.mutation_rejected()
+                else:
+                    coding_task.mutation_failed()
+            if coding_task is not None and evidence in {
+                ToolEvidence.BUILD_RESULT,
+                ToolEvidence.TEST_RESULT,
+            }:
+                coding_task.verification_finished(
+                    call.tool_name.removeprefix("project."),
+                    result.status.value,
+                    result.output if isinstance(result.output, Mapping) else None,
+                )
             self._last_activity = tuple(activities)
             _update_candidates(
                 result,
@@ -503,10 +556,68 @@ class RepositoryChatSession:
             )
         raise RepositoryOrchestrationError("orchestration step limit exceeded")
 
+    def _execute_mutation_proposal(
+        self,
+        invocation: ToolInvocation,
+        arguments: Mapping[str, object],
+        result: ToolResult,
+        observed_hashes: Mapping[str, str],
+        observed_directories: set[str],
+    ) -> ToolResult:
+        provenance_error = _mutation_provenance_error(
+            invocation, observed_hashes, observed_directories
+        )
+        if provenance_error is not None:
+            return _provenance_failure(result, provenance_error)
+        if result.status is not ToolResultStatus.APPROVAL_REQUIRED:
+            return result
+        try:
+            preview = preview_repository_mutation(
+                invocation.tool_name, arguments, self._context
+            )
+        except ToolError as error:
+            return _provenance_failure(result, str(error))
+        approved = (
+            self._approval_callback(invocation, preview)
+            if self._approval_callback is not None
+            else False
+        )
+        if not approved:
+            return result
+        return self._executor.execute(
+            invocation,
+            self._context,
+            approval=InvocationApproval.for_invocation(invocation),
+        )
+
+    def _execute_project_proposal(
+        self, invocation: ToolInvocation, result: ToolResult
+    ) -> ToolResult:
+        tool = self._registry.get(invocation.tool_name)
+        assert isinstance(tool, ProjectCommandTool)
+        try:
+            preview = tool.prepare(self._context)
+        except ToolError as error:
+            return _tool_failure_with_output(result, error)
+        approved = (
+            self._approval_callback(invocation, preview)
+            if self._approval_callback is not None
+            else False
+        )
+        if not approved:
+            return result
+        return self._executor.execute(
+            invocation,
+            self._context,
+            approval=InvocationApproval.for_invocation(invocation),
+        )
+
     def clear(self) -> None:
         self._conversation.clear()
         self._last_plan = None
         self._last_activity = ()
+        self._active_coding_task = None
+        self._last_coding_task = None
 
     def close(self) -> None:
         if self._closed:
@@ -526,7 +637,9 @@ def _repository_system_prompt(
 ) -> str:
     definitions = render_tool_definitions(registry)
     capability = (
-        "You may propose at most one controlled file mutation per turn. Existing-file "
+        "This is a single-step coding task. Inspect relevant source before changing "
+        "it. Make at most one bounded mutation, preferring repository.apply_patch "
+        "for existing files. Existing-file "
         "writes require a prior read of that exact file and its returned SHA-256. New "
         "files require inspected parent or related source context. Every write needs "
         "explicit user approval after a diff preview. Never claim mutation success "
@@ -534,7 +647,10 @@ def _repository_system_prompt(
         "correctness. You may separately propose a configured project.build or "
         "project.test operation; each needs explicit user approval and only a "
         "successful current-generation result supports a build/test claim. Failed "
-        "results are observations, not verification. "
+        "results are observations, not verification; explain the failure and stop "
+        "without another edit. If the user explicitly requests configured build or "
+        "test verification, propose that operation after the mutation before the "
+        "final answer. Do not claim success until Forge confirms it. "
         if assist_mode
         else "You cannot write files. "
     )
@@ -706,6 +822,19 @@ def _provenance_failure(result: ToolResult, message: str) -> ToolResult:
         result.tool_name,
         ToolResultStatus.FAILURE,
         ToolExecutionMetadata(PermissionDecision.ASK, result.metadata.duration_seconds),
+        error_kind=ToolErrorKind.VALIDATION,
+        error_message=message,
+    )
+
+
+def _state_policy_failure(result: ToolResult, message: str) -> ToolResult:
+    return ToolResult(
+        result.invocation_id,
+        result.tool_name,
+        ToolResultStatus.DENIED,
+        ToolExecutionMetadata(
+            PermissionDecision.DENY, result.metadata.duration_seconds
+        ),
         error_kind=ToolErrorKind.VALIDATION,
         error_message=message,
     )

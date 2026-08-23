@@ -71,12 +71,19 @@ def run_repl(
                             "Mutation remains on disk despite conversation failure: "
                             f"{activity.path}. Code correctness was not tested."
                         )
+                if session.last_coding_task is not None:
+                    output_fn(f"\n{session.last_coding_task.footer}")
             continue
         if isinstance(response, RepositoryResponse):
             for activity in response.tool_activity:
                 path = f": {activity.path}" if activity.path is not None else ""
                 output_fn(f"[tool] {activity.tool_name}{path} ({activity.status})")
         output_fn(f"\n{response.text}")
+        if (
+            isinstance(response, RepositoryResponse)
+            and response.coding_task is not None
+        ):
+            output_fn(f"\n{response.coding_task.footer}")
 
 
 def _run_command(
@@ -120,6 +127,8 @@ def _run_command(
                 f"\nbuild configured: {'yes' if info.build_configured else 'no'}"
                 f"\ntest configured: {'yes' if info.test_configured else 'no'}"
                 f"\nmutation generation: {info.mutation_generation}"
+                "\nwrites: approval required"
+                "\ntask mutation limit: 1"
             )
         output_fn(rendered)
     elif command == "/exit":

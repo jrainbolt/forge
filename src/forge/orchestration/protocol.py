@@ -70,6 +70,7 @@ def build_repository_output(
     candidate_queries: set[str],
     observed_hashes: Mapping[str, str] | None = None,
     allow_mutations: bool = False,
+    allow_verification: bool = True,
 ) -> OutputSpecification:
     """Build a strict schema from registered tools and discovered path provenance."""
     branches: list[dict[str, object]] = []
@@ -86,6 +87,15 @@ def build_repository_output(
                 ToolEvidence.PATCH_SUCCESS,
             }
             and not allow_mutations
+        ):
+            continue
+        if (
+            metadata.evidence
+            in {
+                ToolEvidence.BUILD_RESULT,
+                ToolEvidence.TEST_RESULT,
+            }
+            and not allow_verification
         ):
             continue
         if metadata.name == "repository.apply_patch" and not hashes:

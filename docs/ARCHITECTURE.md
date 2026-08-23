@@ -463,6 +463,49 @@ a write followed by a proposed test. It does not automatically run verification,
 repair failures, retry, plan, or create an autonomous fix/test loop; those remain
 later milestones.
 
+## Single-step coding task
+
+A11 upgrades explicit assist mode into a reusable single-step coding workflow through
+`RepositoryChatSession.execute_task`. Normal chat remains tool-free and ordinary
+workspace chat retains only the read registry. Each assist user request creates a new
+small `CodingTaskState`; selecting assist mode is the deliberate coding-capability
+boundary and does not introduce an agent or autonomous loop.
+
+The state phases are `INSPECTING`, `AWAITING_MUTATION_APPROVAL`, `MUTATED`,
+`VERIFYING`, `COMPLETED`, `FAILED`, and `REJECTED`. Terminal task statuses distinguish
+verified, unverified, read-only, rejected, failed-before-mutation,
+mutation-plus-verification-failure, and mutation-plus-later-task-failure outcomes.
+Actual tool results populate mutation path/hashes, build/test records, generation, and
+tool sequence; model prose does not populate external-state facts.
+
+One user task may successfully execute exactly one `repository.write_file` or
+`repository.apply_patch`. Reads remain bounded by the existing loop and are allowed
+before and after mutation. Existing A9 hash and parent-context provenance, exact
+preview, and approval remain unchanged. Rejection terminates the mutation phase, and a
+second mutation request is denied by state even if a model ignores the dynamic schema.
+The allowance resets for the next user request or `/clear`; neither operation rolls
+back an already approved write.
+
+Configured build and test operations retain separate approval. Each operation may run
+once per workspace mutation generation, allowing old verification to be observed and
+then invalidated by the single mutation. A failed build or test terminates the task;
+subsequent verification or mutation requests are denied. A successful current-
+generation result is required for verified status. Missing or rejected verification
+produces an honest unverified result. There is no automatic rerun, repair, package
+installation, command discovery, rollback, or second edit.
+
+Only the final user/assistant messages enter conversation history. Tool protocol stays
+ephemeral, while a separate immutable `CodingTaskResult` preserves bounded mutation
+and verification metadata without source or process contents. Approved filesystem
+changes persist if later model or orchestration work fails. The REPL prints an
+authoritative `Change`/`Build`/`Tests`/`Status` footer, and also prints the last task
+footer on a post-mutation exception, so dishonest or failed model text cannot override
+external truth.
+
+A11 preserves the no-shell, no-Git-mutation, no-package-install, and untrusted-tool-
+output invariants. It does not plan, decompose tasks, perform multiple mutations, or
+iterate after verification failure; those remain later milestones.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values

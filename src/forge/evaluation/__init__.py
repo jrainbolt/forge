@@ -1,5 +1,15 @@
 """Deterministic coding evaluation harness."""
 
+from forge.evaluation.coding_write import (
+    CODING_WRITE_SUITE_VERSION,
+    CODING_WRITE_V1,
+    CODING_WRITE_V1_TASKS,
+    CodingWriteEvaluationRunner,
+    WriteEvaluationTask,
+    WriteTaskResult,
+    WriteTaskScore,
+    load_write_suite,
+)
 from forge.evaluation.reporting import (
     render_terminal_report,
     run_to_dict,
@@ -29,6 +39,10 @@ from forge.evaluation.types import (
 
 __all__ = [
     "CODING_V1",
+    "CODING_WRITE_V1",
+    "CODING_WRITE_V1_TASKS",
+    "CODING_WRITE_SUITE_VERSION",
+    "CodingWriteEvaluationRunner",
     "CODING_V1_TASKS",
     "SCHEMA_VERSION",
     "SUITE_VERSION",
@@ -42,8 +56,12 @@ __all__ = [
     "TaskResult",
     "TaskScores",
     "ToolRecord",
+    "WriteEvaluationTask",
+    "WriteTaskResult",
+    "WriteTaskScore",
     "fixture_workspace",
     "load_suite",
+    "load_write_suite",
     "render_terminal_report",
     "run_to_dict",
     "score_task",

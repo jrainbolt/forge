@@ -9,7 +9,11 @@ from pathlib import Path
 import pytest
 
 from forge.models import MockModel
-from forge.orchestration import RepositoryChatSession, RepositoryOrchestrationError
+from forge.orchestration import (
+    CodingTaskStatus,
+    RepositoryChatSession,
+    RepositoryOrchestrationError,
+)
 from forge.project_config import ProjectCommand, ProjectCommands
 from forge.tools import (
     MutationPreview,
@@ -266,6 +270,7 @@ def test_successful_mutation_remains_real_if_later_generation_fails(
     assert (workspace / "src/value.py").read_bytes() == b"VALUE = 2\n"
     assert observed[-1].evidence == "patch_success"
     assert session.conversation.turns == ()
+    assert session.last_coding_task.status is CodingTaskStatus.MUTATED_TASK_FAILED
 
 
 def test_project_test_rejection_starts_no_process(workspace: Path) -> None:

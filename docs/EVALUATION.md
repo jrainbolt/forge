@@ -97,7 +97,23 @@ when a backend does not report them. The first fixture is intentionally small
 and Python-only. It measures read-only repository reasoning before controlled
 writes arrive; it does not execute fixture tests or evaluate repairs.
 
-`coding-v1` remains the frozen pre-execution, read-only baseline after A10.
+`coding-v1` remains the frozen pre-execution, read-only baseline after A11.
 Evaluation runs continue to construct the read-only registry and policy;
 assist-mode write, build, and test tools are not exposed, and the fixture is
 never mutated or executed.
+
+## coding-write-v1
+
+A11 adds a deliberately small write-capable suite with three one-mutation tasks:
+`W01` fixes the retry boundary, `W02` adds a focused test, and `W03` adds a small retry
+helper. `CodingWriteEvaluationRunner` copies the committed TinyQueue fixture into a
+fresh temporary workspace for every task, composes the production assist registry,
+policy, executor, provenance, task state, and orchestration, and requires an explicitly
+injected approval callback. Production never auto-approves evaluation mutations.
+
+Scoring is deterministic and checks whether the expected file actually changed,
+required content exists, unexpected files stayed byte-identical, exactly one mutation
+occurred, current-generation verification succeeded, and the task completed. The
+tasks permit one-step solutions and contain no repair loop. Full source and process
+output are not retained in results. The original fixture is never modified, and
+`coding-v1` task definitions and scoring remain unchanged.

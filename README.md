@@ -174,8 +174,8 @@ correction per turn.
 Repository mode is read-only. Forge still cannot edit files, apply patches, run
 configured builds or tests, mutate Git, access the network, or use the web.
 
-Explicit assist mode adds previewed, individually approved file mutations and
-configured project verification:
+Explicit assist mode is Forge's bounded single-step coding mode. It adds previewed,
+individually approved file mutations and configured project verification:
 
 ```bash
 forge chat \
@@ -186,7 +186,9 @@ forge chat \
 ```
 
 Normal `--workspace` mode remains read-only. In assist mode, reads are allowed,
-while every write, patch, build, or test proposal receives a separate default-no
+Forge may inspect source, propose at most one successful code mutation for each user
+request, reread the result, and optionally propose configured build or test
+verification. Every write, patch, build, or test proposal receives a separate default-no
 approval prompt. Writes show their target and deterministic diff. Existing files
 require the SHA-256 returned by a current-turn read; approving one exact invocation
 never approves changed content or another path.
@@ -211,8 +213,14 @@ Forge write makes earlier build/test evidence stale. Project configuration is a
 trusted user-owned boundary: configured programs may themselves access the network,
 and A10 does not provide an environment or network sandbox.
 
-Forge still has no arbitrary shell execution or autonomous fix/test loop. Mutation
-success alone is not a code-correctness claim, and tests are never run automatically.
+If verification fails, the approved mutation remains on disk, Forge reports the
+failure, and the task stops without a corrective edit. A deterministic footer reports
+the actual change/build/test status independently of model wording. `/clear` resets
+conversation and coding-task state but never undoes filesystem changes.
+
+Forge still has no arbitrary shell execution or automatic fix/test/retry loop.
+Mutation success alone is not a code-correctness claim, tests are never run without
+approval, and each new user request receives a fresh one-mutation allowance.
 
 Run the controlled read-only coding evaluation locally with:
 
