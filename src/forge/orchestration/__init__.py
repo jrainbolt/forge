@@ -5,6 +5,7 @@ from forge.orchestration.coding_task import (
     CodingTaskResult,
     CodingTaskState,
     CodingTaskStatus,
+    VerificationDecision,
     VerificationRecord,
 )
 from forge.orchestration.protocol import (
@@ -43,6 +44,7 @@ __all__ = [
     "ToolCall",
     "ToolCallOutcome",
     "VerificationRecord",
+    "VerificationDecision",
     "parse_model_output",
     "render_tool_definitions",
     "render_tool_result",

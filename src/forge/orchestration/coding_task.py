@@ -27,6 +27,13 @@ class CodingTaskStatus(Enum):
     MUTATED_TASK_FAILED = "mutated_task_failed"
 
 
+class VerificationDecision(Enum):
+    NOT_DECIDED = "not_decided"
+    REQUESTED = "requested"
+    COMPLETED = "completed"
+    DECLINED = "declined"
+
+
 @dataclass(frozen=True, slots=True)
 class VerificationRecord:
     attempted: bool = False
@@ -75,6 +82,7 @@ class CodingTaskState:
         self.generation = generation
         self.build = VerificationRecord()
         self.test = VerificationRecord()
+        self.verification_decision = VerificationDecision.NOT_DECIDED
         self.tool_sequence: list[str] = []
         self._terminal_status: CodingTaskStatus | None = None
 
@@ -128,6 +136,7 @@ class CodingTaskState:
         self.generation = generation
         self.build = _stale(self.build)
         self.test = _stale(self.test)
+        self.verification_decision = VerificationDecision.NOT_DECIDED
         self.phase = CodingTaskPhase.MUTATED
 
     def verification_requested(self, operation: str) -> bool:
@@ -139,6 +148,7 @@ class CodingTaskState:
             self.fail_after_mutation()
             return False
         self.phase = CodingTaskPhase.VERIFYING
+        self.verification_decision = VerificationDecision.REQUESTED
         return True
 
     def verification_finished(
@@ -176,6 +186,7 @@ class CodingTaskState:
         else:
             self.test = record
         if label == "failed":
+            self.verification_decision = VerificationDecision.COMPLETED
             self.phase = CodingTaskPhase.FAILED
             self._terminal_status = (
                 CodingTaskStatus.MUTATED_VERIFICATION_FAILED
@@ -183,9 +194,11 @@ class CodingTaskState:
                 else CodingTaskStatus.FAILED_BEFORE_MUTATION
             )
         elif label == "not_run":
+            self.verification_decision = VerificationDecision.DECLINED
             self.phase = CodingTaskPhase.COMPLETED
             self._terminal_status = CodingTaskStatus.COMPLETED_UNVERIFIED
         else:
+            self.verification_decision = VerificationDecision.COMPLETED
             self.phase = (
                 CodingTaskPhase.MUTATED
                 if self.mutation_count
@@ -201,6 +214,10 @@ class CodingTaskState:
             if self.mutation_count
             else CodingTaskStatus.FAILED_BEFORE_MUTATION
         )
+
+    def decline_verification(self) -> None:
+        if self.verification_decision is VerificationDecision.NOT_DECIDED:
+            self.verification_decision = VerificationDecision.DECLINED
 
     def finish(self, answer: str) -> CodingTaskResult:
         if self._terminal_status is None:

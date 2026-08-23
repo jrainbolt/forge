@@ -218,6 +218,12 @@ failure, and the task stops without a corrective edit. A deterministic footer re
 the actual change/build/test status independently of model wording. `/clear` resets
 conversation and coding-task state but never undoes filesystem changes.
 
+When build or test is configured, Forge does not accept the model's first immediate
+post-mutation final without a verification decision. It gives the model one bounded
+opportunity to request an available verification tool or explicitly explain why it is
+being skipped. Execution remains separately previewed and approval-gated; Forge never
+auto-runs the command.
+
 Forge still has no arbitrary shell execution or automatic fix/test/retry loop.
 Mutation success alone is not a code-correctness claim, tests are never run without
 approval, and each new user request receives a fresh one-mutation allowance.

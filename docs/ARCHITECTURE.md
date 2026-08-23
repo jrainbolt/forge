@@ -506,6 +506,20 @@ A11 preserves the no-shell, no-Git-mutation, no-package-install, and untrusted-t
 output invariants. It does not plan, decompose tasks, perform multiple mutations, or
 iterate after verification failure; those remain later milestones.
 
+After mutation, coding state tracks a distinct verification decision:
+`NOT_DECIDED`, `REQUESTED`, `COMPLETED`, or `DECLINED`. When at least one configured
+verification capability is available, the first premature model final receives one
+bounded structured correction asking for an appropriate `project.build` or
+`project.test` request, or an explicit reason to decline. Forge never launches the
+operation itself. A second final may deliberately decline verification; user rejection
+also completes the decision without another prompt. With no configured verification,
+an unverified final remains immediately valid. Post-mutation schemas continue to omit
+both write tools.
+
+Read-only repository chat retains its eight-tool limit. Assist coding tasks use a
+modestly larger ten-tool limit to accommodate discovery, multiple relevant reads, one
+mutation, an optional reread, and verification while preserving a hard bound.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values

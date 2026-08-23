@@ -123,6 +123,54 @@ def test_successful_single_step_task_is_verified(workspace: Path) -> None:
     assert len(session(workspace, MockModel(("unused",))).conversation.turns) == 0
 
 
+def test_premature_final_receives_one_correction_then_test_passes(
+    workspace: Path,
+) -> None:
+    test_code = (
+        "from pathlib import Path; assert 'task.attempts < self.max_attempts' "
+        "in Path('src/tinyqueue/retry.py').read_text()"
+    )
+    model = MockModel(
+        coding_flow(
+            workspace,
+            final("Change applied without tests."),
+            call("test", "project.test", {}),
+            final("Change applied and tests passed."),
+        )
+    )
+    response = session(workspace, model, test_code=test_code).execute_task(
+        "Fix retry and run tests"
+    )
+    assert response.verification_corrections == 1
+    assert response.coding_task.status is CodingTaskStatus.COMPLETED_VERIFIED
+    assert response.coding_task.test.status == "passed"
+    correction_request = model.requests[-2]
+    assert "configured verification is available" in str(
+        correction_request.messages[-1].content
+    )
+    assert "repository.apply_patch" not in str(correction_request.output.schema)
+
+
+def test_premature_final_correction_then_test_failure_stops_task(
+    workspace: Path,
+) -> None:
+    model = MockModel(
+        coding_flow(
+            workspace,
+            final("Change applied."),
+            call("test", "project.test", {}),
+            final("Verification failed; the change remains."),
+        )
+    )
+    response = session(
+        workspace, model, test_code="import sys; sys.exit(9)"
+    ).execute_task("Fix retry and test")
+    assert response.verification_corrections == 1
+    assert response.coding_task.status is CodingTaskStatus.MUTATED_VERIFICATION_FAILED
+    assert response.coding_task.test.exit_code == 9
+    assert response.coding_task.mutation_count == 1
+
+
 def test_rejected_mutation_ends_task_without_verification(workspace: Path) -> None:
     model = MockModel(coding_flow(workspace, final("Change rejected.")))
     response = session(workspace, model, approve=lambda *_args: False).execute_task(
@@ -226,6 +274,7 @@ def test_no_verification_config_is_honestly_unverified(workspace: Path) -> None:
     assert response.coding_task.status is CodingTaskStatus.COMPLETED_UNVERIFIED
     assert response.coding_task.build.status == "not_run"
     assert response.coding_task.test.status == "not_run"
+    assert response.verification_corrections == 0
 
 
 def test_verification_rejection_leaves_mutation_unverified(workspace: Path) -> None:
@@ -244,6 +293,7 @@ def test_verification_rejection_leaves_mutation_unverified(workspace: Path) -> N
     ).execute_task("Fix and test")
     assert response.coding_task.status is CodingTaskStatus.COMPLETED_UNVERIFIED
     assert response.coding_task.test.status == "not_run"
+    assert response.verification_corrections == 0
 
 
 def test_forbidden_shell_is_denied_and_transcript_is_ephemeral(workspace: Path) -> None:
