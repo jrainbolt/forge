@@ -1,5 +1,15 @@
 """Deterministic coding evaluation harness."""
 
+from forge.evaluation.agent import (
+    AGENT_SUITE_VERSION,
+    AGENT_V1,
+    AGENT_V1_TASKS,
+    AgentEvaluationResult,
+    AgentEvaluationRunner,
+    AgentEvaluationTask,
+    AgentTaskScore,
+    load_agent_suite,
+)
 from forge.evaluation.coding_write import (
     CODING_WRITE_SUITE_VERSION,
     CODING_WRITE_V1,
@@ -9,6 +19,16 @@ from forge.evaluation.coding_write import (
     WriteTaskResult,
     WriteTaskScore,
     load_write_suite,
+)
+from forge.evaluation.repair import (
+    REPAIR_SUITE_VERSION,
+    REPAIR_V1,
+    REPAIR_V1_TASKS,
+    RepairEvaluationResult,
+    RepairEvaluationRunner,
+    RepairEvaluationTask,
+    RepairTaskScore,
+    load_repair_suite,
 )
 from forge.evaluation.reporting import (
     render_terminal_report,
@@ -38,10 +58,20 @@ from forge.evaluation.types import (
 )
 
 __all__ = [
+    "AGENT_SUITE_VERSION",
+    "AGENT_V1",
+    "AGENT_V1_TASKS",
+    "AgentEvaluationResult",
+    "AgentEvaluationRunner",
+    "AgentEvaluationTask",
+    "AgentTaskScore",
     "CODING_V1",
     "CODING_WRITE_V1",
     "CODING_WRITE_V1_TASKS",
     "CODING_WRITE_SUITE_VERSION",
+    "REPAIR_SUITE_VERSION",
+    "REPAIR_V1",
+    "REPAIR_V1_TASKS",
     "CodingWriteEvaluationRunner",
     "CODING_V1_TASKS",
     "SCHEMA_VERSION",
@@ -52,6 +82,10 @@ __all__ = [
     "EvaluationTask",
     "FailureReason",
     "RequiredFact",
+    "RepairEvaluationResult",
+    "RepairEvaluationRunner",
+    "RepairEvaluationTask",
+    "RepairTaskScore",
     "TaskCategory",
     "TaskResult",
     "TaskScores",
@@ -61,7 +95,9 @@ __all__ = [
     "WriteTaskScore",
     "fixture_workspace",
     "load_suite",
+    "load_agent_suite",
     "load_write_suite",
+    "load_repair_suite",
     "render_terminal_report",
     "run_to_dict",
     "score_task",

@@ -70,18 +70,35 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument(
         "--workspace",
         type=Path,
-        help=("select an explicit repository workspace (read-only unless --assist)"),
+        help=(
+            "select an explicit repository workspace (read-only unless --assist "
+            "or --agent)"
+        ),
     )
     chat.add_argument(
         "--no-system",
         action="store_true",
         help="omit Forge's default system message",
     )
-    chat.add_argument(
+    autonomy = chat.add_mutually_exclusive_group()
+    autonomy.add_argument(
         "--assist",
         action="store_true",
         help=(
             "enable user-approved repository writes and configured build/test execution"
+        ),
+    )
+    chat.add_argument(
+        "--repair",
+        action="store_true",
+        help="allow one approval-gated repair after qualifying verification failure",
+    )
+    autonomy.add_argument(
+        "--agent",
+        action="store_true",
+        help=(
+            "enable bounded multi-step reasoning with approval-gated writes and "
+            "execution"
         ),
     )
     evaluation = commands.add_parser(
@@ -117,6 +134,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ValueError("--no-system cannot be used with repository chat")
             if args.assist and args.workspace is None:
                 raise ValueError("--assist requires --workspace")
+            if args.agent and args.workspace is None:
+                raise ValueError("--agent requires --workspace")
+            if args.repair and not args.agent:
+                raise ValueError("--repair requires --agent")
             generation = GenerationConfig(
                 max_tokens=args.max_tokens,
                 temperature=args.temperature,
@@ -148,10 +169,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                         create_assist_repository_registry(
                             getattr(catalog, "project_commands", ProjectCommands())
                         )
-                        if args.assist
+                        if args.assist or args.agent
                         else None
                     ),
-                    policy=(create_assist_repository_policy() if args.assist else None),
+                    policy=(
+                        create_assist_repository_policy()
+                        if args.assist or args.agent
+                        else None
+                    ),
+                    agent_mode=args.agent,
+                    repair_enabled=args.repair,
                 )
             with model, session:
                 return run_repl(session)

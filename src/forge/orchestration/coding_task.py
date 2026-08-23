@@ -15,6 +15,10 @@ class CodingTaskPhase(Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     REJECTED = "rejected"
+    DIAGNOSING = "diagnosing"
+    AWAITING_REPAIR_APPROVAL = "awaiting_repair_approval"
+    REPAIRED = "repaired"
+    VERIFYING_REPAIR = "verifying_repair"
 
 
 class CodingTaskStatus(Enum):
@@ -25,6 +29,11 @@ class CodingTaskStatus(Enum):
     FAILED_BEFORE_MUTATION = "failed_before_mutation"
     MUTATED_VERIFICATION_FAILED = "mutated_verification_failed"
     MUTATED_TASK_FAILED = "mutated_task_failed"
+    COMPLETED_REPAIRED_VERIFIED = "completed_repaired_verified"
+    REPAIR_REJECTED = "repair_rejected"
+    REPAIR_UNVERIFIED = "repair_unverified"
+    REPAIR_VERIFICATION_FAILED = "repair_verification_failed"
+    REPAIR_FAILED = "repair_failed"
 
 
 class VerificationDecision(Enum):
@@ -42,6 +51,16 @@ class VerificationRecord:
     timed_out: bool = False
     truncated: bool = False
     generation: int | None = None
+    outcome: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MutationRecord:
+    tool: str
+    path: str | None
+    old_sha256: str | None
+    new_sha256: str | None
+    generation: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,9 +76,29 @@ class CodingTaskResult:
     test: VerificationRecord
     verification_generation: int
     tool_sequence: tuple[str, ...]
+    repair_enabled: bool = False
+    repair_eligible: bool = False
+    repair_attempted: bool = False
+    repair_succeeded: bool = False
+    repair_eligibility_outcome: str | None = None
+    mutations: tuple[MutationRecord, ...] = ()
+    build_attempts: tuple[VerificationRecord, ...] = ()
+    test_attempts: tuple[VerificationRecord, ...] = ()
 
     @property
     def footer(self) -> str:
+        if self.repair_enabled:
+            initial = _attempt_label(self.build_attempts, self.test_attempts, 0)
+            repair = _attempt_label(self.build_attempts, self.test_attempts, 1)
+            initial_change = "applied" if self.mutation_count >= 1 else "not applied"
+            repair_change = "applied" if self.mutation_count >= 2 else "not applied"
+            return (
+                f"Change #1: {initial_change}\n"
+                f"Initial verification: {initial}\n"
+                f"Repair #2: {repair_change}\n"
+                f"Repair verification: {repair}\n"
+                f"Status: {self.status.value.upper()}"
+            )
         change = "applied" if self.mutation_count else "not applied"
         return (
             f"Change: {change}\n"
@@ -72,7 +111,7 @@ class CodingTaskResult:
 class CodingTaskState:
     """Small mutable transition authority scoped to one user request."""
 
-    def __init__(self, generation: int) -> None:
+    def __init__(self, generation: int, *, repair_enabled: bool = False) -> None:
         self.phase = CodingTaskPhase.INSPECTING
         self.mutation_count = 0
         self.mutation_tool: str | None = None
@@ -84,6 +123,13 @@ class CodingTaskState:
         self.test = VerificationRecord()
         self.verification_decision = VerificationDecision.NOT_DECIDED
         self.tool_sequence: list[str] = []
+        self.repair_enabled = repair_enabled
+        self.repair_eligible = False
+        self.repair_attempted = False
+        self.repair_eligibility_outcome: str | None = None
+        self.mutations: list[MutationRecord] = []
+        self.build_attempts: list[VerificationRecord] = []
+        self.test_attempts: list[VerificationRecord] = []
         self._terminal_status: CodingTaskStatus | None = None
 
     @property
@@ -92,11 +138,25 @@ class CodingTaskState:
 
     @property
     def may_propose_mutation(self) -> bool:
-        return self.phase is CodingTaskPhase.INSPECTING and not self.terminal
+        return not self.terminal and (
+            self.phase is CodingTaskPhase.INSPECTING
+            or (
+                self.repair_enabled
+                and self.repair_eligible
+                and not self.repair_attempted
+                and self.mutation_count == 1
+                and self.phase is CodingTaskPhase.DIAGNOSING
+            )
+        )
 
     @property
     def may_verify(self) -> bool:
         return not self.terminal
+
+    def may_verify_operation(self, operation: str) -> bool:
+        return self.may_verify and (
+            not self.repair_enabled or len(self._attempts(operation)) < 2
+        )
 
     def record_tool(self, name: str) -> None:
         self.tool_sequence.append(name)
@@ -105,16 +165,33 @@ class CodingTaskState:
         if not self.may_propose_mutation:
             self.fail_after_mutation()
             return False
-        self.phase = CodingTaskPhase.AWAITING_MUTATION_APPROVAL
+        if self.mutation_count == 1:
+            self.repair_attempted = True
+            self.phase = CodingTaskPhase.AWAITING_REPAIR_APPROVAL
+        else:
+            self.phase = CodingTaskPhase.AWAITING_MUTATION_APPROVAL
         return True
 
     def mutation_rejected(self) -> None:
+        if self.terminal:
+            return
         self.phase = CodingTaskPhase.REJECTED
-        self._terminal_status = CodingTaskStatus.REJECTED
+        self._terminal_status = (
+            CodingTaskStatus.REPAIR_REJECTED
+            if self.mutation_count == 1 and self.repair_enabled
+            else CodingTaskStatus.REJECTED
+        )
 
     def mutation_failed(self) -> None:
+        if self.terminal:
+            return
         if self.mutation_count:
-            self.fail_after_mutation()
+            self.phase = CodingTaskPhase.FAILED
+            self._terminal_status = (
+                CodingTaskStatus.REPAIR_FAILED
+                if self.repair_enabled and self.repair_attempted
+                else CodingTaskStatus.MUTATED_TASK_FAILED
+            )
             return
         self.phase = CodingTaskPhase.FAILED
         self._terminal_status = CodingTaskStatus.FAILED_BEFORE_MUTATION
@@ -122,9 +199,9 @@ class CodingTaskState:
     def mutation_succeeded(
         self, tool: str, output: Mapping[str, object], generation: int
     ) -> None:
-        if self.mutation_count:
+        if self.mutation_count >= (2 if self.repair_enabled else 1):
             raise RuntimeError("coding task mutation limit exceeded")
-        self.mutation_count = 1
+        self.mutation_count += 1
         self.mutation_tool = tool
         path = output.get("path")
         if isinstance(path, str):
@@ -133,21 +210,39 @@ class CodingTaskState:
         new_hash = output.get("new_sha256")
         self.old_sha256 = old_hash if isinstance(old_hash, str) else None
         self.new_sha256 = new_hash if isinstance(new_hash, str) else None
+        self.mutations.append(
+            MutationRecord(
+                tool,
+                path if isinstance(path, str) else None,
+                self.old_sha256,
+                self.new_sha256,
+                generation,
+            )
+        )
         self.generation = generation
         self.build = _stale(self.build)
         self.test = _stale(self.test)
         self.verification_decision = VerificationDecision.NOT_DECIDED
-        self.phase = CodingTaskPhase.MUTATED
+        self.repair_eligible = False
+        self.phase = (
+            CodingTaskPhase.REPAIRED
+            if self.mutation_count == 2
+            else CodingTaskPhase.MUTATED
+        )
 
     def verification_requested(self, operation: str) -> bool:
-        if not self.may_verify:
+        if not self.may_verify_operation(operation):
             self.fail_after_mutation()
             return False
         record = self._verification(operation)
         if record.attempted and record.generation == self.generation:
             self.fail_after_mutation()
             return False
-        self.phase = CodingTaskPhase.VERIFYING
+        self.phase = (
+            CodingTaskPhase.VERIFYING_REPAIR
+            if self.mutation_count == 2
+            else CodingTaskPhase.VERIFYING
+        )
         self.verification_decision = VerificationDecision.REQUESTED
         return True
 
@@ -179,29 +274,49 @@ class CodingTaskState:
             exit_code=exit_code if isinstance(exit_code, int) else None,
             timed_out=timed_out is True,
             truncated=stdout_truncated is True or stderr_truncated is True,
-            generation=self.generation if label == "passed" else None,
+            generation=(
+                self.generation
+                if status != "approval_required" and outcome != "command_not_configured"
+                else None
+            ),
+            outcome=outcome if isinstance(outcome, str) else None,
         )
+        self._attempts(operation).append(record)
         if operation == "build":
             self.build = record
         else:
             self.test = record
         if label == "failed":
             self.verification_decision = VerificationDecision.COMPLETED
-            self.phase = CodingTaskPhase.FAILED
-            self._terminal_status = (
-                CodingTaskStatus.MUTATED_VERIFICATION_FAILED
-                if self.mutation_count
-                else CodingTaskStatus.FAILED_BEFORE_MUTATION
-            )
+            eligible = outcome in {"nonzero_exit", "timeout"}
+            if self.repair_enabled and self.mutation_count == 1 and eligible:
+                self.repair_eligible = True
+                self.repair_eligibility_outcome = outcome
+                self.phase = CodingTaskPhase.DIAGNOSING
+            else:
+                self.phase = CodingTaskPhase.FAILED
+                self._terminal_status = (
+                    CodingTaskStatus.REPAIR_VERIFICATION_FAILED
+                    if self.mutation_count == 2 and self.repair_enabled
+                    else CodingTaskStatus.MUTATED_VERIFICATION_FAILED
+                    if self.mutation_count
+                    else CodingTaskStatus.FAILED_BEFORE_MUTATION
+                )
         elif label == "not_run":
             self.verification_decision = VerificationDecision.DECLINED
             self.phase = CodingTaskPhase.COMPLETED
-            self._terminal_status = CodingTaskStatus.COMPLETED_UNVERIFIED
+            self._terminal_status = (
+                CodingTaskStatus.REPAIR_UNVERIFIED
+                if self.mutation_count == 2
+                else CodingTaskStatus.COMPLETED_UNVERIFIED
+            )
         else:
             self.verification_decision = VerificationDecision.COMPLETED
             self.phase = (
-                CodingTaskPhase.MUTATED
-                if self.mutation_count
+                CodingTaskPhase.REPAIRED
+                if self.mutation_count == 2
+                else CodingTaskPhase.MUTATED
+                if self.mutation_count == 1
                 else CodingTaskPhase.INSPECTING
             )
 
@@ -225,11 +340,21 @@ class CodingTaskState:
                 record.status == "passed" and record.generation == self.generation
                 for record in (self.build, self.test)
             ):
-                status = CodingTaskStatus.COMPLETED_VERIFIED
+                status = (
+                    CodingTaskStatus.COMPLETED_REPAIRED_VERIFIED
+                    if self.mutation_count == 2
+                    else CodingTaskStatus.COMPLETED_VERIFIED
+                )
             elif not self.mutation_count:
                 status = CodingTaskStatus.COMPLETED_READ_ONLY
             else:
-                status = CodingTaskStatus.COMPLETED_UNVERIFIED
+                status = (
+                    CodingTaskStatus.REPAIR_UNVERIFIED
+                    if self.mutation_count == 2
+                    else CodingTaskStatus.MUTATED_VERIFICATION_FAILED
+                    if self.repair_eligible
+                    else CodingTaskStatus.COMPLETED_UNVERIFIED
+                )
             self._terminal_status = status
             self.phase = CodingTaskPhase.COMPLETED
         return CodingTaskResult(
@@ -244,6 +369,14 @@ class CodingTaskState:
             self.test,
             self.generation,
             tuple(self.tool_sequence),
+            self.repair_enabled,
+            self.repair_eligible,
+            self.repair_attempted,
+            self.mutation_count == 2,
+            self.repair_eligibility_outcome,
+            tuple(self.mutations),
+            tuple(self.build_attempts),
+            tuple(self.test_attempts),
         )
 
     def _verification(self, operation: str) -> VerificationRecord:
@@ -251,6 +384,13 @@ class CodingTaskState:
             return self.build
         if operation == "test":
             return self.test
+        raise ValueError("verification operation must be build or test")
+
+    def _attempts(self, operation: str) -> list[VerificationRecord]:
+        if operation == "build":
+            return self.build_attempts
+        if operation == "test":
+            return self.test_attempts
         raise ValueError("verification operation must be build or test")
 
 
@@ -264,4 +404,14 @@ def _stale(record: VerificationRecord) -> VerificationRecord:
         record.timed_out,
         record.truncated,
         record.generation,
+        record.outcome,
     )
+
+
+def _attempt_label(
+    builds: tuple[VerificationRecord, ...],
+    tests: tuple[VerificationRecord, ...],
+    index: int,
+) -> str:
+    records = tuple(record for record in (*builds, *tests) if record.attempted)
+    return records[index].status if len(records) > index else "not_run"

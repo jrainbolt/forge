@@ -228,6 +228,45 @@ Forge still has no arbitrary shell execution or automatic fix/test/retry loop.
 Mutation success alone is not a code-correctness claim, tests are never run without
 approval, and each new user request receives a fresh one-mutation allowance.
 
+Use explicit agent mode when a task needs a bounded sequence of repository reads,
+one optional edit, and optional configured verification:
+
+```bash
+forge chat \
+  --model qwen-small \
+  --config ~/Models/forge/forge.toml \
+  --workspace . \
+  --agent
+```
+
+Agent mode is distinct from ordinary chat, read-only workspace chat, and `--assist`.
+It runs in the foreground with limits of 16 model calls/iterations and 12 tool calls,
+stops after repeated or no-progress activity, and prints a structured task footer.
+Every write, build, and test still receives its own exact preview and approval prompt.
+Only one successful mutation is permitted; a failed verification may be inspected and
+explained but never authorizes a repair edit. Ctrl-C at an approval prompt cancels the
+agent task without performing the proposed action. Agent mode adds no shell, Git
+mutation, package installation, network access, rollback, or background execution.
+
+Enable A13 repair authority explicitly with `--repair`:
+
+```bash
+forge chat \
+  --model qwen-small \
+  --config ~/Models/forge/forge.toml \
+  --workspace . \
+  --agent \
+  --repair
+```
+
+Repair mode permits at most two approved mutations and two attempts per configured
+build/test operation. The second mutation becomes available only after the first
+change receives a current-generation `nonzero_exit` or `timeout`. Forge must reread
+the current repair target, show another exact diff, and receive another approval.
+Reverification is separately approved. A second verification failure ends the loop;
+process-start and missing-command failures grant no repair authority. Approved
+changes persist without automatic rollback.
+
 Run the controlled read-only coding evaluation locally with:
 
 ```bash

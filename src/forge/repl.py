@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from forge.models import ModelError
-from forge.orchestration import RepositoryChatSession, RepositoryResponse
+from forge.orchestration import (
+    AgentCancelled,
+    RepositoryChatSession,
+    RepositoryResponse,
+)
 from forge.session import ChatSession
 from forge.tools import MutationPreview, PreparedProjectCommand, ToolInvocation
 
@@ -32,14 +36,22 @@ def run_repl(
     if isinstance(session, RepositoryChatSession):
         output_fn(f"Workspace: {info.workspace}")
         mode = (
-            "assist (writes and project execution require approval)"
+            "agent repair (bounded; two writes maximum; approval required)"
+            if info.repair_enabled
+            else "agent (bounded; writes and project execution require approval)"
+            if info.agent_mode
+            else "assist (writes and project execution require approval)"
             if info.assist_mode
             else "read-only"
         )
         output_fn(f"Repository access: {mode}")
         if info.assist_mode:
             session.set_approval_callback(
-                _approval_prompt(input_fn=input_fn, output_fn=output_fn)
+                _approval_prompt(
+                    input_fn=input_fn,
+                    output_fn=output_fn,
+                    cancel_on_interrupt=info.agent_mode,
+                )
             )
     output_fn("Type /help for commands.")
     while True:
@@ -59,6 +71,11 @@ def run_repl(
             continue
         try:
             response = session.ask(text)
+        except AgentCancelled:
+            output_fn("Agent task cancelled.")
+            if session.last_agent_task is not None:
+                output_fn(f"\n{session.last_agent_task.footer}")
+            continue
         except (ModelError, ValueError, RuntimeError) as error:
             output_fn(f"Error: {error}")
             if isinstance(session, RepositoryChatSession):
@@ -82,8 +99,11 @@ def run_repl(
         if (
             isinstance(response, RepositoryResponse)
             and response.coding_task is not None
+            and response.agent_task is None
         ):
             output_fn(f"\n{response.coding_task.footer}")
+        if isinstance(response, RepositoryResponse) and response.agent_task is not None:
+            output_fn(f"\n{response.agent_task.footer}")
 
 
 def _run_command(
@@ -118,7 +138,15 @@ def _run_command(
             f"last omitted turns: {info.last_omitted_turns}"
         )
         if isinstance(session, RepositoryChatSession):
-            repository_mode = "assist" if info.assist_mode else "read-only"
+            repository_mode = (
+                "agent repair"
+                if info.repair_enabled
+                else "agent"
+                if info.agent_mode
+                else "assist"
+                if info.assist_mode
+                else "read-only"
+            )
             rendered += (
                 f"\nrepository mode: {repository_mode}"
                 f"\nworkspace: {info.workspace}"
@@ -128,8 +156,14 @@ def _run_command(
                 f"\ntest configured: {'yes' if info.test_configured else 'no'}"
                 f"\nmutation generation: {info.mutation_generation}"
                 "\nwrites: approval required"
-                "\ntask mutation limit: 1"
+                f"\ntask mutation limit: {2 if info.repair_enabled else 1}"
             )
+            if info.agent_mode:
+                rendered += (
+                    f"\niteration limit: {info.iteration_limit}"
+                    f"\ntool limit: {info.tool_limit}"
+                    f"\nrepair enabled: {'yes' if info.repair_enabled else 'no'}"
+                )
         output_fn(rendered)
     elif command == "/exit":
         output_fn("Goodbye.")
@@ -140,7 +174,10 @@ def _run_command(
 
 
 def _approval_prompt(
-    *, input_fn: InputFunction, output_fn: OutputFunction
+    *,
+    input_fn: InputFunction,
+    output_fn: OutputFunction,
+    cancel_on_interrupt: bool = False,
 ) -> Callable[[ToolInvocation, MutationPreview | PreparedProjectCommand], bool]:
     def approve(
         invocation: ToolInvocation,
@@ -162,7 +199,12 @@ def _approval_prompt(
             rejection = "Execution rejected."
         try:
             answer = input_fn(prompt).strip().casefold()
-        except (EOFError, KeyboardInterrupt):
+        except KeyboardInterrupt as error:
+            if cancel_on_interrupt:
+                raise AgentCancelled("agent task cancelled by user") from error
+            output_fn(rejection)
+            return False
+        except EOFError:
             output_fn(rejection)
             return False
         if answer in {"y", "yes"}:

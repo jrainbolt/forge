@@ -1,10 +1,19 @@
 """Bounded backend-independent repository orchestration."""
 
+from forge.orchestration.agent_task import (
+    AgentCancelled,
+    AgentPhase,
+    AgentStopReason,
+    AgentTaskResult,
+    AgentTaskState,
+    AutonomyMode,
+)
 from forge.orchestration.coding_task import (
     CodingTaskPhase,
     CodingTaskResult,
     CodingTaskState,
     CodingTaskStatus,
+    MutationRecord,
     VerificationDecision,
     VerificationRecord,
 )
@@ -18,7 +27,14 @@ from forge.orchestration.protocol import (
     render_tool_result,
 )
 from forge.orchestration.repository_session import (
+    DEFAULT_MAX_AGENT_ITERATIONS,
+    DEFAULT_MAX_AGENT_MODEL_CALLS,
+    DEFAULT_MAX_AGENT_TOOL_EXECUTIONS,
+    DEFAULT_MAX_NO_PROGRESS_CYCLES,
     DEFAULT_MAX_ORCHESTRATION_STEPS,
+    DEFAULT_MAX_REPAIR_ITERATIONS,
+    DEFAULT_MAX_REPAIR_MODEL_CALLS,
+    DEFAULT_MAX_REPAIR_TOOL_EXECUTIONS,
     DEFAULT_MAX_REPEATED_CALLS,
     DEFAULT_MAX_TOOL_EXECUTIONS,
     RepositoryChatSession,
@@ -28,13 +44,27 @@ from forge.orchestration.repository_session import (
 )
 
 __all__ = [
+    "AgentCancelled",
+    "AgentPhase",
+    "AgentStopReason",
+    "AgentTaskResult",
+    "AgentTaskState",
+    "AutonomyMode",
+    "DEFAULT_MAX_AGENT_ITERATIONS",
+    "DEFAULT_MAX_AGENT_MODEL_CALLS",
+    "DEFAULT_MAX_AGENT_TOOL_EXECUTIONS",
+    "DEFAULT_MAX_NO_PROGRESS_CYCLES",
     "DEFAULT_MAX_ORCHESTRATION_STEPS",
     "DEFAULT_MAX_REPEATED_CALLS",
     "DEFAULT_MAX_TOOL_EXECUTIONS",
+    "DEFAULT_MAX_REPAIR_ITERATIONS",
+    "DEFAULT_MAX_REPAIR_MODEL_CALLS",
+    "DEFAULT_MAX_REPAIR_TOOL_EXECUTIONS",
     "CodingTaskPhase",
     "CodingTaskResult",
     "CodingTaskState",
     "CodingTaskStatus",
+    "MutationRecord",
     "ParsedModelOutput",
     "ProtocolError",
     "RepositoryChatSession",

@@ -117,3 +117,36 @@ occurred, current-generation verification succeeded, and the task completed. The
 tasks permit one-step solutions and contain no repair loop. Full source and process
 output are not retained in results. The original fixture is never modified, and
 `coding-v1` task definitions and scoring remain unchanged.
+
+## agent-v1
+
+A12 adds four deterministic agent-loop scenarios while leaving `coding-v1` and
+`coding-write-v1` unchanged. `G01` requires multi-step read-only investigation, `G02`
+requires multiple reads followed by one targeted mutation, `G03` checks recovery from
+an irrelevant search, and `G04` checks truthful handling of a failed verification
+without a repair mutation.
+
+`AgentEvaluationRunner` copies TinyQueue into a fresh temporary workspace for every
+task and invokes the production agent session with an explicitly injected approval
+callback. Scoring uses observable state only: multi-step tool use, expected bytes,
+exactly zero or one mutation as appropriate, hard-budget compliance, the expected
+machine-readable stop reason, and absence of unexpected file changes. The original
+fixture is byte-checked by deterministic tests and never modified. No model grades
+answers, no evaluator tool bypass exists, and real-model scores are not CI gates.
+
+## repair-v1
+
+A13 adds four repair scenarios without changing historical suites. `R01` uses a
+deterministic test failure followed by successful repair, `R02` uses a syntax failure
+followed by successful rebuild, `R03` keeps failing after the sole repair, and `R04`
+produces a process-start failure that must not grant repair authority.
+
+Each scenario copies TinyQueue into a fresh temporary workspace and uses production
+repair state, tools, provenance, permission checks, and approvals. Scripted responses
+deliberately create the first failure; evaluation never relies on a real model making
+a predictable mistake. Commands and approvals are injected explicitly.
+
+Scoring checks the initial mutation and failure, repair eligibility, the two-mutation
+ceiling, per-operation two-attempt ceiling, truthful final status/stop reason, and
+absence of unexpected paths. Tests byte-check the committed fixture. There is no LLM
+grader, automatic approval, evaluator-only write path, or cross-task mutation leak.

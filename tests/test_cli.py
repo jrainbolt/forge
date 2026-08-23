@@ -76,6 +76,47 @@ def test_chat_help_succeeds_without_constructing_model(
     assert "--model" in output
     assert "--workspace" in output
     assert "--assist" in output
+    assert "--agent" in output
+
+
+def test_assist_and_agent_are_mutually_exclusive(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(
+            [
+                "chat",
+                "--model",
+                "fixture",
+                "--config",
+                "forge.toml",
+                "--assist",
+                "--agent",
+            ]
+        )
+    assert exit_info.value.code == 2
+    assert "not allowed with argument --assist" in capsys.readouterr().err
+
+
+def test_repair_requires_agent(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    assert (
+        main(
+            [
+                "chat",
+                "--model",
+                "fixture",
+                "--config",
+                str(tmp_path / "forge.toml"),
+                "--workspace",
+                str(tmp_path),
+                "--repair",
+            ]
+        )
+        == 2
+    )
+    assert "--repair requires --agent" in caplog.text
 
 
 def test_eval_help_succeeds_without_constructing_model(
@@ -306,3 +347,98 @@ def test_assist_requires_workspace_and_is_explicitly_write_capable(
     )
     assert observed == {"assist": True, "tools": 9}
     assert second.closed
+
+
+def test_agent_requires_workspace_and_selects_bounded_agent_mode(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    models = iter((MockModel(("unused",)), MockModel(("unused",))))
+
+    class Catalog:
+        def create(self, _name: str) -> MockModel:
+            return next(models)
+
+    monkeypatch.setattr("forge.cli.load_model_catalog", lambda *_args: Catalog())
+    config = str(tmp_path / "forge.toml")
+    assert main(["chat", "--model", "fixture", "--config", config, "--agent"]) == 2
+    assert "--agent requires --workspace" in caplog.text
+
+    observed: dict[str, object] = {}
+
+    def inspect(session: object) -> int:
+        info = session.info  # type: ignore[attr-defined]
+        observed.update(
+            agent=info.agent_mode,
+            mode=info.autonomy_mode.value,
+            tools=info.available_tools,
+            iterations=info.iteration_limit,
+            tool_limit=info.tool_limit,
+        )
+        return 0
+
+    monkeypatch.setattr("forge.cli.run_repl", inspect)
+    assert (
+        main(
+            [
+                "chat",
+                "--model",
+                "fixture",
+                "--config",
+                config,
+                "--workspace",
+                str(tmp_path),
+                "--agent",
+            ]
+        )
+        == 0
+    )
+    assert observed == {
+        "agent": True,
+        "mode": "agent",
+        "tools": 9,
+        "iterations": 16,
+        "tool_limit": 12,
+    }
+
+
+def test_repair_flag_selects_explicit_larger_bounded_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = MockModel(("unused",))
+
+    class Catalog:
+        def create(self, _name: str) -> MockModel:
+            return model
+
+    observed: dict[str, object] = {}
+
+    def inspect(session: object) -> int:
+        info = session.info  # type: ignore[attr-defined]
+        observed.update(
+            repair=info.repair_enabled,
+            iterations=info.iteration_limit,
+            tools=info.tool_limit,
+        )
+        return 0
+
+    monkeypatch.setattr("forge.cli.load_model_catalog", lambda *_args: Catalog())
+    monkeypatch.setattr("forge.cli.run_repl", inspect)
+    assert (
+        main(
+            [
+                "chat",
+                "--model",
+                "fixture",
+                "--config",
+                str(tmp_path / "forge.toml"),
+                "--workspace",
+                str(tmp_path),
+                "--agent",
+                "--repair",
+            ]
+        )
+        == 0
+    )
+    assert observed == {"repair": True, "iterations": 24, "tools": 18}

@@ -520,6 +520,73 @@ Read-only repository chat retains its eight-tool limit. Assist coding tasks use 
 modestly larger ten-tool limit to accommodate discovery, multiple relevant reads, one
 mutation, an optional reread, and verification while preserving a hard bound.
 
+## Agent loop v1
+
+A12 adds an explicit foreground `--agent` mode without changing the authority of any
+tool. The four user-visible autonomy modes are ordinary `CHAT`, repository `READ`,
+single-step `ASSIST`, and bounded multi-step `AGENT`. Agent mode reuses the production
+structured protocol, registry, executor, workspace confinement, provenance rules,
+approval snapshots, coding-task state, and one-successful-mutation invariant.
+
+`AgentTaskState` records phases, iterations/model calls, tool requests, unique source
+files read, approvals, no-progress cycles, and the underlying mutation and verification
+facts. A completed `AgentTaskResult` exposes those facts plus a machine-readable stop
+reason. Stop reasons distinguish completion, rejection, cancellation, model/context/
+protocol/tool failures, verification failure, repeated calls, no progress, independent
+model/tool/iteration limits, and a blocked second mutation. Only model calls count as
+iterations; every requested tool counts against the tool budget even when it is denied
+or fails.
+
+The default agent budgets are 16 iterations, 16 model calls, and 12 tool calls. Three
+consecutive observations without new evidence stop the task, as does a third identical
+tool request. Counters and progress history are fresh for each user task and remain
+separate from bounded conversation history. The loop is sequential and synchronous;
+there is no background scheduler, planner service, or parallel execution.
+
+Writes and configured build/test commands remain `ASK`. The terminal presents the
+same exact immutable preview used by assist mode, and Ctrl-C while awaiting approval
+cancels the current agent task. Cancellation or rejection grants no authority. One
+approved mutation exhausts the task's mutation allowance. After failed verification,
+the agent may use remaining read-only calls to inspect and explain evidence, but repair,
+retry, rollback, command discovery, shell, Git mutation, package installation, and
+network access remain unavailable.
+
+## Repair loop
+
+A13 adds repair as an explicit `--agent --repair` capability. `--assist` and ordinary
+`--agent` retain their A12 one-mutation behavior. Repair mode uses 24 iterations/model
+calls and 18 tool requests while retaining no-progress and repeated-call guards. It
+remains foreground and sequential.
+
+Coding-task phases extend through `DIAGNOSING`, `AWAITING_REPAIR_APPROVAL`, `REPAIRED`,
+and `VERIFYING_REPAIR`. Only a launched current-generation build/test ending in
+`nonzero_exit` or `timeout` grants repair eligibility. `command_not_configured`,
+`process_start_failed`, rejection, write failure, read failure, and model
+reconsideration do not. Failure output remains untrusted diagnostic evidence.
+
+Repair mutation #2 is the only corrective proposal. All observed hashes are cleared
+after mutation #1, so the model must reread the current target and use its new SHA-256.
+The repair may target the same or another freshly evidenced file. It receives the
+normal exact A9 preview and invocation-specific approval. Rejection consumes the
+repair opportunity; mutation #1 remains on disk.
+
+Build and test attempts are tracked separately and capped at two per operation. A
+command repeated after mutation generation changes is legitimate; repeating it in the
+same generation is denied. Reverification receives a separate A10 approval. Passing
+produces `COMPLETED_REPAIRED_VERIFIED`; rejection produces an honest unverified repair;
+failure produces `REPAIR_VERIFICATION_FAILED` and ends the loop. Mutation #3 and
+verification attempt #3 are impossible.
+
+Agent results retain bounded mutation records, verification histories, the eligibility
+outcome, approval counters, and repair outcome without full source or process content.
+The deterministic footer reports both mutations and verification stages independently
+of model prose. Superseded observations are discarded at mutation boundaries. There
+is no transaction or rollback across writes: every approved successful mutation
+persists after rejection, cancellation, context failure, or failed retest.
+
+Repair adds no shell, Git mutation, package installation, command discovery, network,
+automatic approval, background work, subagents, or parallel repair candidates.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values
