@@ -10,6 +10,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from forge.conversation import ContextBudgetError, Conversation, RequestPlan
+from forge.interaction import (
+    AutonomyMode,
+    InteractionPolicy,
+    resolve_interaction_policy,
+)
 from forge.models import (
     GenerationConfig,
     Message,
@@ -27,7 +32,6 @@ from forge.orchestration.agent_task import (
     AgentStopReason,
     AgentTaskResult,
     AgentTaskState,
-    AutonomyMode,
 )
 from forge.orchestration.coding_task import (
     CodingTaskResult,
@@ -171,6 +175,11 @@ class RepositorySessionInfo:
     iteration_limit: int
     tool_limit: int
     repair_enabled: bool
+    permission_profile: str
+    read_permission: PermissionDecision
+    write_permission: PermissionDecision
+    build_permission: PermissionDecision
+    test_permission: PermissionDecision
 
 
 class RepositoryChatSession:
@@ -185,6 +194,8 @@ class RepositoryChatSession:
         generation: GenerationConfig | None = None,
         registry: ToolRegistry | None = None,
         policy: PermissionPolicy | None = None,
+        mode: AutonomyMode | None = None,
+        interaction_policy: InteractionPolicy | None = None,
         agent_mode: bool = False,
         repair_enabled: bool = False,
         max_steps: int | None = None,
@@ -214,20 +225,26 @@ class RepositoryChatSession:
             raise TypeError("repair_enabled must be a Boolean")
         if repair_enabled and not agent_mode:
             raise ValueError("repair mode requires explicit agent mode")
+        if mode is not None and not isinstance(mode, AutonomyMode):
+            raise TypeError("mode must be an AutonomyMode or None")
+        requested_repair = repair_enabled or mode is AutonomyMode.REPAIR
+        requested_agent = agent_mode or (
+            mode in {AutonomyMode.AGENT, AutonomyMode.REPAIR}
+        )
         effective_steps = (
             DEFAULT_MAX_REPAIR_ITERATIONS
-            if max_steps is None and repair_enabled
+            if max_steps is None and requested_repair
             else DEFAULT_MAX_AGENT_ITERATIONS
-            if max_steps is None and agent_mode
+            if max_steps is None and requested_agent
             else DEFAULT_MAX_ORCHESTRATION_STEPS
             if max_steps is None
             else max_steps
         )
         effective_model_calls = (
             DEFAULT_MAX_REPAIR_MODEL_CALLS
-            if max_model_calls is None and repair_enabled
+            if max_model_calls is None and requested_repair
             else DEFAULT_MAX_AGENT_MODEL_CALLS
-            if max_model_calls is None and agent_mode
+            if max_model_calls is None and requested_agent
             else effective_steps
             if max_model_calls is None
             else max_model_calls
@@ -254,15 +271,37 @@ class RepositoryChatSession:
             max_tokens=256, temperature=0.4
         )
         self._registry = registry or create_readonly_repository_registry()
-        self._assist_mode = any(
+        if interaction_policy is not None:
+            self._registry = self._registry.filtered(interaction_policy.exposes)
+        registry_has_writes = any(
             metadata.evidence
             in {ToolEvidence.WRITE_SUCCESS, ToolEvidence.PATCH_SUCCESS}
             for metadata in self._registry.metadata
         )
-        if agent_mode and not self._assist_mode:
+        derived_mode = mode or (
+            AutonomyMode.REPAIR
+            if repair_enabled
+            else AutonomyMode.AGENT
+            if agent_mode
+            else AutonomyMode.ASSIST
+            if registry_has_writes
+            else AutonomyMode.READ
+        )
+        if derived_mode is AutonomyMode.CHAT:
+            raise ValueError("RepositoryChatSession cannot use CHAT mode")
+        if interaction_policy is not None and (
+            interaction_policy.autonomy_mode is not derived_mode
+        ):
+            raise ValueError("interaction policy mode does not match session mode")
+        self._interaction_policy = interaction_policy or resolve_interaction_policy(
+            derived_mode
+        )
+        self._mode = derived_mode
+        self._assist_mode = derived_mode.coding_mode
+        self._agent_mode = derived_mode.agent_mode
+        self._repair_enabled = derived_mode is AutonomyMode.REPAIR
+        if self._assist_mode and not registry_has_writes and policy is None:
             raise ValueError("agent mode requires the assist tool registry")
-        self._agent_mode = agent_mode
-        self._repair_enabled = repair_enabled
         effective_tool_limit = (
             DEFAULT_MAX_REPAIR_TOOL_EXECUTIONS
             if max_tool_executions is None and self._repair_enabled
@@ -282,7 +321,11 @@ class RepositoryChatSession:
             raise ValueError("max_tool_executions must be a positive integer or None")
         self._executor = ToolExecutor(
             self._registry,
-            policy if policy is not None else create_readonly_repository_policy(),
+            policy
+            if policy is not None
+            else interaction_policy
+            if interaction_policy is not None
+            else create_readonly_repository_policy(),
         )
         self._context = ExecutionContext(_resolve_selected_workspace(workspace))
         self._conversation = Conversation(
@@ -311,6 +354,12 @@ class RepositoryChatSession:
         self._active_agent_task: AgentTaskState | None = None
         self._last_agent_task: AgentTaskResult | None = None
         self._agent_stop_hint: AgentStopReason | None = None
+        LOGGER.info(
+            "Repository session policy mode=%s permissions=%s tools=%d",
+            self._mode.value,
+            self._interaction_policy.permission_profile.name,
+            len(self._registry.metadata),
+        )
 
     @property
     def conversation(self) -> Conversation:
@@ -350,17 +399,16 @@ class RepositoryChatSession:
             build_configured=_project_configured(self._registry, "project.build"),
             test_configured=_project_configured(self._registry, "project.test"),
             mutation_generation=self._mutation_generation,
-            autonomy_mode=(
-                AutonomyMode.AGENT
-                if self._agent_mode
-                else AutonomyMode.ASSIST
-                if self._assist_mode
-                else AutonomyMode.READ
-            ),
+            autonomy_mode=(self._mode),
             agent_mode=self._agent_mode,
             iteration_limit=self._max_steps,
             tool_limit=self._max_tool_executions,
             repair_enabled=self._repair_enabled,
+            permission_profile=self._interaction_policy.permission_profile.name,
+            read_permission=self._interaction_policy.permission_profile.read,
+            write_permission=self._interaction_policy.permission_profile.write,
+            build_permission=self._interaction_policy.permission_profile.build,
+            test_permission=self._interaction_policy.permission_profile.test,
         )
 
     def set_approval_callback(

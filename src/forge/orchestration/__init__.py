@@ -1,12 +1,12 @@
 """Bounded backend-independent repository orchestration."""
 
+from forge.interaction import AutonomyMode
 from forge.orchestration.agent_task import (
     AgentCancelled,
     AgentPhase,
     AgentStopReason,
     AgentTaskResult,
     AgentTaskState,
-    AutonomyMode,
 )
 from forge.orchestration.coding_task import (
     CodingTaskPhase,

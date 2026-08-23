@@ -12,13 +12,6 @@ from forge.orchestration.coding_task import (
 )
 
 
-class AutonomyMode(Enum):
-    CHAT = "chat"
-    READ = "read"
-    ASSIST = "assist"
-    AGENT = "agent"
-
-
 class AgentPhase(Enum):
     ANALYZING = "analyzing"
     ACTING = "acting"

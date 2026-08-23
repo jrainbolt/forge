@@ -35,16 +35,28 @@ def run_repl(
     output_fn(f"Forge [{info.profile_name}]")
     if isinstance(session, RepositoryChatSession):
         output_fn(f"Workspace: {info.workspace}")
-        mode = (
-            "agent repair (bounded; two writes maximum; approval required)"
+        legacy_access = (
+            "agent repair"
             if info.repair_enabled
-            else "agent (bounded; writes and project execution require approval)"
+            else "agent"
             if info.agent_mode
-            else "assist (writes and project execution require approval)"
+            else "assist"
             if info.assist_mode
             else "read-only"
         )
-        output_fn(f"Repository access: {mode}")
+        output_fn(f"Repository access: {legacy_access}")
+        output_fn(f"Mode: {info.autonomy_mode.value.upper()}")
+        output_fn(f"Permissions: {info.permission_profile}")
+        output_fn(
+            "Reads: "
+            + _permission_label(info.read_permission)
+            + " | Writes: "
+            + _permission_label(info.write_permission)
+            + " | Build/Test: "
+            + _permission_label(info.build_permission)
+            + "/"
+            + _permission_label(info.test_permission)
+        )
         if info.assist_mode:
             session.set_approval_callback(
                 _approval_prompt(
@@ -163,6 +175,11 @@ def _run_command(
                     f"\niteration limit: {info.iteration_limit}"
                     f"\ntool limit: {info.tool_limit}"
                     f"\nrepair enabled: {'yes' if info.repair_enabled else 'no'}"
+                    f"\npermissions: {info.permission_profile}"
+                    f"\nread: {info.read_permission.value}"
+                    f"\nwrite: {info.write_permission.value}"
+                    f"\nbuild: {info.build_permission.value}"
+                    f"\ntest: {info.test_permission.value}"
                 )
         output_fn(rendered)
     elif command == "/exit":
@@ -171,6 +188,11 @@ def _run_command(
     else:
         output_fn(f"Unknown command: {command}. Type /help for commands.")
     return False
+
+
+def _permission_label(decision: object) -> str:
+    value = getattr(decision, "value", "deny")
+    return {"allow": "automatic", "ask": "approval required"}.get(value, "denied")
 
 
 def _approval_prompt(

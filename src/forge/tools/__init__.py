@@ -8,6 +8,7 @@ from forge.tools.builtin import (
     create_assist_repository_registry,
     create_readonly_repository_policy,
     create_readonly_repository_registry,
+    create_repository_registry,
 )
 from forge.tools.executor import ToolExecutor
 from forge.tools.git import GitDiffTool, GitStatusTool
@@ -52,6 +53,7 @@ from forge.tools.types import (
     ExecutionContext,
     InvocationApproval,
     PermissionDecision,
+    ToolCapability,
     ToolErrorKind,
     ToolEvidence,
     ToolExecutionMetadata,
@@ -94,6 +96,7 @@ __all__ = [
     "Tool",
     "ToolError",
     "ToolErrorKind",
+    "ToolCapability",
     "ToolEvidence",
     "ToolExecutionMetadata",
     "ToolExecutor",
@@ -111,6 +114,7 @@ __all__ = [
     "create_assist_repository_registry",
     "create_readonly_repository_policy",
     "create_readonly_repository_registry",
+    "create_repository_registry",
     "resolve_workspace_path",
     "resolve_workspace_write_path",
     "preview_repository_mutation",

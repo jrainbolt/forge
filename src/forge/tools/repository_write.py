@@ -25,6 +25,7 @@ from forge.tools.types import (
     ArgumentType,
     ExecutionContext,
     StructuredValue,
+    ToolCapability,
     ToolEvidence,
     ToolMetadata,
     ToolRisk,
@@ -67,6 +68,7 @@ class WriteFileTool(Tool):
         ),
         ToolRisk.WRITE,
         ToolEvidence.WRITE_SUCCESS,
+        ToolCapability.WRITE,
     )
 
     @property
@@ -109,6 +111,7 @@ class ApplyPatchTool(Tool):
         ),
         ToolRisk.WRITE,
         ToolEvidence.PATCH_SUCCESS,
+        ToolCapability.WRITE,
     )
 
     @property

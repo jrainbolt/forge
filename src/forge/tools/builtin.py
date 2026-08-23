@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from forge.interaction import InteractionPolicy
 from forge.project_config import ProjectCommands
 from forge.tools.git import GitDiffTool, GitStatusTool
 from forge.tools.permissions import RuleBasedPolicy
@@ -68,3 +72,25 @@ def create_assist_repository_policy() -> RuleBasedPolicy:
     rules.update({name: PermissionDecision.ASK for name in WRITE_TOOL_NAMES})
     rules.update({name: PermissionDecision.ASK for name in PROJECT_TOOL_NAMES})
     return RuleBasedPolicy(rules)
+
+
+def create_repository_registry(
+    interaction: InteractionPolicy,
+    commands: ProjectCommands | None = None,
+) -> ToolRegistry:
+    """Create one fixed registry under autonomy ceiling and permanent DENYs."""
+    configured = commands or ProjectCommands()
+    candidates = (
+        ListDirectoryTool(),
+        ReadFileTool(),
+        SearchFilesTool(),
+        GitStatusTool(),
+        GitDiffTool(),
+        WriteFileTool(),
+        ApplyPatchTool(),
+        ProjectCommandTool("build", configured.build),
+        ProjectCommandTool("test", configured.test),
+    )
+    return ToolRegistry(
+        tool for tool in candidates if interaction.exposes(tool.metadata)
+    )

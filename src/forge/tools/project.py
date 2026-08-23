@@ -20,6 +20,7 @@ from forge.tools.types import (
     ArgumentSchema,
     ExecutionContext,
     StructuredValue,
+    ToolCapability,
     ToolEvidence,
     ToolMetadata,
     ToolRisk,
@@ -78,6 +79,7 @@ class ProjectCommandTool(Tool):
             ArgumentSchema(),
             ToolRisk.EXECUTE,
             evidence,
+            ToolCapability.BUILD if operation == "build" else ToolCapability.TEST,
         )
 
     @property

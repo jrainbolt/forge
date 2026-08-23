@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from forge.tools.tool import Tool
 from forge.tools.types import ToolMetadata, validate_tool_name
@@ -37,3 +37,9 @@ class ToolRegistry:
     @property
     def metadata(self) -> tuple[ToolMetadata, ...]:
         return tuple(self._tools[name].metadata for name in sorted(self._tools))
+
+    def filtered(self, predicate: Callable[[ToolMetadata], bool]) -> ToolRegistry:
+        """Return a fresh immutable-composition view selected by safe metadata."""
+        return ToolRegistry(
+            tool for tool in self._tools.values() if predicate(tool.metadata)
+        )

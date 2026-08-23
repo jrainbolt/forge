@@ -150,3 +150,11 @@ Scoring checks the initial mutation and failure, repair eligibility, the two-mut
 ceiling, per-operation two-attempt ceiling, truthful final status/stop reason, and
 absence of unexpected paths. Tests byte-check the committed fixture. There is no LLM
 grader, automatic approval, evaluator-only write path, or cross-task mutation leak.
+
+## Autonomy policy coverage
+
+A14 adds deterministic infrastructure tests rather than another model-quality suite.
+They exhaustively exercise the built-in permission matrix, autonomy ceilings,
+production tool classifications, immutable snapshots, trusted configured execution,
+write approval, and existing AGENT/REPAIR budgets. The frozen `coding-v1`,
+`coding-write-v1`, `agent-v1`, and `repair-v1` definitions and scoring are unchanged.

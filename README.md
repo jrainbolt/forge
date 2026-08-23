@@ -267,6 +267,35 @@ Reverification is separately approved. A second verification failure ends the lo
 process-start and missing-command failures grant no repair authority. Approved
 changes persist without automatic rollback.
 
+A14’s preferred syntax selects orchestration and permissions independently:
+
+```bash
+forge chat \
+  --model qwen-small \
+  --config ~/Models/forge/forge.toml \
+  --workspace . \
+  --mode agent \
+  --permissions confirm
+```
+
+For automatic execution of trusted configured build/test commands while keeping every
+write approval-gated:
+
+```bash
+forge chat \
+  --model qwen-small \
+  --config ~/Models/forge/forge.toml \
+  --workspace . \
+  --mode repair \
+  --permissions trusted-exec
+```
+
+Built-in profiles are deliberately small: `safe` allows reads and denies everything
+else; `confirm` allows reads and asks for writes/build/tests; `trusted-exec` allows
+reads and configured build/tests automatically but still asks for writes. No built-in
+profile auto-allows writes. Legacy `--workspace`, `--assist`, `--agent`, and
+`--agent --repair` forms remain supported and map to READ, ASSIST, AGENT, and REPAIR.
+
 Run the controlled read-only coding evaluation locally with:
 
 ```bash

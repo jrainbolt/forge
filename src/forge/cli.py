@@ -18,6 +18,11 @@ from forge.evaluation import (
     render_terminal_report,
     write_json_report,
 )
+from forge.interaction import (
+    BUILTIN_PERMISSION_PROFILES,
+    AutonomyMode,
+    resolve_interaction_policy,
+)
 from forge.logging import configure_logging
 from forge.models import (
     GenerationConfig,
@@ -32,8 +37,7 @@ from forge.project_config import ProjectCommands
 from forge.repl import run_repl
 from forge.session import DEFAULT_SYSTEM_MESSAGE, ChatSession
 from forge.tools import (
-    create_assist_repository_policy,
-    create_assist_repository_registry,
+    create_repository_registry,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -89,6 +93,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     chat.add_argument(
+        "--mode",
+        choices=tuple(mode.value for mode in AutonomyMode),
+        help="explicit autonomy mode: chat, read, assist, agent, or repair",
+    )
+    chat.add_argument(
+        "--permissions",
+        choices=tuple(BUILTIN_PERMISSION_PROFILES),
+        help="permission profile: safe, confirm, or trusted-exec",
+    )
+    chat.add_argument(
         "--repair",
         action="store_true",
         help="allow one approval-gated repair after qualifying verification failure",
@@ -130,14 +144,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             LOGGER.error("chat requires --config or FORGE_CONFIG")
             return 2
         try:
+            mode = _resolve_chat_mode(args)
+            interaction = resolve_interaction_policy(mode, args.permissions)
             if args.workspace is not None and args.no_system:
                 raise ValueError("--no-system cannot be used with repository chat")
-            if args.assist and args.workspace is None:
-                raise ValueError("--assist requires --workspace")
-            if args.agent and args.workspace is None:
-                raise ValueError("--agent requires --workspace")
-            if args.repair and not args.agent:
-                raise ValueError("--repair requires --agent")
+            if mode.repository_mode and args.workspace is None:
+                if args.assist:
+                    raise ValueError("--assist requires --workspace")
+                if args.agent:
+                    raise ValueError("--agent requires --workspace")
+                raise ValueError(f"--mode {mode.value} requires --workspace")
+            if mode is AutonomyMode.CHAT and args.workspace is not None:
+                raise ValueError("--mode chat cannot be used with --workspace")
             generation = GenerationConfig(
                 max_tokens=args.max_tokens,
                 temperature=args.temperature,
@@ -152,7 +170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.model,
                 time.perf_counter() - load_started,
             )
-            if args.workspace is None:
+            if mode is AutonomyMode.CHAT:
                 session = ChatSession(
                     args.model,
                     model,
@@ -166,19 +184,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.workspace,
                     generation=generation,
                     registry=(
-                        create_assist_repository_registry(
-                            getattr(catalog, "project_commands", ProjectCommands())
+                        create_repository_registry(
+                            interaction,
+                            getattr(catalog, "project_commands", ProjectCommands()),
                         )
-                        if args.assist or args.agent
-                        else None
                     ),
-                    policy=(
-                        create_assist_repository_policy()
-                        if args.assist or args.agent
-                        else None
-                    ),
-                    agent_mode=args.agent,
-                    repair_enabled=args.repair,
+                    policy=interaction,
+                    mode=mode,
+                    interaction_policy=interaction,
                 )
             with model, session:
                 return run_repl(session)
@@ -226,3 +239,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 LOGGER.debug("Evaluation failed", exc_info=True)
             return 2
     return 0
+
+
+def _resolve_chat_mode(args: argparse.Namespace) -> AutonomyMode:
+    legacy_selected = args.assist or args.agent or args.repair
+    if args.mode is not None and legacy_selected:
+        raise ValueError(
+            "--mode cannot be combined with --assist, --agent, or --repair"
+        )
+    if args.mode is not None:
+        return AutonomyMode(args.mode)
+    if args.repair and not args.agent:
+        raise ValueError("--repair requires --agent")
+    if args.repair:
+        return AutonomyMode.REPAIR
+    if args.agent:
+        return AutonomyMode.AGENT
+    if args.assist:
+        return AutonomyMode.ASSIST
+    return AutonomyMode.READ if args.workspace is not None else AutonomyMode.CHAT

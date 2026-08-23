@@ -20,6 +20,7 @@ from forge.tools.types import (
     ArgumentType,
     ExecutionContext,
     StructuredValue,
+    ToolCapability,
     ToolEvidence,
     ToolMetadata,
     ToolRisk,
@@ -59,6 +60,7 @@ class ListDirectoryTool(Tool):
         ),
         ToolRisk.READ_ONLY,
         ToolEvidence.DISCOVERY,
+        ToolCapability.READ,
     )
 
     @property
@@ -103,6 +105,7 @@ class ReadFileTool(Tool):
         ),
         ToolRisk.READ_ONLY,
         ToolEvidence.SOURCE_CONTENT,
+        ToolCapability.READ,
     )
 
     @property
@@ -169,6 +172,7 @@ class SearchFilesTool(Tool):
         ),
         ToolRisk.READ_ONLY,
         ToolEvidence.DISCOVERY,
+        ToolCapability.READ,
     )
 
     @property

@@ -77,6 +77,9 @@ def test_chat_help_succeeds_without_constructing_model(
     assert "--workspace" in output
     assert "--assist" in output
     assert "--agent" in output
+    assert "--mode" in output
+    assert "--permissions" in output
+    assert "trusted-exec" in output
 
 
 def test_assist_and_agent_are_mutually_exclusive(
@@ -117,6 +120,37 @@ def test_repair_requires_agent(
         == 2
     )
     assert "--repair requires --agent" in caplog.text
+
+
+def test_explicit_mode_conflicts_with_legacy_flags(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    result = main(
+        [
+            "chat",
+            "--model",
+            "fixture",
+            "--config",
+            str(tmp_path / "forge.toml"),
+            "--workspace",
+            str(tmp_path),
+            "--mode",
+            "agent",
+            "--assist",
+        ]
+    )
+    assert result == 2
+    assert "--mode cannot be combined" in caplog.text
+
+
+@pytest.mark.parametrize("option", ("--mode", "--permissions"))
+def test_invalid_mode_or_permission_is_rejected_by_parser(
+    option: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["chat", "--model", "fixture", option, "unknown"])
+    assert exit_info.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
 
 
 def test_eval_help_succeeds_without_constructing_model(
@@ -442,3 +476,56 @@ def test_repair_flag_selects_explicit_larger_bounded_mode(
         == 0
     )
     assert observed == {"repair": True, "iterations": 24, "tools": 18}
+
+
+def test_explicit_mode_and_permission_profile_reach_session_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = MockModel(("unused",))
+
+    class Catalog:
+        project_commands = None
+
+        def create(self, _name: str) -> MockModel:
+            return model
+
+    observed: dict[str, object] = {}
+
+    def inspect(session: object) -> int:
+        info = session.info  # type: ignore[attr-defined]
+        observed.update(
+            mode=info.autonomy_mode.value,
+            profile=info.permission_profile,
+            read=info.read_permission.value,
+            write=info.write_permission.value,
+            test=info.test_permission.value,
+        )
+        return 0
+
+    monkeypatch.setattr("forge.cli.load_model_catalog", lambda *_args: Catalog())
+    monkeypatch.setattr("forge.cli.run_repl", inspect)
+    assert (
+        main(
+            [
+                "chat",
+                "--model",
+                "fixture",
+                "--config",
+                str(tmp_path / "forge.toml"),
+                "--workspace",
+                str(tmp_path),
+                "--mode",
+                "agent",
+                "--permissions",
+                "trusted-exec",
+            ]
+        )
+        == 0
+    )
+    assert observed == {
+        "mode": "agent",
+        "profile": "trusted-exec",
+        "read": "allow",
+        "write": "ask",
+        "test": "allow",
+    }

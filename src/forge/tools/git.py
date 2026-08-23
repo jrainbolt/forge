@@ -14,6 +14,7 @@ from forge.tools.types import (
     ArgumentType,
     ExecutionContext,
     StructuredValue,
+    ToolCapability,
     ToolEvidence,
     ToolMetadata,
     ToolRisk,
@@ -31,6 +32,7 @@ class GitStatusTool(Tool):
         ArgumentSchema(),
         ToolRisk.READ_ONLY,
         ToolEvidence.GIT_WORKING_STATE,
+        ToolCapability.READ,
     )
 
     def __init__(self, *, runner: GitRunner | None = None) -> None:
@@ -69,6 +71,7 @@ class GitDiffTool(Tool):
         ),
         ToolRisk.READ_ONLY,
         ToolEvidence.GIT_WORKING_STATE,
+        ToolCapability.READ,
     )
 
     def __init__(self, *, runner: GitRunner | None = None) -> None:

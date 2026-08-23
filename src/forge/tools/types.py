@@ -52,6 +52,14 @@ class ToolRisk(Enum):
     EXECUTE = "execute"
 
 
+class ToolCapability(Enum):
+    UNCLASSIFIED = "unclassified"
+    READ = "read"
+    WRITE = "write"
+    BUILD = "build"
+    TEST = "test"
+
+
 class ToolEvidence(Enum):
     NONE = "none"
     DISCOVERY = "discovery"
@@ -138,6 +146,7 @@ class ToolMetadata:
     argument_schema: ArgumentSchema
     risk: ToolRisk = ToolRisk.UNSPECIFIED
     evidence: ToolEvidence = ToolEvidence.NONE
+    capability: ToolCapability = ToolCapability.UNCLASSIFIED
 
     def __post_init__(self) -> None:
         validate_tool_name(self.name)
@@ -148,6 +157,8 @@ class ToolMetadata:
             raise TypeError("risk must be a ToolRisk")
         if not isinstance(self.evidence, ToolEvidence):
             raise TypeError("evidence must be a ToolEvidence")
+        if not isinstance(self.capability, ToolCapability):
+            raise TypeError("capability must be a ToolCapability")
 
 
 @dataclass(frozen=True, slots=True)

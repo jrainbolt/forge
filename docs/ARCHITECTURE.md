@@ -587,6 +587,41 @@ persists after rejection, cancellation, context failure, or failed retest.
 Repair adds no shell, Git mutation, package installation, command discovery, network,
 automatic approval, background work, subagents, or parallel repair candidates.
 
+## Autonomy and permission profiles
+
+A14 separates two immutable axes. `AutonomyMode` selects orchestration and defines the
+maximum capability set: `CHAT` has none, `READ` has repository reads, `ASSIST` has the
+single-step one-mutation task, `AGENT` has bounded multi-step one-mutation behavior,
+and `REPAIR` has A13's conditional two-mutation loop. `PermissionProfile` independently
+maps explicitly classified READ, WRITE, BUILD, and TEST tools to A5 `ALLOW`, `ASK`, or
+`DENY` decisions.
+
+Autonomy is always the ceiling. A profile cannot expose a category absent from its
+mode, so CHAT stays tool-free and READ stays mutation/execution-free even under
+`trusted-exec`. Tools permanently denied by the selected profile are omitted from the
+fixed registry and structured schemas. ASK and ALLOW tools remain visible subject to
+the task phase. Every production tool declares a semantic capability; unclassified
+tools deny by default.
+
+Built-ins are `safe` (READ allow; all else deny), `confirm` (READ allow; WRITE/BUILD/
+TEST ask), and `trusted-exec` (READ/BUILD/TEST allow; WRITE ask). No built-in profile
+automatically allows writes. ALLOW removes only the approval prompt: registry lookup,
+argument validation, workspace confinement, coding/repair state, generations, attempt
+budgets, timeouts, output bounds, and termination guards remain authoritative.
+
+`InteractionPolicy` is the immutable composition passed to the registry, session, and
+executor. It is selected only by the application/user, logged at session creation, and
+never reread during a task. Model output, repository text, command diagnostics, or a
+later configuration-file edit cannot alter the active snapshot. Config-file defaults
+and custom profiles are intentionally not added in A14; CLI explicit values take
+precedence over conservative mode defaults (`safe` for CHAT/READ, `confirm` otherwise).
+
+The preferred CLI is `--mode MODE --permissions PROFILE`. Legacy workspace/assist/
+agent/repair flags translate once at the application boundary and cannot be mixed with
+`--mode`. Trusted execution applies only to predefined immutable project commands; it
+adds no shell, model-controlled argv, network, package, Git-write, or filesystem-delete
+capability.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values
