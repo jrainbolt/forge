@@ -28,8 +28,12 @@ from forge.tools import (
 EXPECTED_CAPABILITIES = {
     "git.diff": ToolCapability.READ,
     "git.status": ToolCapability.READ,
+    "repository.file_outline": ToolCapability.READ,
+    "repository.find_references": ToolCapability.READ,
+    "repository.find_symbol": ToolCapability.READ,
     "repository.list_directory": ToolCapability.READ,
     "repository.read_file": ToolCapability.READ,
+    "repository.read_range": ToolCapability.READ,
     "repository.search_files": ToolCapability.READ,
     "repository.apply_patch": ToolCapability.WRITE,
     "repository.write_file": ToolCapability.WRITE,

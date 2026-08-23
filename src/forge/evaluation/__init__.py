@@ -40,6 +40,9 @@ from forge.evaluation.scoring import score_task
 from forge.evaluation.tasks import (
     CODING_V1,
     CODING_V1_TASKS,
+    CONTEXT_SUITE_VERSION,
+    CONTEXT_V1,
+    CONTEXT_V1_TASKS,
     fixture_workspace,
     load_suite,
 )
@@ -67,6 +70,9 @@ __all__ = [
     "AgentTaskScore",
     "CODING_V1",
     "CODING_WRITE_V1",
+    "CONTEXT_SUITE_VERSION",
+    "CONTEXT_V1",
+    "CONTEXT_V1_TASKS",
     "CODING_WRITE_V1_TASKS",
     "CODING_WRITE_SUITE_VERSION",
     "REPAIR_SUITE_VERSION",

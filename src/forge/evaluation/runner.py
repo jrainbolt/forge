@@ -93,7 +93,7 @@ class EvaluationRunner:
                 dict.fromkeys(
                     record.path
                     for record in tools
-                    if record.name == "repository.read_file"
+                    if record.name in {"repository.read_file", "repository.read_range"}
                     and record.status == "success"
                     and record.path is not None
                 )
@@ -135,7 +135,12 @@ class EvaluationRunner:
 
 def _tool_record(activity: ToolActivity) -> ToolRecord:
     return ToolRecord(
-        activity.tool_name, activity.status, activity.evidence, activity.path
+        activity.tool_name,
+        activity.status,
+        activity.evidence,
+        activity.path,
+        activity.returned_bytes,
+        activity.returned_lines,
     )
 
 

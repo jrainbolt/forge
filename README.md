@@ -296,6 +296,14 @@ reads and configured build/tests automatically but still asks for writes. No bui
 profile auto-allows writes. Legacy `--workspace`, `--assist`, `--agent`, and
 `--agent --repair` forms remain supported and map to READ, ASSIST, AGENT, and REPAIR.
 
+Repository modes also provide bounded Python symbol intelligence. Forge can inspect a
+file outline, find exact simple or qualified definitions, locate structural reference
+candidates, and read a targeted line range with the file's current SHA-256. These
+operations analyze the workspace on demand and remain ordinary read-only tools; they
+are not a persistent index, semantic call graph, embedding search, or refactoring
+engine. Actual source ranges or files must still be read before an implementation
+answer or provenance-constrained write.
+
 Run the controlled read-only coding evaluation locally with:
 
 ```bash
@@ -304,6 +312,10 @@ forge eval \
   --config ~/Models/forge/forge.toml \
   --suite coding-v1
 ```
+
+Use `--suite context-v1` to run five focused structural-navigation tasks and compare
+whole-file reads, targeted range reads, returned bytes/lines, grounding, and tool
+counts.
 
 An optional versioned JSON report is written only when requested:
 

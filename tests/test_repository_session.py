@@ -660,11 +660,11 @@ def test_large_tool_result_that_cannot_fit_current_turn_fails_safely(
     assert session.conversation.turns == ()
 
 
-def test_registry_exposes_exactly_five_read_only_tools(workspace: Path) -> None:
+def test_registry_exposes_exactly_nine_read_only_tools(workspace: Path) -> None:
     session = RepositoryChatSession(
         "fixture",
         MockModel((final("Answer"),)),
         workspace,
         registry=create_readonly_repository_registry(),
     )
-    assert session.info.available_tools == 5
+    assert session.info.available_tools == 9

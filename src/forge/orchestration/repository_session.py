@@ -43,7 +43,6 @@ from forge.orchestration.protocol import (
     ToolCallOutcome,
     build_repository_output,
     parse_model_output,
-    render_tool_definitions,
     render_tool_result,
 )
 from forge.tools import (
@@ -134,6 +133,8 @@ class ToolActivity:
     current_source: bool = True
     generation: int = 0
     current_verification: bool = False
+    returned_bytes: int | None = None
+    returned_lines: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -698,7 +699,7 @@ class RepositoryChatSession:
                 else:
                     result = self._execute_project_proposal(invocation, result)
             if (
-                call.tool_name == "repository.read_file"
+                call.tool_name in {"repository.read_file", "repository.read_range"}
                 and result.status is ToolResultStatus.SUCCESS
             ):
                 path = call.arguments.get("path")
@@ -727,6 +728,8 @@ class RepositoryChatSession:
                     and evidence
                     in {ToolEvidence.BUILD_RESULT, ToolEvidence.TEST_RESULT}
                 ),
+                returned_bytes=_output_integer(result, "size_bytes"),
+                returned_lines=_returned_lines(result),
             )
             activities.append(activity)
             if (
@@ -931,7 +934,7 @@ def _repository_system_prompt(
     agent_mode: bool = False,
     repair_enabled: bool = False,
 ) -> str:
-    definitions = render_tool_definitions(registry)
+    definitions = _render_prompt_tool_definitions(registry)
     build_availability = (
         "available" if _project_configured(registry, "project.build") else "unavailable"
     )
@@ -997,8 +1000,11 @@ def _repository_system_prompt(
         "Every response must be exactly one JSON object matching the requested "
         "tool_call-or-final schema. Never add prose or code fences outside JSON. "
         "For repository questions, inspect relevant source contents before the final "
-        "answer. If you need to locate code, use repository.search_files first, then "
-        "use repository.read_file on likely source files. Search and directory results "
+        "answer. Use repository.find_symbol for known Python symbols, file_outline "
+        "to understand a file, read_range for targeted implementation context, and "
+        "find_references for structural reference candidates. Use search_files and "
+        "read_file when structural tools are insufficient. Structural, search, and "
+        "directory results "
         "are discovery evidence only. Prefer implementation source over documentation "
         "when asked how code works. Git tools describe only current changes and do not "
         "provide implementation evidence. Never claim to have read data that was not "
@@ -1010,8 +1016,9 @@ def _repository_system_prompt(
         "You cannot run arbitrary shell commands, use the network, or "
         "invent results. "
         "If current evidence is insufficient, request another tool; do not guess. "
-        "If read_file fails, search for the symbol or concept and read an existing "
-        "candidate before finalizing. Only a successful read supplies source evidence. "
+        "If a source read fails, search for the symbol or concept and read an existing "
+        "candidate before finalizing. Only a successful read_file or read_range "
+        "supplies source evidence. "
         "Never invent a file path; copy exact paths from tool results. "
         "Documentation reads are discovery only and do not satisfy implementation "
         "evidence. Read a source file whose contents are relevant to the user's exact "
@@ -1024,6 +1031,26 @@ def _repository_system_prompt(
         "repository-relative files and symbols in final answers. Available tool "
         "metadata:\n"
         f"{definitions}"
+    )
+
+
+def _render_prompt_tool_definitions(registry: ToolRegistry) -> str:
+    """Render concise guidance; the output specification owns exact schemas."""
+    tools = []
+    for metadata in registry.metadata:
+        arguments = [
+            argument.name + ("" if argument.required else "?")
+            for argument in metadata.argument_schema.arguments
+        ]
+        tools.append(
+            {
+                "arguments": arguments,
+                "description": metadata.description,
+                "name": metadata.name,
+            }
+        )
+    return json.dumps(
+        {"tools": tools}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
 
 
@@ -1065,6 +1092,25 @@ def _activity_path(result: ToolResult, arguments: Mapping[str, object]) -> str |
             return output_path
     value = arguments.get("path")
     return value if isinstance(value, str) else None
+
+
+def _output_integer(result: ToolResult, key: str) -> int | None:
+    if isinstance(result.output, Mapping):
+        value = result.output.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
+
+
+def _returned_lines(result: ToolResult) -> int | None:
+    if result.tool_name == "repository.read_range" and isinstance(
+        result.output, Mapping
+    ):
+        start = result.output.get("actual_start_line")
+        end = result.output.get("actual_end_line")
+        if isinstance(start, int) and isinstance(end, int):
+            return end - start + 1
+    return None
 
 
 def _tool_evidence(
@@ -1295,7 +1341,7 @@ def _update_observations(
         result.output, Mapping
     ):
         return
-    if result.tool_name == "repository.read_file":
+    if result.tool_name in {"repository.read_file", "repository.read_range"}:
         path = result.output.get("path")
         digest = result.output.get("sha256")
         if isinstance(path, str) and isinstance(digest, str):
@@ -1316,7 +1362,7 @@ def _is_relevant_source(
     output = result.output
     if not isinstance(output, Mapping):
         return False
-    content = output.get("content")
+    content = output.get("content", output.get("text"))
     if not isinstance(content, str):
         return False
     terms = {
@@ -1358,10 +1404,14 @@ def _update_candidates(
         result.output, Mapping
     ):
         return
-    if result.tool_name == "repository.search_files":
-        matches = result.output.get("matches")
+    if result.tool_name in {
+        "repository.search_files",
+        "repository.find_symbol",
+        "repository.find_references",
+    }:
+        matches = result.output.get("matches", result.output.get("references"))
         if isinstance(matches, tuple):
-            query = result.output.get("query")
+            query = result.output.get("query", result.output.get("symbol"))
             preferred_stems = (
                 {component.casefold() for component in query.split(".") if component}
                 if isinstance(query, str) and "." in query
@@ -1381,6 +1431,11 @@ def _update_candidates(
                     path = match["path"]
                     candidate_files.add(path)
                     candidate_directories.add(str(Path(path).parent).replace("\\", "/"))
+    elif result.tool_name == "repository.file_outline":
+        path = result.output.get("path")
+        if isinstance(path, str):
+            candidate_files.add(path)
+            candidate_directories.add(str(Path(path).parent).replace("\\", "/"))
     elif result.tool_name == "repository.list_directory":
         entries = result.output.get("entries")
         if isinstance(entries, tuple):

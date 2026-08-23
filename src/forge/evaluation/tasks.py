@@ -7,6 +7,8 @@ from pathlib import Path
 from forge.evaluation.types import EvaluationTask, RequiredFact, TaskCategory
 
 CODING_V1 = "coding-v1"
+CONTEXT_V1 = "context-v1"
+CONTEXT_SUITE_VERSION = 1
 
 
 def fixture_workspace() -> Path:
@@ -158,8 +160,75 @@ CODING_V1_TASKS = (
     ),
 )
 
+CONTEXT_V1_TASKS = (
+    EvaluationTask(
+        "C01",
+        TaskCategory.CONTEXT,
+        "Where is RetryPolicy.should_retry defined? Give its exact file and symbol.",
+        ("src/tinyqueue/retry.py",),
+        (_fact("retrypolicy.should_retry", "should_retry"),),
+        ("src/tinyqueue/retry.py",),
+        ("RetryPolicy.should_retry",),
+        3,
+    ),
+    EvaluationTask(
+        "C02",
+        TaskCategory.CONTEXT,
+        "Explain RetryPolicy.should_retry using targeted source context, without "
+        "reading unrelated files.",
+        ("src/tinyqueue/retry.py",),
+        (_fact("<=", "less than or equal"), _fact("max_attempts")),
+        ("src/tinyqueue/retry.py",),
+        ("RetryPolicy.should_retry",),
+        3,
+    ),
+    EvaluationTask(
+        "C03",
+        TaskCategory.CONTEXT,
+        "Where is RetryPolicy.should_retry referenced? Identify structural candidates.",
+        ("src/tinyqueue/service.py",),
+        (_fact("service.py"), _fact("fail")),
+        ("src/tinyqueue/service.py",),
+        ("should_retry",),
+        4,
+    ),
+    EvaluationTask(
+        "C04",
+        TaskCategory.CONTEXT,
+        "Which tests reference RetryPolicy.should_retry or exercise its boundary?",
+        ("tests/test_retry.py",),
+        (_fact("test_retry_stops_at_limit"), _fact("attempts=3", "attempts = 3")),
+        ("tests/test_retry.py",),
+        ("should_retry",),
+        4,
+    ),
+    EvaluationTask(
+        "C05",
+        TaskCategory.CONTEXT,
+        "Trace RetryPolicy.should_retry from its definition to the service caller "
+        "and the focused test using structural lookups and targeted reads.",
+        (
+            "src/tinyqueue/retry.py",
+            "src/tinyqueue/service.py",
+            "tests/test_retry.py",
+        ),
+        (_fact("retrypolicy"), _fact("queueservice", "service"), _fact("test_retry")),
+        (
+            "src/tinyqueue/retry.py",
+            "src/tinyqueue/service.py",
+            "tests/test_retry.py",
+        ),
+        ("should_retry",),
+        7,
+    ),
+)
+
 
 def load_suite(name: str) -> tuple[EvaluationTask, ...]:
-    if name != CODING_V1:
-        raise ValueError(f"unknown evaluation suite {name!r}; available: {CODING_V1}")
-    return CODING_V1_TASKS
+    if name == CODING_V1:
+        return CODING_V1_TASKS
+    if name == CONTEXT_V1:
+        return CONTEXT_V1_TASKS
+    raise ValueError(
+        f"unknown evaluation suite {name!r}; available: {CODING_V1}, {CONTEXT_V1}"
+    )

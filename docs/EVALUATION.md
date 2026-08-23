@@ -158,3 +158,23 @@ They exhaustively exercise the built-in permission matrix, autonomy ceilings,
 production tool classifications, immutable snapshots, trusted configured execution,
 write approval, and existing AGENT/REPAIR budgets. The frozen `coding-v1`,
 `coding-write-v1`, `agent-v1`, and `repair-v1` definitions and scoring are unchanged.
+
+## context-v1
+
+A15 adds five deterministic TinyQueue navigation tasks. C01 locates an exact qualified
+method, C02 explains it from a targeted range, C03 finds service reference candidates,
+C04 traces focused test coverage, and C05 combines definition, caller, and test
+evidence across files. Private ground truth continues to declare required files,
+facts, symbols, and tool thresholds without exposing them in prompts.
+
+The suite uses the production read-only session, executor, policy, workspace
+confinement, and source-grounding rules. Reports count all tools and inspected files
+and now distinguish `repository.read_file` from `repository.read_range`, recording
+returned bytes and lines when available. This makes whole-file reads, range reads,
+files inspected, context volume, grounding, completion, and tool count directly
+comparable. Structural discovery alone receives no source grounding credit.
+
+`find_references` scores bounded structural candidates rather than a perfect semantic
+call graph. Normal CI uses scripted models only; real qwen-small runs remain optional
+and are not score gates. Historical `coding-v1`, `coding-write-v1`, `agent-v1`, and
+`repair-v1` task definitions and scores are unchanged.

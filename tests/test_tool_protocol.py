@@ -176,16 +176,24 @@ def test_tool_definitions_are_deterministic_schema_derived_and_categorized() -> 
     assert [tool["name"] for tool in payload["tools"]] == [
         "git.diff",
         "git.status",
+        "repository.file_outline",
+        "repository.find_references",
+        "repository.find_symbol",
         "repository.list_directory",
         "repository.read_file",
+        "repository.read_range",
         "repository.search_files",
     ]
     evidence = {tool["name"]: tool["evidence"] for tool in payload["tools"]}
     assert evidence == {
         "git.diff": "git_working_state",
         "git.status": "git_working_state",
+        "repository.file_outline": "discovery",
+        "repository.find_references": "discovery",
+        "repository.find_symbol": "discovery",
         "repository.list_directory": "discovery",
         "repository.read_file": "source_content",
+        "repository.read_range": "source_content",
         "repository.search_files": "discovery",
     }
     assert render_tool_definitions(create_readonly_repository_registry()) == rendered

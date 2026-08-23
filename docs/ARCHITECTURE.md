@@ -622,6 +622,41 @@ agent/repair flags translate once at the application boundary and cannot be mixe
 adds no shell, model-controlled argv, network, package, Git-write, or filesystem-delete
 capability.
 
+## Repository analyzers and symbol intelligence
+
+A15 adds a small model-independent analyzer boundary. `PythonAnalyzer` uses the
+standard-library AST to extract source-ordered class, function, async-function,
+method, and nested-definition locations. Non-Python UTF-8 files receive only an
+explicit generic text classification; Forge does not apply regex language parsers or
+claim structural support for them.
+
+Four read-only tools expose this boundary. `repository.file_outline` returns bounded
+definitions and actual AST line ranges. `repository.find_symbol` performs exact simple
+or file-local qualified-name matching. `repository.find_references` returns Python AST
+reference candidates with bounded snippets and containing definitions; it is not a
+complete semantic call graph and does not promise cross-module type or alias
+resolution. `repository.read_range` reads an inclusive 1-based line interval and
+returns the SHA-256 of the complete current file.
+
+Outline, definition, and reference results are discovery evidence. Their returned
+paths may authorize a subsequent confined source read, but locations alone do not
+satisfy implementation grounding. A successful range read is source-content evidence,
+and its full-file hash may establish the same current-turn write provenance as a full
+file read. Existing compare-before-write checks still reject stale hashes.
+
+All paths use the A6 resolver and walker, including ignored-directory and symlink
+rules. Structural requests scan at most 2,000 files, parse at most 512 KiB per file,
+return at most 500 outline definitions, 100 symbol matches, or 200 reference
+candidates, and bound snippets to 300 characters. Range reads permit at most 400 lines
+and 128 KiB of returned text. Parser failures are explicit for direct outlines and are
+counted and skipped during workspace searches.
+
+Analysis occurs on demand. A15 adds no cache, persistent index, watcher, database,
+embedding, language server, or semantic retrieval subsystem, so mutations cannot
+leave stale analyzer state. All four tools declare `ToolCapability.READ`; CHAT remains
+tool-free, structural discovery grants no mutation or execution authority, and model
+or repository instructions cannot expand the fixed policy.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values

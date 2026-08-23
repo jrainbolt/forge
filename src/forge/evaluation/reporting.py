@@ -92,6 +92,8 @@ def _task_to_dict(result: TaskResult) -> dict[str, object]:
                 "status": tool.status,
                 "evidence": tool.evidence,
                 "path": tool.path,
+                "returned_bytes": tool.returned_bytes,
+                "returned_lines": tool.returned_lines,
             }
             for tool in result.tools
         ],

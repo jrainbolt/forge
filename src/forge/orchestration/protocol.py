@@ -76,7 +76,15 @@ def build_repository_output(
     branches: list[dict[str, object]] = []
     hashes = observed_hashes or {}
     for metadata in registry.metadata:
-        if metadata.name == "repository.read_file" and not candidate_files:
+        if (
+            metadata.name
+            in {
+                "repository.file_outline",
+                "repository.read_file",
+                "repository.read_range",
+            }
+            and not candidate_files
+        ):
             continue
         if metadata.name == "repository.search_files" and not candidate_queries:
             continue
@@ -122,7 +130,11 @@ def build_repository_output(
                     }
                 )
             if argument.name == "path":
-                if metadata.name == "repository.read_file":
+                if metadata.name in {
+                    "repository.file_outline",
+                    "repository.read_file",
+                    "repository.read_range",
+                }:
                     candidates = candidate_files
                 elif metadata.name == "repository.apply_patch":
                     candidates = set(hashes)
@@ -313,8 +325,8 @@ def render_tool_result(
                 )
             else:
                 payload["guidance"] = (
-                    "Discovery only: copy an exact returned candidate path into "
-                    "repository.read_file before answering implementation questions."
+                    "Discovery only: inspect actual source with repository.read_range "
+                    "or repository.read_file before answering implementation questions."
                 )
         elif evidence is ToolEvidence.SOURCE_CONTENT:
             payload["guidance"] = (
@@ -336,7 +348,7 @@ def render_tool_result(
             "kind": result.error_kind.value if result.error_kind is not None else None,
             "message": result.error_message,
         }
-        if result.tool_name == "repository.read_file":
+        if result.tool_name in {"repository.read_file", "repository.read_range"}:
             payload["guidance"] = (
                 "No source was inspected. Do not invent a path; search again or copy "
                 "an exact existing path from discovery results."
@@ -387,6 +399,8 @@ def _bounded_model_output(tool_name: str, output: object) -> object:
         return output
     if tool_name == "repository.read_file":
         _truncate_text_field(output, "content")
+    elif tool_name == "repository.read_range":
+        _truncate_text_field(output, "text")
     elif tool_name == "git.diff":
         _truncate_text_field(output, "diff")
     elif tool_name == "repository.search_files":

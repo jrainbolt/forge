@@ -107,7 +107,7 @@ def test_repository_repl_shows_workspace_tools_and_extended_info(
     assert "Repository access: read-only" in rendered
     assert "[tool] repository.read_file: evidence.txt (success)" in rendered
     assert "repository mode: read-only" in rendered
-    assert "available tools: 5" in rendered
+    assert "available tools: 9" in rendered
     assert "last tool count: 1" in rendered
     assert session.info.completed_turns == 0
     assert session.info.workspace == workspace.resolve()

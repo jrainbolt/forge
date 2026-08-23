@@ -20,6 +20,7 @@ class TaskCategory(Enum):
     BUG_EXPLAIN = "bug_explain"
     TEST_COVERAGE = "test_coverage"
     ARCHITECTURE = "architecture"
+    CONTEXT = "context"
 
 
 class FailureReason(Enum):
@@ -119,6 +120,8 @@ class ToolRecord:
     status: str
     evidence: str
     path: str | None = None
+    returned_bytes: int | None = None
+    returned_lines: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

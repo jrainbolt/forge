@@ -12,14 +12,24 @@ from forge.tools.permissions import RuleBasedPolicy
 from forge.tools.project import ProjectCommandTool
 from forge.tools.registry import ToolRegistry
 from forge.tools.repository import ListDirectoryTool, ReadFileTool, SearchFilesTool
+from forge.tools.repository_analysis import (
+    FileOutlineTool,
+    FindReferencesTool,
+    FindSymbolTool,
+    ReadRangeTool,
+)
 from forge.tools.repository_write import ApplyPatchTool, WriteFileTool
 from forge.tools.types import PermissionDecision
 
 READ_ONLY_TOOL_NAMES = (
     "git.diff",
     "git.status",
+    "repository.file_outline",
+    "repository.find_references",
+    "repository.find_symbol",
     "repository.list_directory",
     "repository.read_file",
+    "repository.read_range",
     "repository.search_files",
 )
 WRITE_TOOL_NAMES = ("repository.apply_patch", "repository.write_file")
@@ -33,6 +43,10 @@ def create_readonly_repository_registry() -> ToolRegistry:
             ListDirectoryTool(),
             ReadFileTool(),
             SearchFilesTool(),
+            FileOutlineTool(),
+            FindSymbolTool(),
+            FindReferencesTool(),
+            ReadRangeTool(),
             GitStatusTool(),
             GitDiffTool(),
         )
@@ -56,6 +70,10 @@ def create_assist_repository_registry(
             ListDirectoryTool(),
             ReadFileTool(),
             SearchFilesTool(),
+            FileOutlineTool(),
+            FindSymbolTool(),
+            FindReferencesTool(),
+            ReadRangeTool(),
             GitStatusTool(),
             GitDiffTool(),
             WriteFileTool(),
@@ -84,6 +102,10 @@ def create_repository_registry(
         ListDirectoryTool(),
         ReadFileTool(),
         SearchFilesTool(),
+        FileOutlineTool(),
+        FindSymbolTool(),
+        FindReferencesTool(),
+        ReadRangeTool(),
         GitStatusTool(),
         GitDiffTool(),
         WriteFileTool(),
