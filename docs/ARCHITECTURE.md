@@ -306,6 +306,33 @@ injection.
 A7 remains read-only. It adds no write, patch, shell, build, test, network,
 parallel-call, planning, autonomous-agent, or persistence capability.
 
+## Evaluation boundary
+
+The A8 evaluation package is separate from normal chat and orchestration. Its
+runner measures the production `RepositoryChatSession` against a controlled
+fixture, so model requests still travel through structured output, provenance,
+the central executor, A6 read-only tools, permission policy, and workspace
+confinement. There is no evaluator-only repository access or relaxed benchmark
+mode.
+
+`coding-v1` defines immutable tasks with private, explicit ground truth:
+required inspected files, normalized answer facts, expected file and symbol
+references, and coarse tool thresholds. Prompts do not disclose those criteria.
+Scoring is deterministic and reports correctness, grounding, localization,
+efficiency, and completion independently. Forge does not use an LLM grader,
+semantic grading, embeddings, or inferred evidence from answer prose.
+
+One loaded generic model is reused across a run. The repository conversation is
+cleared between independent tasks, and a failure is recorded without aborting
+later tasks. Reports retain bounded final answers and execution metadata but not
+source contents or internal transcripts. Versioned JSON is written only to an
+explicitly requested path.
+
+A8 establishes a local pre-write-access baseline for comparing compatible
+models and future orchestration changes with identical prompts and scoring.
+Normal CI exercises only deterministic scripted-model harness tests; it loads
+no GGUF model and enforces no real-model score threshold.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values

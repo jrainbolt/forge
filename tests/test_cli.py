@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import pytest
 
 from forge import __version__
 from forge.cli import main
+from forge.evaluation import EvaluationRun
 from forge.models import MockModel, ModelSelectionError
 
 
@@ -73,6 +75,77 @@ def test_chat_help_succeeds_without_constructing_model(
     output = capsys.readouterr().out
     assert "--model" in output
     assert "--workspace" in output
+
+
+def test_eval_help_succeeds_without_constructing_model(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "forge.cli.load_model_catalog",
+        lambda *_args: pytest.fail("help must not load configuration"),
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        main(["eval", "--help"])
+    assert exit_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "--model" in output
+    assert "--suite" in output
+    assert "--output" in output
+
+
+def test_eval_requires_configuration_path(caplog: pytest.LogCaptureFixture) -> None:
+    assert main(["eval", "--model", "fixture"]) == 2
+    assert "eval requires --config or FORGE_CONFIG" in caplog.text
+
+
+def test_eval_loads_model_once_writes_only_explicit_report(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = MockModel(("unused",))
+    workspace = tmp_path / "fixture"
+    workspace.mkdir()
+    output = tmp_path / "result.json"
+
+    class Catalog:
+        def create(self, name: str) -> MockModel:
+            assert name == "fixture"
+            return model
+
+    class Runner:
+        def __init__(self, profile: str, received: MockModel, root: Path) -> None:
+            assert (profile, received, root) == ("fixture", model, workspace)
+
+        def run(
+            self, suite: str, tasks: object, *, suite_version: int
+        ) -> EvaluationRun:
+            assert suite == "coding-v1"
+            assert tasks == ()
+            assert suite_version == 1
+            return EvaluationRun("coding-v1", 1, "fixture", (), 0.25)
+
+    monkeypatch.setattr("forge.cli.load_suite", lambda _name: ())
+    monkeypatch.setattr("forge.cli.fixture_workspace", lambda: workspace)
+    monkeypatch.setattr("forge.cli.load_model_catalog", lambda *_args: Catalog())
+    monkeypatch.setattr("forge.cli.EvaluationRunner", Runner)
+    assert (
+        main(
+            [
+                "eval",
+                "--model",
+                "fixture",
+                "--config",
+                str(tmp_path / "forge.toml"),
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    assert model.closed
+    assert json.loads(output.read_text())["schema_version"] == 1
+    assert "Evaluation workspace:" in capsys.readouterr().out
 
 
 def test_chat_requires_explicit_model(capsys: pytest.CaptureFixture[str]) -> None:

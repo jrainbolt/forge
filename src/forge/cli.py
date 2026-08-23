@@ -10,6 +10,14 @@ from pathlib import Path
 
 from forge import __version__
 from forge.config import ForgeConfig
+from forge.evaluation import (
+    SUITE_VERSION,
+    EvaluationRunner,
+    fixture_workspace,
+    load_suite,
+    render_terminal_report,
+    write_json_report,
+)
 from forge.logging import configure_logging
 from forge.models import (
     GenerationConfig,
@@ -63,6 +71,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-system",
         action="store_true",
         help="omit Forge's default system message",
+    )
+    evaluation = commands.add_parser(
+        "eval", help="run a controlled read-only coding evaluation"
+    )
+    evaluation.add_argument("--model", required=True, help="configured model profile")
+    evaluation.add_argument(
+        "--config", type=Path, help="model configuration path (or set FORGE_CONFIG)"
+    )
+    evaluation.add_argument("--suite", default="coding-v1")
+    evaluation.add_argument("--output", type=Path, help="explicit JSON report path")
+    evaluation.add_argument(
+        "--verbose", action="store_true", help="include answers and files in report"
     )
     return parser
 
@@ -123,5 +143,37 @@ def main(argv: Sequence[str] | None = None) -> int:
             LOGGER.error("%s", error)
             if config.verbose:
                 LOGGER.debug("Chat startup failed", exc_info=True)
+            return 2
+    if args.command == "eval":
+        config_path = args.config or config.model_config_path
+        if config_path is None:
+            LOGGER.error("eval requires --config or FORGE_CONFIG")
+            return 2
+        try:
+            tasks = load_suite(args.suite)
+            workspace = fixture_workspace().resolve(strict=True)
+            print(f"Evaluation workspace: {workspace}")
+            catalog = load_model_catalog(config_path, default_backend_registry())
+            model = catalog.create(args.model)
+            with model:
+                result = EvaluationRunner(args.model, model, workspace).run(
+                    args.suite, tasks, suite_version=SUITE_VERSION
+                )
+            print(render_terminal_report(result, verbose=args.verbose))
+            if args.output is not None:
+                write_json_report(result, args.output)
+                print(f"JSON report: {args.output}")
+            return 0
+        except (
+            ModelConfigurationError,
+            ModelSelectionError,
+            ModelError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as error:
+            LOGGER.error("%s", error)
+            if config.verbose:
+                LOGGER.debug("Evaluation failed", exc_info=True)
             return 2
     return 0

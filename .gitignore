@@ -9,4 +9,5 @@ build/
 *.egg-info/
 *.gguf
 forge.toml
+eval-results/
 .DS_Store

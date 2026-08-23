@@ -19,6 +19,7 @@ from forge.models import (
     ModelIdentity,
     ModelRequest,
     ModelResponse,
+    ModelUsage,
 )
 from forge.orchestration.protocol import (
     ToolCallOutcome,
@@ -96,6 +97,8 @@ class RepositoryResponse:
     model_response: ModelResponse
     tool_activity: tuple[ToolActivity, ...]
     protocol_corrections: int = 0
+    orchestration_steps: int = 1
+    usage: ModelUsage = ModelUsage()
 
     @property
     def text(self) -> str:
@@ -217,6 +220,7 @@ class RepositoryChatSession:
         invocation_ids: set[str] = set()
         call_counts: dict[str, int] = {}
         protocol_corrections = 0
+        response_usages: list[ModelUsage] = []
         candidate_files: set[str] = set()
         candidate_directories = {"."}
         candidate_queries = _candidate_search_queries(user_text)
@@ -244,6 +248,7 @@ class RepositoryChatSession:
                 ),
             )
             response = self._model.generate(structured_request)
+            response_usages.append(response.usage)
             try:
                 parsed = parse_model_output(response.text)
             except ValueError as error:
@@ -286,7 +291,11 @@ class RepositoryChatSession:
                 self._last_plan = plan
                 self._last_activity = tuple(activities)
                 return RepositoryResponse(
-                    answer_response, tuple(activities), protocol_corrections
+                    answer_response,
+                    tuple(activities),
+                    protocol_corrections,
+                    len(response_usages),
+                    _aggregate_usage(response_usages),
                 )
 
             call = parsed.tool_call
@@ -408,6 +417,19 @@ def _call_signature(tool_name: str, arguments: Mapping[str, object]) -> str:
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
+    )
+
+
+def _aggregate_usage(usages: list[ModelUsage]) -> ModelUsage:
+    inputs = [usage.input_tokens for usage in usages]
+    outputs = [usage.output_tokens for usage in usages]
+    return ModelUsage(
+        input_tokens=(
+            sum(inputs) if all(value is not None for value in inputs) else None
+        ),
+        output_tokens=(
+            sum(outputs) if all(value is not None for value in outputs) else None
+        ),
     )
 
 

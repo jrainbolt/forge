@@ -174,6 +174,30 @@ correction per turn.
 Repository mode is read-only. Forge still cannot edit files, apply patches, run
 shell commands, builds or tests, mutate Git, access the network, or use the web.
 
+Run the controlled read-only coding evaluation locally with:
+
+```bash
+forge eval \
+  --model qwen-small \
+  --config ~/Models/forge/forge.toml \
+  --suite coding-v1
+```
+
+An optional versioned JSON report is written only when requested:
+
+```bash
+forge eval \
+  --model qwen-large \
+  --config ~/Models/forge/forge.toml \
+  --suite coding-v1 \
+  --output eval-results/qwen-large.json
+```
+
+Evaluations use the committed fixture and the same production read-only
+repository orchestration. Real-model runs remain local and are not part of CI.
+See [`docs/EVALUATION.md`](docs/EVALUATION.md) for tasks, scoring, and report
+details.
+
 An opt-in non-interactive repository smoke request is also available:
 
 ```bash
