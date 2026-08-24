@@ -20,6 +20,13 @@ from forge.evaluation.coding_write import (
     WriteTaskScore,
     load_write_suite,
 )
+from forge.evaluation.coverage import (
+    COVERAGE_SUITE_VERSION,
+    COVERAGE_V1,
+    CoverageEvaluationResult,
+    CoverageTaskResult,
+    run_coverage_v1,
+)
 from forge.evaluation.repair import (
     REPAIR_SUITE_VERSION,
     REPAIR_V1,
@@ -94,6 +101,10 @@ __all__ = [
     "AgentEvaluationTask",
     "AgentTaskScore",
     "CODING_V1",
+    "COVERAGE_SUITE_VERSION",
+    "COVERAGE_V1",
+    "CoverageEvaluationResult",
+    "CoverageTaskResult",
     "CODING_WRITE_V1",
     "CONTEXT_SUITE_VERSION",
     "CONTEXT_BUDGET_SUITE_VERSION",
@@ -154,4 +165,5 @@ __all__ = [
     "run_to_dict",
     "score_task",
     "write_json_report",
+    "run_coverage_v1",
 ]

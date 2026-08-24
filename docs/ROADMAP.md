@@ -1015,18 +1015,16 @@ model-based planner.
 
 ---
 
-# Milestone A22 — Local Service API
+# Milestone A22 — Task Decomposition & Evidence Coverage v1
 
-**Goal:** Separate Forge UI from Forge Core.
+**Status:** Implemented.
 
-Expose a local service interface suitable for:
-
-* CLI;
-* IDE clients;
-* desktop clients;
-* other automation.
-
-CLI should become one client rather than the only way to invoke Forge.
+Forge tracks bounded deterministic evidence goals independently from retrieval
+ranking and routing. Trusted source observations cover only associated goals;
+multi-goal plans advance sequentially, dependency and source-kind requirements
+are enforced, changed-path coverage becomes stale, and finalization requires
+both existing grounding and complete required-goal coverage. The fixed
+`coverage-v1` suite validates these behaviors without an LLM planner or judge.
 
 ---
 

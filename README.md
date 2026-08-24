@@ -406,3 +406,6 @@ architecture questions.
 Forge narrows repository tools as useful candidates are discovered, helping
 local models inspect known source before restarting broad searches. Failed or
 exhausted candidates safely reopen discovery, including for multi-file tasks.
+
+For multi-part repository questions, Forge can track which requested areas have
+actual source evidence before accepting a final answer.

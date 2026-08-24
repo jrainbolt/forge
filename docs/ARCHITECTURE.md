@@ -873,3 +873,25 @@ metadata remains discovery evidence, current source reads remain necessary for
 grounding and write hashes remain necessary for mutation provenance. A20 ranks
 candidates, A21 manages their workflow, A18 decides context admission, and the
 permission system remains independently authoritative.
+
+## Task evidence plans and coverage
+
+A22 represents bounded task obligations with an immutable `TaskEvidencePlan`
+of at most four `EvidenceGoal` values and a separate mutable
+`EvidenceCoverageState`. Production decomposition is deliberately conservative:
+ordinary requests receive one goal, while evaluations and internal callers may
+supply explicit multi-goal plans with acyclic dependencies.
+
+Discovery marks only discovery state. A successful trusted source read covers
+only the active associated goal when its centralized source kind satisfies that
+goal. Relationship goals become covered only after their declared source goals.
+Coverage metadata stores paths, generation, evidence type, source kind, and
+observation identity—not source contents. Changed-path evidence is invalidated
+without disturbing unchanged goals.
+
+Goals are processed sequentially. Covering one goal reopens A21 retrieval for
+the next, while retained source observations remain available to A18 for final
+synthesis. A final response requires both the existing grounding rule and all
+required goals; one premature final receives bounded missing-goal guidance.
+Coverage proves that evidence was gathered, not that the model interpreted it
+correctly, and it grants no tool or write authority.

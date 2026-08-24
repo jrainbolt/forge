@@ -20,6 +20,12 @@ from forge.conversation import (
     Conversation,
     RequestPlan,
 )
+from forge.evidence_coverage import (
+    EvidenceCoverageState,
+    EvidenceGoalResult,
+    TaskEvidencePlan,
+    default_evidence_plan,
+)
 from forge.interaction import (
     AutonomyMode,
     InteractionPolicy,
@@ -164,6 +170,9 @@ class RepositoryResponse:
     retrieval_state: RetrievalState = RetrievalState.UNSTARTED
     retrieval_candidate_count: int = 0
     retrieval_metrics: RetrievalMetrics = RetrievalMetrics()
+    evidence_goals: tuple[EvidenceGoalResult, ...] = ()
+    coverage_complete: bool = True
+    premature_finals: int = 0
 
     @property
     def text(self) -> str:
@@ -231,6 +240,7 @@ class RepositoryChatSession:
         repository_index: RepositoryIndex | None = None,
         semantic_index: SemanticIndex | None = None,
         enforce_retrieval_routing: bool = False,
+        evidence_plan: TaskEvidencePlan | None = None,
     ) -> None:
         if not isinstance(model, Model):
             raise TypeError("model must implement Model")
@@ -369,6 +379,7 @@ class RepositoryChatSession:
         self._repository_index = repository_index
         self._semantic_index = semantic_index
         self._enforce_retrieval_routing = enforce_retrieval_routing
+        self._evidence_plan = evidence_plan
         self._closed = False
         self._last_plan: RequestPlan | None = None
         self._last_activity: tuple[ToolActivity, ...] = ()
@@ -522,6 +533,9 @@ class RepositoryChatSession:
         candidate_directories = {"."}
         candidate_queries = _candidate_search_queries(user_text)
         retrieval_strategy = RetrievalStrategy()
+        coverage = EvidenceCoverageState(
+            self._evidence_plan or default_evidence_plan(user_text)
+        )
         observed_hashes: dict[str, str] = {}
         observed_directories: set[str] = set()
         coding_task = self._active_coding_task if self._assist_mode else None
@@ -540,7 +554,7 @@ class RepositoryChatSession:
                 agent_task.model_called()
             evidence_sufficient = _has_completion_evidence(
                 activities, required_source_files, self._require_relevant_source
-            )
+            ) and (self._evidence_plan is None or coverage.complete)
             routed_tools = retrieval_strategy.allowed_tools(
                 {metadata.name for metadata in self._registry.metadata},
                 evidence_sufficient=evidence_sufficient,
@@ -672,20 +686,35 @@ class RepositoryChatSession:
                         )
                         continue
                     coding_task.decline_verification()
-                if not _has_completion_evidence(
+                has_grounding = _has_completion_evidence(
                     activities,
                     required_source_files,
                     self._require_relevant_source,
-                ):
+                )
+                coverage_required = self._evidence_plan is not None
+                if not has_grounding or (coverage_required and not coverage.complete):
                     if protocol_corrections:
                         raise RepositoryOrchestrationError(
-                            "final answer lacks source-content evidence"
+                            "final answer lacks source-content evidence or required "
+                            "evidence-goal coverage"
                         )
                     protocol_corrections += 1
+                    coverage.premature_finals += 1
+                    active = coverage.active_goal
+                    correction = (
+                        EVIDENCE_CORRECTION
+                        if not has_grounding
+                        else (
+                            f"Evidence is still missing for {active.goal_id} — "
+                            f"{active.description}. Inspect associated current source."
+                            if active is not None
+                            else EVIDENCE_CORRECTION
+                        )
+                    )
                     transcript.extend(
                         (
                             Message(MessageRole.ASSISTANT, response.text),
-                            Message(MessageRole.USER, EVIDENCE_CORRECTION),
+                            Message(MessageRole.USER, correction),
                         )
                     )
                     continue
@@ -727,6 +756,9 @@ class RepositoryChatSession:
                     retrieval_state=retrieval_strategy.state,
                     retrieval_candidate_count=len(retrieval_strategy.candidates),
                     retrieval_metrics=retrieval_strategy.metrics,
+                    evidence_goals=coverage.results(),
+                    coverage_complete=coverage.complete,
+                    premature_finals=coverage.premature_finals,
                 )
 
             call = parsed.tool_call
@@ -889,11 +921,35 @@ class RepositoryChatSession:
                 returned_lines=_returned_lines(result),
             )
             activities.append(activity)
+            active_before = coverage.active_goal
+            if evidence is ToolEvidence.DISCOVERY and active_before is not None:
+                coverage.note_discovery(active_before.goal_id)
+            if (
+                result.status is ToolResultStatus.SUCCESS
+                and evidence is ToolEvidence.SOURCE_CONTENT
+                and activity.path is not None
+                and active_before is not None
+            ):
+                coverage.register_source(
+                    active_before.goal_id,
+                    activity.path,
+                    self._mutation_generation,
+                    call.invocation_id,
+                )
             retrieval_strategy.observe(
                 result,
                 generation=self._mutation_generation,
                 arguments=call.arguments,
             )
+            if (
+                active_before is not coverage.active_goal
+                and coverage.active_goal is not None
+            ):
+                retrieval_strategy.start_goal()
+                candidate_files.clear()
+                candidate_queries = _candidate_search_queries(
+                    coverage.active_goal.description
+                )
             if (
                 result.status is ToolResultStatus.SUCCESS
                 and evidence in {ToolEvidence.WRITE_SUCCESS, ToolEvidence.PATCH_SUCCESS}
@@ -925,6 +981,11 @@ class RepositoryChatSession:
                             "Semantic index invalidation failed", exc_info=True
                         )
                 self._mutation_generation += 1
+                # Explicit A22 plans require generation-current source coverage.
+                # The implicit compatibility goal preserves the pre-A22 coding
+                # workflow, whose verification state already guards mutations.
+                if self._evidence_plan is not None:
+                    coverage.invalidate_path(activity.path)
                 retrieval_strategy.invalidate_path(
                     activity.path, generation=self._mutation_generation
                 )

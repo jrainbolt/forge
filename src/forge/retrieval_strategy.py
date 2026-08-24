@@ -196,6 +196,12 @@ class RetrievalStrategy:
             + 1,
         )
 
+    def start_goal(self) -> None:
+        """Begin a distinct sequential evidence goal with fresh retrieval state."""
+        self._state = RetrievalState.UNSTARTED
+        self._candidates = ()
+        self._signatures.clear()
+
     def _observe_read(
         self, result: ToolResult, generation: int, arguments: Mapping[str, object]
     ) -> bool:

@@ -247,3 +247,17 @@ understands valid inspected source. Unrestricted qwen-small observations showed
 that A21 removed broad-discovery and repeated-invalid-range loops, while nearby
 source interpretation and conceptual coverage remain model/retrieval-quality
 limitations rather than router correctness failures.
+
+## coverage-v1
+
+`coverage-v1` runs six deterministic tasks for single and independent goals,
+relationship dependencies, wrong-goal isolation, premature-final redirection,
+and generation invalidation. Scripted production sessions exercise A21 routing,
+A18 admission, real temporary repository tools, explicit evidence plans, and
+the finalization gate. Metrics report required/covered goals, coverage ratio,
+premature finals, source reads, distinct paths, and completion without model
+grading.
+
+Evidence coverage is separate from retrieval relevance and model interpretation:
+it establishes that each explicit facet has associated trusted evidence, not
+that the retrieved source was ideal or the generated explanation is correct.
