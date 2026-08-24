@@ -930,13 +930,16 @@ This milestone should remain language-extensible.
 
 ---
 
-# Milestone A17 — Retrieval Layer
+# Milestone A17 — Persistent Repository Index v1
 
-**Goal:** Retrieve useful context from repositories and documentation without relying entirely on lexical search.
+**Goal:** Reuse repository structure across queries without weakening source authority.
 
-Add a generic retrieval abstraction.
+Implemented as a local, versioned SQLite cache of A15 file, symbol, and syntactic
+reference metadata. It refreshes incrementally, recovers from corrupt or incompatible
+derived state, and falls back to bounded direct scanning when the cache is unavailable.
+No complete source text is stored, and indexed discovery does not authorize writes.
 
-Potential future implementations:
+Future retrieval work may still add abstractions such as:
 
 ```text
 keyword retrieval
@@ -945,7 +948,7 @@ embedding retrieval
 hybrid retrieval
 ```
 
-Do not hard-wire Forge Core to embeddings.
+Forge Core remains independent of embeddings.
 
 ---
 

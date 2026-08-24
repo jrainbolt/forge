@@ -28,6 +28,8 @@ class ReferenceCandidate:
     line: int
     column: int
     containing_symbol: str | None
+    name: str = ""
+    supports_qualified: bool = False
 
 
 class PythonParseError(ValueError):
@@ -80,6 +82,13 @@ class PythonAnalyzer:
     def references(self, source: str, symbol: str) -> tuple[ReferenceCandidate, ...]:
         tree = _parse(source)
         visitor = _ReferenceVisitor(symbol)
+        visitor.visit(tree)
+        return tuple(visitor.results)
+
+    def all_references(self, source: str) -> tuple[ReferenceCandidate, ...]:
+        """Extract query-independent candidates suitable for persistent indexing."""
+        tree = _parse(source)
+        visitor = _AllReferenceVisitor()
         visitor.visit(tree)
         return tuple(visitor.results)
 
@@ -193,3 +202,76 @@ def _attribute_name(node: ast.Attribute) -> str:
     if isinstance(value, ast.Name):
         parts.append(value.id)
     return ".".join(reversed(parts))
+
+
+class _AllReferenceVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self._containers: list[str] = []
+        self.results: list[ReferenceCandidate] = []
+
+    @property
+    def _container(self) -> str | None:
+        return ".".join(self._containers) if self._containers else None
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._containers.append(node.name)
+        for item in node.body:
+            self.visit(item)
+        self._containers.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node)
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self._containers.append(node.name)
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for item in node.body:
+            self.visit(item)
+        self._containers.pop()
+
+    def visit_Call(self, node: ast.Call) -> None:
+        name = _expression_name(node.func)
+        if name is not None:
+            self._add("call", node.func, name, isinstance(node.func, ast.Attribute))
+            for argument in (*node.args, *node.keywords):
+                self.visit(
+                    argument.value if isinstance(argument, ast.keyword) else argument
+                )
+            return
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Load):
+            self._add("name", node, node.id, False)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        self._add("attribute", node, _attribute_name(node), True)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self._add(
+                "import", node, alias.asname or alias.name.rsplit(".", 1)[-1], False
+            )
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            self._add("import", node, alias.asname or alias.name, False)
+
+    def _add(self, kind: str, node: ast.AST, name: str, qualified: bool) -> None:
+        self.results.append(
+            ReferenceCandidate(
+                kind, node.lineno, node.col_offset, self._container, name, qualified
+            )
+        )
+
+
+def _expression_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return _attribute_name(node)
+    return None

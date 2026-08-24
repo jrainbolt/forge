@@ -45,6 +45,7 @@ from forge.orchestration.protocol import (
     parse_model_output,
     render_tool_result,
 )
+from forge.repository_index import RepositoryIndex, RepositoryIndexError
 from forge.tools import (
     ExecutionContext,
     InvocationApproval,
@@ -211,6 +212,7 @@ class RepositoryChatSession:
             Callable[[ToolInvocation, MutationPreview | PreparedProjectCommand], bool]
             | None
         ) = None,
+        repository_index: RepositoryIndex | None = None,
     ) -> None:
         if not isinstance(model, Model):
             raise TypeError("model must implement Model")
@@ -346,6 +348,7 @@ class RepositoryChatSession:
         self._require_relevant_source = require_relevant_source
         self._activity_callback = activity_callback
         self._approval_callback = approval_callback
+        self._repository_index = repository_index
         self._closed = False
         self._last_plan: RequestPlan | None = None
         self._last_activity: tuple[ToolActivity, ...] = ()
@@ -748,6 +751,13 @@ class RepositoryChatSession:
                 observed_hashes.clear()
                 observed_directories.clear()
                 candidate_files.add(activity.path)
+                if self._repository_index is not None:
+                    try:
+                        self._repository_index.invalidate(activity.path)
+                    except RepositoryIndexError:
+                        LOGGER.warning(
+                            "Repository index invalidation failed", exc_info=True
+                        )
                 self._mutation_generation += 1
                 activities[:] = [
                     replace(item, current_verification=False)

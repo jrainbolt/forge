@@ -178,3 +178,9 @@ comparable. Structural discovery alone receives no source grounding credit.
 call graph. Normal CI uses scripted models only; real qwen-small runs remain optional
 and are not score gates. Historical `coding-v1`, `coding-write-v1`, `agent-v1`, and
 `repair-v1` task definitions and scores are unchanged.
+
+Milestone A17 leaves the context-v1 tasks and scoring frozen. Normal CLI repository
+chat now supplies the same structural tools with a persistent local index; deterministic
+index tests inject temporary cache roots. Index build/refresh metrics are operational
+diagnostics only and do not change grounding: only current source reads receive source
+evidence credit.

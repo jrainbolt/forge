@@ -320,10 +320,21 @@ profile auto-allows writes. Legacy `--workspace`, `--assist`, `--agent`, and
 Repository modes also provide bounded Python symbol intelligence. Forge can inspect a
 file outline, find exact simple or qualified definitions, locate structural reference
 candidates, and read a targeted line range with the file's current SHA-256. These
-operations analyze the workspace on demand and remain ordinary read-only tools; they
-are not a persistent index, semantic call graph, embedding search, or refactoring
-engine. Actual source ranges or files must still be read before an implementation
-answer or provenance-constrained write.
+operations use a local persistent SQLite index of derived file hashes, definitions,
+and syntactic reference locations. The index is stored in the platform cache, never
+in the repository, and refreshes synchronously before structural results are used.
+It is not a semantic call graph, embedding search, or refactoring engine. Actual
+source ranges or files must still be read before an implementation answer or
+provenance-constrained write.
+
+The derived cache can be inspected or maintained without loading a model:
+
+```bash
+forge index status --workspace .
+forge index build --workspace .
+forge index refresh --workspace .
+forge index clear --workspace .
+```
 
 Run the controlled read-only coding evaluation locally with:
 

@@ -671,11 +671,26 @@ candidates, and bound snippets to 300 characters. Range reads permit at most 400
 and 128 KiB of returned text. Parser failures are explicit for direct outlines and are
 counted and skipped during workspace searches.
 
-Analysis occurs on demand. A15 adds no cache, persistent index, watcher, database,
-embedding, language server, or semantic retrieval subsystem, so mutations cannot
-leave stale analyzer state. All four tools declare `ToolCapability.READ`; CHAT remains
-tool-free, structural discovery grants no mutation or execution authority, and model
-or repository instructions cannot expand the fixed policy.
+Milestone A17 persists the A15 metadata in a versioned SQLite database beneath the
+platform cache directory. A SHA-256 of the canonical workspace path supplies the
+workspace identity. The schema stores file-relative paths, size/mtime diagnostics,
+content hashes, parse status, symbol ranges, and syntactic reference locations; it
+never stores complete source text or snippets.
+
+The first structural query builds the index lazily. Every later structural query
+walks the confined workspace and hashes eligible Python files, reparsing only added or
+content-changed files and deleting vanished entries in one transaction. A valid build
+is replaced atomically. Schema mismatch or corruption causes a derived-cache rebuild;
+cache or lock failures cause the structural tool to use its existing bounded direct
+scan. Successful Forge writes invalidate the affected row, but write success never
+depends on index maintenance.
+
+Indexed outline, definition, and reference results remain discovery evidence. Source
+files and their current hashes remain authoritative, `repository.read_range` stays a
+direct source read, and indexed data cannot satisfy write provenance. All four tools
+declare `ToolCapability.READ`; CHAT remains tool-free, structural discovery grants no
+mutation or execution authority, and model or repository instructions cannot expand
+the fixed policy.
 
 ## Capability discovery
 

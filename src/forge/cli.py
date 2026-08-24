@@ -35,6 +35,7 @@ from forge.models import (
 from forge.orchestration import RepositoryChatSession
 from forge.project_config import ProjectCommands
 from forge.repl import run_repl
+from forge.repository_index import RepositoryIndex, RepositoryIndexError
 from forge.session import DEFAULT_SYSTEM_MESSAGE, ChatSession
 from forge.tools import (
     create_repository_registry,
@@ -127,6 +128,13 @@ def build_parser() -> argparse.ArgumentParser:
     evaluation.add_argument(
         "--verbose", action="store_true", help="include answers and files in report"
     )
+    index = commands.add_parser(
+        "index", help="inspect or maintain the local repository index"
+    )
+    index_commands = index.add_subparsers(dest="index_command", required=True)
+    for name in ("status", "build", "refresh", "clear"):
+        operation = index_commands.add_parser(name)
+        operation.add_argument("--workspace", type=Path, default=Path.cwd())
     return parser
 
 
@@ -138,6 +146,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = config.with_verbose(True)
     configure_logging(verbose=config.verbose)
     LOGGER.debug("Forge CLI initialized")
+    if args.command == "index":
+        try:
+            index = RepositoryIndex(args.workspace)
+            if args.index_command == "status":
+                result = index.status()
+            elif args.index_command == "build":
+                result = index.build()
+            elif args.index_command == "refresh":
+                result = index.refresh()
+            else:
+                index.clear()
+                result = {"state": "cleared", "path": str(index.database_path)}
+            print(result)
+            return 0
+        except (OSError, RepositoryIndexError, ValueError) as error:
+            LOGGER.error("%s", error)
+            return 2
     if args.command == "chat":
         config_path = args.config or config.model_config_path
         if config_path is None:
@@ -178,6 +203,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     system_message=(None if args.no_system else DEFAULT_SYSTEM_MESSAGE),
                 )
             else:
+                repository_index = RepositoryIndex(args.workspace)
                 session = RepositoryChatSession(
                     args.model,
                     model,
@@ -187,11 +213,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         create_repository_registry(
                             interaction,
                             getattr(catalog, "project_commands", ProjectCommands()),
+                            repository_index,
                         )
                     ),
                     policy=interaction,
                     mode=mode,
                     interaction_policy=interaction,
+                    repository_index=repository_index,
                 )
             with model, session:
                 return run_repl(session)
@@ -199,6 +227,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ModelConfigurationError,
             ModelSelectionError,
             ModelError,
+            OSError,
             TypeError,
             ValueError,
         ) as error:

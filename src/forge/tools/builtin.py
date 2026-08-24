@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from forge.interaction import InteractionPolicy
+    from forge.repository_index import RepositoryIndex
 from forge.project_config import ProjectCommands
 from forge.tools.git import GitDiffTool, GitStatusTool
 from forge.tools.permissions import RuleBasedPolicy
@@ -36,16 +37,18 @@ WRITE_TOOL_NAMES = ("repository.apply_patch", "repository.write_file")
 PROJECT_TOOL_NAMES = ("project.build", "project.test")
 
 
-def create_readonly_repository_registry() -> ToolRegistry:
+def create_readonly_repository_registry(
+    index: RepositoryIndex | None = None,
+) -> ToolRegistry:
     """Create a fresh registry containing only A6 read-only capabilities."""
     return ToolRegistry(
         (
             ListDirectoryTool(),
             ReadFileTool(),
             SearchFilesTool(),
-            FileOutlineTool(),
-            FindSymbolTool(),
-            FindReferencesTool(),
+            FileOutlineTool(index),
+            FindSymbolTool(index),
+            FindReferencesTool(index),
             ReadRangeTool(),
             GitStatusTool(),
             GitDiffTool(),
@@ -62,6 +65,7 @@ def create_readonly_repository_policy(
 
 def create_assist_repository_registry(
     commands: ProjectCommands | None = None,
+    index: RepositoryIndex | None = None,
 ) -> ToolRegistry:
     """Create the explicit A6 read plus A9 controlled-write registry."""
     configured = commands or ProjectCommands()
@@ -70,9 +74,9 @@ def create_assist_repository_registry(
             ListDirectoryTool(),
             ReadFileTool(),
             SearchFilesTool(),
-            FileOutlineTool(),
-            FindSymbolTool(),
-            FindReferencesTool(),
+            FileOutlineTool(index),
+            FindSymbolTool(index),
+            FindReferencesTool(index),
             ReadRangeTool(),
             GitStatusTool(),
             GitDiffTool(),
@@ -95,6 +99,7 @@ def create_assist_repository_policy() -> RuleBasedPolicy:
 def create_repository_registry(
     interaction: InteractionPolicy,
     commands: ProjectCommands | None = None,
+    index: RepositoryIndex | None = None,
 ) -> ToolRegistry:
     """Create one fixed registry under autonomy ceiling and permanent DENYs."""
     configured = commands or ProjectCommands()
@@ -102,9 +107,9 @@ def create_repository_registry(
         ListDirectoryTool(),
         ReadFileTool(),
         SearchFilesTool(),
-        FileOutlineTool(),
-        FindSymbolTool(),
-        FindReferencesTool(),
+        FileOutlineTool(index),
+        FindSymbolTool(index),
+        FindReferencesTool(index),
         ReadRangeTool(),
         GitStatusTool(),
         GitDiffTool(),

@@ -6,6 +6,10 @@ import hashlib
 import stat
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from forge.repository_index import RepositoryIndex
 
 from forge.repository_analysis import (
     FileLanguage,
@@ -55,6 +59,9 @@ class FileOutlineTool(Tool):
         ToolCapability.READ,
     )
 
+    def __init__(self, index: RepositoryIndex | None = None) -> None:
+        self._index = index
+
     @property
     def metadata(self) -> ToolMetadata:
         return self._metadata
@@ -74,7 +81,15 @@ class FileOutlineTool(Tool):
                 "structural_support": False,
             }
         try:
-            symbols = PythonAnalyzer().outline(text)
+            if self._index is not None:
+                try:
+                    symbols = self._index.file_symbols(
+                        workspace_relative_path(context.workspace, path)
+                    )
+                except RuntimeError:
+                    symbols = PythonAnalyzer().outline(text)
+            else:
+                symbols = PythonAnalyzer().outline(text)
         except PythonParseError as error:
             raise ToolError(
                 str(error),
@@ -122,6 +137,9 @@ class FindSymbolTool(Tool):
         ToolCapability.READ,
     )
 
+    def __init__(self, index: RepositoryIndex | None = None) -> None:
+        self._index = index
+
     @property
     def metadata(self) -> ToolMetadata:
         return self._metadata
@@ -134,6 +152,29 @@ class FindSymbolTool(Tool):
             raise ToolError("symbol must not be empty")
         requested = str(arguments.get("path", "."))
         root = _resolve(context, requested)
+        if self._index is not None:
+            try:
+                rows = self._index.find_symbols(
+                    symbol, workspace_relative_path(context.workspace, root)
+                )
+                scanned, parse_failures, oversized = self._index.file_counts(
+                    workspace_relative_path(context.workspace, root)
+                )
+                matches = [
+                    {"path": row["path"], **_symbol_output(row)}
+                    for row in rows[:MAX_SYMBOL_RESULTS]
+                ]
+                return _structural_result(
+                    symbol,
+                    requested,
+                    matches,
+                    scanned,
+                    parse_failures,
+                    oversized,
+                    len(rows) > MAX_SYMBOL_RESULTS,
+                )
+            except RuntimeError:
+                pass
         matches: list[dict[str, StructuredValue]] = []
         scanned = parse_failures = oversized = 0
         incomplete = False
@@ -202,6 +243,9 @@ class FindReferencesTool(Tool):
         ToolCapability.READ,
     )
 
+    def __init__(self, index: RepositoryIndex | None = None) -> None:
+        self._index = index
+
     @property
     def metadata(self) -> ToolMetadata:
         return self._metadata
@@ -214,6 +258,46 @@ class FindReferencesTool(Tool):
             raise ToolError("symbol must not be empty")
         requested = str(arguments.get("path", "."))
         root = _resolve(context, requested)
+        if self._index is not None:
+            try:
+                rows = self._index.find_references(
+                    symbol, workspace_relative_path(context.workspace, root)
+                )
+                scanned, parse_failures, oversized = self._index.file_counts(
+                    workspace_relative_path(context.workspace, root)
+                )
+                matches = []
+                for row in rows[:MAX_REFERENCE_RESULTS]:
+                    display = row["path"]
+                    _, _, text = _read_analysis_file(context, display)
+                    lines = text.splitlines()
+                    line_text = (
+                        lines[row["line"] - 1] if row["line"] <= len(lines) else ""
+                    )
+                    matches.append(
+                        {
+                            "path": display,
+                            "line": row["line"],
+                            "column": row["column_no"],
+                            "kind": row["kind"],
+                            "containing_symbol": row["containing_symbol"],
+                            "line_text": line_text[:MAX_REFERENCE_SNIPPET_CHARS],
+                            "line_truncated": len(line_text)
+                            > MAX_REFERENCE_SNIPPET_CHARS,
+                        }
+                    )
+                return _structural_result(
+                    symbol,
+                    requested,
+                    matches,
+                    scanned,
+                    parse_failures,
+                    oversized,
+                    len(rows) > MAX_REFERENCE_RESULTS,
+                    key="references",
+                )
+            except RuntimeError:
+                pass
         matches: list[dict[str, StructuredValue]] = []
         scanned = parse_failures = oversized = 0
         incomplete = False
@@ -370,6 +454,14 @@ def _python_files(context: ExecutionContext, root: Path):  # type: ignore[no-unt
 
 
 def _symbol_output(symbol) -> dict[str, StructuredValue]:  # type: ignore[no-untyped-def]
+    if hasattr(symbol, "keys"):
+        return {
+            "kind": symbol["kind"],
+            "name": symbol["name"],
+            "qualified_name": symbol["qualified_name"],
+            "line_start": symbol["line_start"],
+            "line_end": symbol["line_end"],
+        }
     return {
         "kind": symbol.kind,
         "name": symbol.name,
