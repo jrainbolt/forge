@@ -170,6 +170,22 @@ def test_dynamic_output_schema_enforces_discovered_path_and_query_provenance() -
     )
 
 
+def test_dynamic_output_schema_intersects_routed_tool_names() -> None:
+    specification = build_repository_output(
+        create_readonly_repository_registry(),
+        allow_final=False,
+        candidate_files={"src/target.py"},
+        candidate_directories={"."},
+        candidate_queries={"target"},
+        allowed_tool_names={"repository.read_range", "git.status"},
+    )
+    tools = {
+        branch["properties"]["tool"]["const"]  # type: ignore[index]
+        for branch in specification.schema["oneOf"]  # type: ignore[index]
+    }
+    assert tools == {"repository.read_range", "git.status"}
+
+
 def test_tool_definitions_are_deterministic_schema_derived_and_categorized() -> None:
     rendered = render_tool_definitions(create_readonly_repository_registry())
     payload = json.loads(rendered)

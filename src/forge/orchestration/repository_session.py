@@ -56,6 +56,7 @@ from forge.orchestration.protocol import (
     render_tool_result,
 )
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
+from forge.retrieval_strategy import RetrievalStrategy
 from forge.semantic_index import SemanticIndex, SemanticIndexError
 from forge.tools import (
     ExecutionContext,
@@ -515,6 +516,7 @@ class RepositoryChatSession:
         candidate_files: set[str] = set()
         candidate_directories = {"."}
         candidate_queries = _candidate_search_queries(user_text)
+        retrieval_strategy = RetrievalStrategy()
         observed_hashes: dict[str, str] = {}
         observed_directories: set[str] = set()
         coding_task = self._active_coding_task if self._assist_mode else None
@@ -531,11 +533,16 @@ class RepositoryChatSession:
                         "agent model-call limit exceeded"
                     )
                 agent_task.model_called()
+            evidence_sufficient = _has_completion_evidence(
+                activities, required_source_files, self._require_relevant_source
+            )
+            routed_tools = retrieval_strategy.allowed_tools(
+                {metadata.name for metadata in self._registry.metadata},
+                evidence_sufficient=evidence_sufficient,
+            )
             output_specification = build_repository_output(
                 self._registry,
-                allow_final=_has_completion_evidence(
-                    activities, required_source_files, self._require_relevant_source
-                ),
+                allow_final=evidence_sufficient,
                 candidate_files=candidate_files,
                 candidate_directories=candidate_directories,
                 candidate_queries=candidate_queries,
@@ -548,6 +555,7 @@ class RepositoryChatSession:
                 allow_verification=(
                     coding_task.may_verify if coding_task is not None else True
                 ),
+                allowed_tool_names=routed_tools,
             )
             schema_cost = _estimated_schema_cost(output_specification.schema)
             system_cost = (
@@ -837,6 +845,7 @@ class RepositoryChatSession:
                 returned_lines=_returned_lines(result),
             )
             activities.append(activity)
+            retrieval_strategy.observe(result, generation=self._mutation_generation)
             if (
                 result.status is ToolResultStatus.SUCCESS
                 and evidence in {ToolEvidence.WRITE_SUCCESS, ToolEvidence.PATCH_SUCCESS}
@@ -868,6 +877,9 @@ class RepositoryChatSession:
                             "Semantic index invalidation failed", exc_info=True
                         )
                 self._mutation_generation += 1
+                retrieval_strategy.invalidate_path(
+                    activity.path, generation=self._mutation_generation
+                )
                 context_planner.mutation_succeeded(self._mutation_generation)
                 activities[:] = [
                     replace(item, current_verification=False)
@@ -1179,6 +1191,9 @@ def _repository_system_prompt(
         f"{tool_example}"
         'Final example: {"type":"final","answer":"Grounded answer."}. '
         "After a tool result, request one next tool or give the final answer. Mention "
+        "Use broad discovery only until concrete candidates are available. Inspect "
+        "known candidates before restarting broad discovery. Once relevant source is "
+        "available, answer or inspect a specific unresolved candidate. "
         "repository-relative files and symbols in final answers. Available tool "
         "metadata:\n"
         f"{definitions}"

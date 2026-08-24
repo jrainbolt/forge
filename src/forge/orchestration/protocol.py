@@ -71,11 +71,14 @@ def build_repository_output(
     observed_hashes: Mapping[str, str] | None = None,
     allow_mutations: bool = False,
     allow_verification: bool = True,
+    allowed_tool_names: set[str] | None = None,
 ) -> OutputSpecification:
     """Build a strict schema from registered tools and discovered path provenance."""
     branches: list[dict[str, object]] = []
     hashes = observed_hashes or {}
     for metadata in registry.metadata:
+        if allowed_tool_names is not None and metadata.name not in allowed_tool_names:
+            continue
         if (
             metadata.name
             in {

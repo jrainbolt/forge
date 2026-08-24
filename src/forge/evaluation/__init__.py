@@ -44,6 +44,13 @@ from forge.evaluation.retrieval import (
     RetrievalTaskResult,
     evaluate_retrieval,
 )
+from forge.evaluation.routing import (
+    ROUTING_SUITE_VERSION,
+    ROUTING_V1,
+    ROUTING_V1_TASKS,
+    RoutingTask,
+    load_routing_suite,
+)
 from forge.evaluation.runner import EvaluationRunner
 from forge.evaluation.scoring import score_task
 from forge.evaluation.tasks import (
@@ -105,6 +112,10 @@ __all__ = [
     "RetrievalMetrics",
     "RetrievalTask",
     "RetrievalTaskResult",
+    "ROUTING_SUITE_VERSION",
+    "ROUTING_V1",
+    "ROUTING_V1_TASKS",
+    "RoutingTask",
     "CodingWriteEvaluationRunner",
     "CODING_V1_TASKS",
     "SCHEMA_VERSION",
@@ -132,6 +143,7 @@ __all__ = [
     "load_agent_suite",
     "load_write_suite",
     "load_repair_suite",
+    "load_routing_suite",
     "render_terminal_report",
     "run_to_dict",
     "score_task",

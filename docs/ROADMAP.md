@@ -1001,13 +1001,16 @@ Forge should remain fully usable with network disabled.
 
 ---
 
-# Milestone A21 — General Tool-Using Assistant
+# Milestone A21 — Retrieval Strategy & Tool Routing v1
 
-**Goal:** Demonstrate that Forge's architecture is not coding-specific.
+**Status:** Implemented.
 
-The same orchestration system should be able to answer ordinary requests and invoke non-coding tools where appropriate.
-
-This validates the broader architecture without changing Forge's primary coding focus.
+Forge now tracks a bounded, generation-aware queue of discovery candidates and
+deterministically narrows repository tool schemas toward targeted inspection.
+Failed or exhausted candidates reopen discovery, while successful source reads
+retain unresolved candidates for multi-file tasks. Routing only removes tools
+from the existing autonomy and permission ceiling; it adds no capability or
+model-based planner.
 
 ---
 

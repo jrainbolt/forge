@@ -218,3 +218,16 @@ values so improvements and regressions remain visible. The harness accepts a
 `SemanticIndex` directly through `evaluate_retrieval`; its task definitions and
 scoring are fixed and model-independent, while acceptance may be run against a
 real configured embedding artifact.
+
+## routing-v1
+
+`routing-v1` fixes six deterministic workflow cases: semantic-to-read routing,
+exact-symbol narrowing, repeated candidate-set detection, read-failure
+reopening, multi-file inspection, and broad-search suppression after sufficient
+source. Router metrics count transitions, discovered/inspected/failed
+candidates, broad and targeted operations, suppressed attempts, repeated sets,
+source acquisition, and queue truncation without retaining source contents.
+
+CI uses scripted results and dynamic-schema assertions. Real qwen-small runs
+remain opt-in observations used to compare unrestricted behavior; they do not
+alter deterministic suite scores.

@@ -845,3 +845,31 @@ The repository tool returns the raw cosine as both `similarity` and
 internal diagnostic detail. If candidate validation rejects data, the index
 falls back to deterministic raw semantic order; unrelated programming failures
 are not suppressed.
+
+## Retrieval strategy
+
+Repository orchestration owns a deterministic `RetrievalStrategy` separate from
+ranking and context admission. Its compact states distinguish unstarted
+retrieval, discovery without candidates, available candidates, an exact target,
+acquired source, and exhaustion. Trusted tool results—not repository text or a
+model classifier—drive transitions.
+
+The strategy retains at most 32 immutable, generation-aware candidates with
+path/range/symbol identity, discovery source, priority, and inspection state.
+Exact duplicates are ignored; identical candidate sets provide no novelty.
+Successful reads inspect matching candidates, ordinary read failures mark them
+failed, and context-budget rejection leaves them unresolved. Mutation marks
+changed-path candidates stale without invalidating safe candidates elsewhere.
+
+Dynamic response schemas intersect registry capabilities with routed tools.
+Concrete semantic, lexical, reference, directory, or symbol candidates suppress
+broad discovery until targeted inspection or refinement occurs. Exact symbols
+produce a target-identified state. Candidate failure or exhaustion reopens
+discovery. Acquiring one source file does not discard unresolved candidates, so
+multi-file evidence requirements remain possible.
+
+Routing can only narrow the autonomy/permission capability ceiling. Candidate
+metadata remains discovery evidence, current source reads remain necessary for
+grounding and write hashes remain necessary for mutation provenance. A20 ranks
+candidates, A21 manages their workflow, A18 decides context admission, and the
+permission system remains independently authoritative.
