@@ -8,12 +8,20 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 
 class EmbeddingError(RuntimeError):
     """An embedding backend failed or returned an invalid vector."""
+
+
+class EmbeddingPurpose(Enum):
+    """Constrained retrieval role for backend-owned input formatting."""
+
+    DOCUMENT = "document"
+    QUERY = "query"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,11 +56,13 @@ class EmbeddingModel(ABC):
     @abstractmethod
     def dimensions(self) -> int: ...
 
-    def embed_text(self, text: str) -> EmbeddingVector:
-        return self.embed_batch((text,))[0]
+    def embed_text(self, text: str, *, purpose: EmbeddingPurpose) -> EmbeddingVector:
+        return self.embed_batch((text,), purpose=purpose)[0]
 
     @abstractmethod
-    def embed_batch(self, texts: Sequence[str]) -> tuple[EmbeddingVector, ...]: ...
+    def embed_batch(
+        self, texts: Sequence[str], *, purpose: EmbeddingPurpose
+    ) -> tuple[EmbeddingVector, ...]: ...
 
     def close(self) -> None:
         """Release backend resources; implementations must be idempotent."""
@@ -83,14 +93,20 @@ class MockEmbeddingModel(EmbeddingModel):
     def dimensions(self) -> int:
         return self._dimensions
 
-    def embed_batch(self, texts: Sequence[str]) -> tuple[EmbeddingVector, ...]:
+    def embed_batch(
+        self, texts: Sequence[str], *, purpose: EmbeddingPurpose
+    ) -> tuple[EmbeddingVector, ...]:
+        if not isinstance(purpose, EmbeddingPurpose):
+            raise TypeError("purpose must be an EmbeddingPurpose")
         self.calls += 1
         result = []
         for text in texts:
             if not isinstance(text, str) or not text.strip():
                 raise EmbeddingError("embedding input must be non-empty text")
             values = [0.0] * self.dimensions
-            tokens = re.findall(r"[a-z0-9]+", _split_identifiers(text))
+            tokens = re.findall(
+                r"[a-z0-9]+", _split_identifiers(f"{purpose.value} {text}")
+            )
             for token in tokens:
                 digest = hashlib.sha256(token.encode()).digest()
                 values[int.from_bytes(digest[:4], "little") % self.dimensions] += 1.0
@@ -110,6 +126,8 @@ class LlamaCppEmbeddingModel(EmbeddingModel):
         dimensions: int,
         context_size: int = 2048,
         gpu_layers: int = 0,
+        document_prefix: str = "",
+        query_prefix: str = "",
     ) -> None:
         path = model_path.expanduser().resolve(strict=True)
         if not path.is_file() or dimensions <= 0:
@@ -122,8 +140,19 @@ class LlamaCppEmbeddingModel(EmbeddingModel):
             raise EmbeddingError(
                 "llama.cpp embeddings require the optional 'semantic' extra"
             ) from error
-        self._identity = EmbeddingIdentity("llama.cpp", str(path))
+        if not isinstance(document_prefix, str) or not isinstance(query_prefix, str):
+            raise TypeError("embedding prefixes must be strings")
+        formatting = hashlib.sha256(
+            f"{document_prefix}\0{query_prefix}".encode()
+        ).hexdigest()[:12]
+        self._identity = EmbeddingIdentity(
+            "llama.cpp", f"{path}#retrieval-format={formatting}"
+        )
         self._dimensions = dimensions
+        self._prefixes = {
+            EmbeddingPurpose.DOCUMENT: document_prefix,
+            EmbeddingPurpose.QUERY: query_prefix,
+        }
         self._model: Any = Llama(
             model_path=str(path),
             embedding=True,
@@ -140,15 +169,22 @@ class LlamaCppEmbeddingModel(EmbeddingModel):
     def dimensions(self) -> int:
         return self._dimensions
 
-    def embed_batch(self, texts: Sequence[str]) -> tuple[EmbeddingVector, ...]:
+    def embed_batch(
+        self, texts: Sequence[str], *, purpose: EmbeddingPurpose
+    ) -> tuple[EmbeddingVector, ...]:
         if self._model is None:
             raise EmbeddingError("embedding model is closed")
+        if not isinstance(purpose, EmbeddingPurpose):
+            raise TypeError("purpose must be an EmbeddingPurpose")
         if not texts or any(
             not isinstance(text, str) or not text.strip() for text in texts
         ):
             raise EmbeddingError("embedding input must be non-empty text")
         try:
-            response = self._model.create_embedding(input=list(texts))
+            prefix = self._prefixes[purpose]
+            response = self._model.create_embedding(
+                input=[f"{prefix}{text}" for text in texts]
+            )
             vectors = tuple(
                 EmbeddingVector(tuple(item["embedding"])) for item in response["data"]
             )

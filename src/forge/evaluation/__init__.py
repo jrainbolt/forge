@@ -35,6 +35,15 @@ from forge.evaluation.reporting import (
     run_to_dict,
     write_json_report,
 )
+from forge.evaluation.retrieval import (
+    RETRIEVAL_SUITE_VERSION,
+    RETRIEVAL_V1,
+    RETRIEVAL_V1_TASKS,
+    RetrievalMetrics,
+    RetrievalTask,
+    RetrievalTaskResult,
+    evaluate_retrieval,
+)
 from forge.evaluation.runner import EvaluationRunner
 from forge.evaluation.scoring import score_task
 from forge.evaluation.tasks import (
@@ -90,6 +99,12 @@ __all__ = [
     "REPAIR_SUITE_VERSION",
     "REPAIR_V1",
     "REPAIR_V1_TASKS",
+    "RETRIEVAL_SUITE_VERSION",
+    "RETRIEVAL_V1",
+    "RETRIEVAL_V1_TASKS",
+    "RetrievalMetrics",
+    "RetrievalTask",
+    "RetrievalTaskResult",
     "CodingWriteEvaluationRunner",
     "CODING_V1_TASKS",
     "SCHEMA_VERSION",
@@ -112,6 +127,7 @@ __all__ = [
     "WriteTaskResult",
     "WriteTaskScore",
     "fixture_workspace",
+    "evaluate_retrieval",
     "load_suite",
     "load_agent_suite",
     "load_write_suite",

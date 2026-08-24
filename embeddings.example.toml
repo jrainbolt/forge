@@ -5,3 +5,5 @@ model_path = "/path/to/local-embedding-model.gguf"
 dimensions = 768
 context_size = 2048
 gpu_layers = 0
+document_prefix = "search_document: "
+query_prefix = "search_query: "

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import os
 import sqlite3
@@ -12,9 +13,17 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from forge.embeddings import EmbeddingModel, EmbeddingVector
+from forge.embeddings import EmbeddingModel, EmbeddingPurpose, EmbeddingVector
 from forge.repository_analysis import PythonAnalyzer, PythonParseError
 from forge.repository_index import default_cache_root
+from forge.retrieval import (
+    RETRIEVAL_RANKING_VERSION,
+    RetrievalCandidate,
+    RetrievalRankingError,
+    SourceKind,
+    classify_source,
+    rank_candidates,
+)
 from forge.tools.paths import workspace_relative_path
 from forge.tools.repository import _iter_search_files
 
@@ -26,6 +35,9 @@ MAX_CHUNKS = 20_000
 WINDOW_LINES = 80
 WINDOW_OVERLAP = 10
 MAX_QUERY_BYTES = 8 * 1024
+MIN_RAW_CANDIDATES = 20
+MAX_RAW_CANDIDATES = 80
+LOGGER = logging.getLogger(__name__)
 
 
 class SemanticIndexError(RuntimeError):
@@ -57,6 +69,8 @@ class SemanticMatch:
     qualified_name: str | None
     chunk_kind: str
     similarity: float
+    source_kind: SourceKind = SourceKind.OTHER_TEXT
+    chunk_sha256: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +135,9 @@ class SemanticIndex:
                 "model": metadata.get("model"),
                 "dimensions": int(metadata.get("dimensions", 0)),
                 "chunker_version": metadata.get("chunker_version"),
+                "retrieval_ranking_version": int(
+                    metadata.get("retrieval_ranking_version", 0)
+                ),
                 "files": files,
                 "chunks": chunks,
             }
@@ -170,12 +187,50 @@ class SemanticIndex:
     def search(
         self, query: str, *, path: str = ".", limit: int = 8
     ) -> tuple[SemanticMatch, ...]:
+        matches = self._semantic_matches(query, path=path, limit=limit)
+        raw_limit = min(MAX_RAW_CANDIDATES, max(MIN_RAW_CANDIDATES, limit * 4))
+        raw = matches[:raw_limit]
+        candidates = tuple(self._ranking_candidate(match) for match in raw)
+        try:
+            ranked = rank_candidates(query, candidates, limit=limit)
+        except RetrievalRankingError:
+            LOGGER.warning(
+                "Hybrid reranking rejected candidate data; using semantic order"
+            )
+            return tuple(raw[:limit])
+        return tuple(
+            SemanticMatch(
+                candidate.path,
+                candidate.line_start,
+                candidate.line_end,
+                candidate.language,
+                candidate.symbol,
+                candidate.qualified_name,
+                candidate.chunk_kind,
+                candidate.semantic_similarity,
+                candidate.source_kind,
+                candidate.chunk_sha256,
+            )
+            for candidate in ranked
+        )
+
+    def search_raw(
+        self, query: str, *, path: str = ".", limit: int = 8
+    ) -> tuple[SemanticMatch, ...]:
+        """Return semantic-only order for deterministic evaluation comparisons."""
+        return self._semantic_matches(query, path=path, limit=limit)[:limit]
+
+    def _semantic_matches(
+        self, query: str, *, path: str, limit: int
+    ) -> tuple[SemanticMatch, ...]:
         if not query.strip() or len(query.encode("utf-8")) > MAX_QUERY_BYTES:
             raise ValueError("query must be non-empty and at most 8192 UTF-8 bytes")
         if not 1 <= limit <= 20:
             raise ValueError("limit must be between 1 and 20")
         self.refresh()
-        query_vector = self.model.embed_text(query).values
+        query_vector = self.model.embed_text(
+            query, purpose=EmbeddingPurpose.QUERY
+        ).values
         clause, values = self._scope(path)
         try:
             with self._connect() as connection:
@@ -195,6 +250,8 @@ class SemanticIndex:
                             row["qualified_name"],
                             row["chunk_kind"],
                             _cosine(query_vector, vector),
+                            classify_source(row["path"]),
+                            row["chunk_sha256"],
                         )
                     )
         except sqlite3.Error as error:
@@ -207,7 +264,31 @@ class SemanticIndex:
                 item.line_end,
             )
         )
-        return tuple(matches[:limit])
+        return tuple(matches)
+
+    def _ranking_candidate(self, match: SemanticMatch) -> RetrievalCandidate:
+        source = ""
+        try:
+            lines = (
+                (self.workspace / match.path)
+                .read_text(encoding="utf-8-sig")
+                .splitlines()
+            )
+            source = "\n".join(lines[match.line_start - 1 : match.line_end])
+        except (OSError, UnicodeDecodeError):
+            pass
+        return RetrievalCandidate(
+            match.path,
+            match.line_start,
+            match.line_end,
+            match.language,
+            match.symbol,
+            match.qualified_name,
+            match.chunk_kind,
+            match.chunk_sha256,
+            match.similarity,
+            source,
+        )
 
     def invalidate(self, relative_path: str) -> None:
         if self.database_path.exists():
@@ -263,7 +344,10 @@ class SemanticIndex:
                 failures += 1
                 break
             vectors = (
-                self.model.embed_batch(tuple(chunk.embedding_text for chunk in chunks))
+                self.model.embed_batch(
+                    tuple(chunk.embedding_text for chunk in chunks),
+                    purpose=EmbeddingPurpose.DOCUMENT,
+                )
                 if chunks
                 else ()
             )
@@ -300,6 +384,10 @@ class SemanticIndex:
         connection.execute(
             "INSERT OR REPLACE INTO metadata VALUES('updated_at', ?)",
             (str(time.time()),),
+        )
+        connection.execute(
+            "INSERT OR REPLACE INTO metadata VALUES('retrieval_ranking_version', ?)",
+            (str(RETRIEVAL_RANKING_VERSION),),
         )
         connection.commit()
         return SemanticMetrics(
@@ -353,6 +441,7 @@ class SemanticIndex:
                 ("backend", identity.backend),
                 ("model", identity.model),
                 ("dimensions", str(self.model.dimensions)),
+                ("retrieval_ranking_version", str(RETRIEVAL_RANKING_VERSION)),
             ),
         )
         connection.commit()

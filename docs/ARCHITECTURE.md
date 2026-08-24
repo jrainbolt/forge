@@ -814,3 +814,34 @@ Platform-specific behavior belongs behind clear boundaries.
 Correct, tested behavior precedes optimization. This is especially important
 for the future native inference runtime, where reference implementations must
 anchor optimized CPU, SIMD, and GPU implementations.
+# Hybrid retrieval and source-aware reranking
+
+Semantic repository search uses a two-stage, model-independent retrieval path.
+The embedding backend first supplies a bounded semantic candidate pool (four
+times the requested result count, with a floor of 20 and ceiling of 80). A pure
+deterministic reranker then combines dominant cosine similarity with small
+lexical, structural, and source-kind signals. The fixed policy is versioned as
+`retrieval_ranking_version = 1`; it is intentionally not user-configurable.
+
+Lexical evidence is derived from normalized query, path, symbol, qualified
+symbol, and current bounded source text. Tokenization handles snake_case,
+camelCase, dotted names, and path components without an NLP dependency.
+Implementation symbols receive a modest structural/source prior, while semantic
+similarity remains strong enough that a much better semantic match cannot be
+overturned by metadata alone. Exact locations and identical chunk hashes are
+deduplicated, ties are stable, and a three-results-per-file first pass preserves
+useful result diversity when alternatives exist.
+
+`SourceKind` is the centralized classifier for implementation, test,
+documentation, configuration, generated metadata, and other text. The shared
+repository walker excludes package metadata such as `.egg-info`, `.dist-info`,
+`PKG-INFO`, and `SOURCES.txt`. Semantic refresh consequently deletes stale rows
+for newly ineligible files without rebuilding unchanged embeddings. The SQLite
+cache remains source-free; source text is read only for the bounded live
+candidate pool and is neither persisted nor returned as discovery evidence.
+
+The repository tool returns the raw cosine as both `similarity` and
+`semantic_similarity`, plus `source_kind`. Ranking component scores remain an
+internal diagnostic detail. If candidate validation rejects data, the index
+falls back to deterministic raw semantic order; unrelated programming failures
+are not suppressed.

@@ -204,3 +204,17 @@ compaction and rejection counts, final remaining budget, and whole-file/range-re
 counts. Scoring remains deterministic and source-grounded; no model grader or semantic
 retrieval is introduced. Large-file admission behavior is exercised through generated
 temporary fixtures in deterministic tests rather than committed filler.
+# Retrieval evaluation v1
+
+`retrieval-v1` is a deterministic six-task harness for repair eligibility,
+context compaction, approval policy, persistent repository indexing, configured
+project execution, and workspace path confinement. It compares raw semantic and
+hybrid-reranked ranks without invoking a generation model.
+
+For each task it records the first expected-file rank, top-1/top-3/top-5 success,
+generated-metadata contamination, documentation-before-implementation ordering,
+and distinct-file diversity. Aggregate metrics report both raw and reranked
+values so improvements and regressions remain visible. The harness accepts a
+`SemanticIndex` directly through `evaluate_retrieval`; its task definitions and
+scoring are fixed and model-independent, while acceptance may be run against a
+real configured embedding artifact.

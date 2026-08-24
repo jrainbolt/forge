@@ -87,6 +87,8 @@ class SemanticSearchTool(Tool):
                     "symbol": match.symbol,
                     "qualified_name": match.qualified_name,
                     "similarity": match.similarity,
+                    "semantic_similarity": match.similarity,
+                    "source_kind": match.source_kind.value,
                     "language": match.language,
                     "chunk_kind": match.chunk_kind,
                     "recommended_range": {

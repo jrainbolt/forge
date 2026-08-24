@@ -86,7 +86,14 @@ def build_repository_output(
             and not candidate_files
         ):
             continue
-        if metadata.name == "repository.search_files" and not candidate_queries:
+        if (
+            metadata.name
+            in {
+                "repository.search_files",
+                "repository.semantic_search",
+            }
+            and not candidate_queries
+        ):
             continue
         if (
             metadata.evidence
@@ -140,14 +147,19 @@ def build_repository_output(
                     candidates = set(hashes)
                 elif metadata.name == "repository.search_files":
                     candidates = {"."}
-                elif metadata.name == "repository.list_directory":
+                elif metadata.name in {
+                    "repository.semantic_search",
+                    "repository.list_directory",
+                }:
                     candidates = candidate_directories
                 else:
                     candidates = set()
                 if candidates:
                     property_schema["enum"] = sorted(candidates)
             elif (
-                metadata.name == "repository.search_files" and argument.name == "query"
+                metadata.name
+                in {"repository.search_files", "repository.semantic_search"}
+                and argument.name == "query"
             ):
                 property_schema["enum"] = sorted(candidate_queries)
             elif argument.name == "mode":

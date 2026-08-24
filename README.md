@@ -393,3 +393,12 @@ forge index semantic-build --workspace . \
 
 Forge never downloads embedding models. Semantic matches are discovery candidates;
 the agent must read the recommended source range before using them as evidence.
+# Hybrid repository retrieval
+
+Configured semantic search now applies deterministic hybrid reranking: semantic
+cosine remains dominant, while path/symbol/source tokens, code structure, and
+source kind provide small relevance corrections. Generated package metadata is
+excluded from repository indexes, and returned candidates include their source
+kind while preserving raw cosine similarity. The model-free `retrieval-v1`
+evaluation suite compares raw and reranked top-k quality on six Forge
+architecture questions.

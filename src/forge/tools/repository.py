@@ -8,6 +8,7 @@ import stat
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
+from forge.retrieval import is_generated_metadata_path
 from forge.tools.paths import (
     WorkspacePathError,
     resolve_workspace_path,
@@ -301,9 +302,15 @@ def _iter_search_files(workspace: Path, root: Path) -> Iterator[Path]:
             except WorkspacePathError:
                 continue
             if resolved.is_dir():
-                if entry.name not in IGNORED_SEARCH_DIRECTORIES:
+                relative = workspace_relative_path(workspace, resolved)
+                if (
+                    entry.name not in IGNORED_SEARCH_DIRECTORIES
+                    and not is_generated_metadata_path(relative)
+                ):
                     directories.append(resolved)
-            else:
+            elif not is_generated_metadata_path(
+                workspace_relative_path(workspace, resolved)
+            ):
                 yield resolved
         pending.extend(reversed(directories))
 
