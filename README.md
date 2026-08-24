@@ -19,6 +19,20 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
+This editable development install uses the standard `src/` layout and requires no
+`PYTHONPATH` setting. A regular local installation is also supported:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install .
+forge --version
+```
+
+The distribution name is `forge-coding-assistant`; the import package and console
+command are both `forge`. Forge is not published to PyPI, so these commands install
+the local checkout.
+
 Run the CLI:
 
 ```bash
@@ -36,6 +50,13 @@ ruff format --check .
 
 The same test, lint, and formatting checks run in GitHub Actions for pushes and
 pull requests on Python 3.12.
+
+On macOS, if an editable install reports success but `forge` raises
+`ModuleNotFoundError`, inspect the generated `site-packages/__editable__*.pth` with
+`ls -lO`. Python ignores a `.pth` carrying the macOS `hidden` flag. This is external
+filesystem metadata, not a Forge import requirement; remove that flag from the
+affected virtual environment or recreate the venv under a directory that does not
+propagate it. Do not set `PYTHONPATH` as a permanent workaround.
 
 ## Optional local inference
 

@@ -9,10 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -27,3 +27,44 @@ jobs:
 
       - name: Run Ruff formatting checks
         run: python -m ruff format --check .
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install "build>=1,<2"
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+      - name: Inspect wheel contents
+        run: python scripts/verify_wheel.py dist/*.whl
+
+      - name: Install wheel in a clean environment
+        run: |
+          python -m venv /tmp/forge-wheel-venv
+          /tmp/forge-wheel-venv/bin/python -m pip install dist/*.whl
+
+      - name: Smoke installed package outside checkout
+        working-directory: /tmp
+        run: |
+          /tmp/forge-wheel-venv/bin/forge --version
+          /tmp/forge-wheel-venv/bin/forge --help
+          /tmp/forge-wheel-venv/bin/forge chat --help
+          /tmp/forge-wheel-venv/bin/forge eval --help
+          /tmp/forge-wheel-venv/bin/python -m forge --help
+          /tmp/forge-wheel-venv/bin/python -c "import forge.models.catalog"
+          /tmp/forge-wheel-venv/bin/python -c "import forge.tools.executor"
+          /tmp/forge-wheel-venv/bin/python -c "import forge.orchestration.repository_session"
+          /tmp/forge-wheel-venv/bin/python -c "import forge.evaluation.runner"
+          /tmp/forge-wheel-venv/bin/python -c "import forge.repository_analysis"
+          /tmp/forge-wheel-venv/bin/python -c "from forge.evaluation import fixture_workspace; assert fixture_workspace().is_dir()"
+          /tmp/forge-wheel-venv/bin/python -c "import importlib.util; assert importlib.util.find_spec('llama_cpp') is None"

@@ -8,12 +8,13 @@ dynamic = ["version"]
 description = "A local-first AI coding assistant with interchangeable language models"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "All rights reserved" }
+license = "LicenseRef-Proprietary"
 authors = [{ name = "Forge contributors" }]
 dependencies = []
 
 [project.optional-dependencies]
 dev = [
+    "build>=1,<2",
     "pytest>=8,<9",
     "ruff>=0.9,<1",
 ]
@@ -27,8 +28,15 @@ forge = "forge.cli:main"
 [tool.setuptools.dynamic]
 version = { attr = "forge.__version__" }
 
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"forge.evaluation" = ["fixtures/**/*"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

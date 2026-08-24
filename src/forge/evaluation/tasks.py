@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib.resources import files
 from pathlib import Path
 
 from forge.evaluation.types import EvaluationTask, RequiredFact, TaskCategory
@@ -12,8 +13,12 @@ CONTEXT_SUITE_VERSION = 1
 
 
 def fixture_workspace() -> Path:
-    """Locate the installed-source checkout's controlled evaluation fixture."""
-    return Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "eval_repo"
+    """Locate TinyQueue as deliberate installed evaluation package data."""
+    resource = files("forge.evaluation").joinpath("fixtures", "eval_repo")
+    workspace = Path(str(resource))
+    if not workspace.is_dir():
+        raise RuntimeError("installed TinyQueue evaluation fixture is unavailable")
+    return workspace
 
 
 def _fact(*alternatives: str) -> RequiredFact:

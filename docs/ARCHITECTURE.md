@@ -4,6 +4,26 @@ This document records the architectural invariants that apply to Forge today.
 It complements the development sequence in `ROADMAP.md`; it does not define
 future APIs.
 
+## Package layout and runtime resources
+
+Forge uses a standard setuptools `src/` layout with explicit `package-dir` and
+recursive package discovery. The `forge-coding-assistant` distribution installs the
+`forge` import package and `forge = forge.cli:main` console entry point. Package
+version metadata is derived from `forge.__version__`, which is also used by the CLI.
+Neither the console script nor `python -m forge` changes `sys.path` or the process
+working directory.
+
+The controlled TinyQueue evaluation workspace is deliberate package data under
+`forge.evaluation`. Runtime lookup uses `importlib.resources`, so installed evaluation
+suites do not depend on the repository's `tests/` tree, README, scripts, or invocation
+directory. User-selected `--workspace .` and relative configuration paths retain their
+ordinary current-working-directory semantics.
+
+Base Forge has no runtime dependencies and importing it does not import llama.cpp.
+Pytest, Ruff, and the standards-based build frontend belong only to the `dev` extra;
+`llama-cpp-python` belongs only to the separately requested `llama` extra. Wheels and
+source distributions contain no model weights or user configuration.
+
 ## Model independence
 
 Forge Core must not depend on a particular LLM or model family. Model-specific
