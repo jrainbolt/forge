@@ -878,9 +878,12 @@ permission system remains independently authoritative.
 
 A22 represents bounded task obligations with an immutable `TaskEvidencePlan`
 of at most four `EvidenceGoal` values and a separate mutable
-`EvidenceCoverageState`. Production decomposition is deliberately conservative:
-ordinary requests receive one goal, while evaluations and internal callers may
-supply explicit multi-goal plans with acyclic dependencies.
+`EvidenceCoverageState`. Production decomposition is deliberately conservative.
+Explicit numbered or bulleted items and independent semicolon clauses become
+separate goals. The narrowly recognized `How do X and Y work together`,
+`interact`, or `connect` form becomes two source goals plus a dependency-only
+relationship goal. Ordinary uses of `and` and ambiguous prose remain one goal.
+Plans are frozen at task start; explicit trusted plans take precedence.
 
 Discovery marks only discovery state. A successful trusted source read covers
 only the active associated goal when its centralized source kind satisfies that
@@ -895,3 +898,10 @@ synthesis. A final response requires both the existing grounding rule and all
 required goals; one premature final receives bounded missing-goal guidance.
 Coverage proves that evidence was gathered, not that the model interpreted it
 correctly, and it grants no tool or write authority.
+
+Discovery candidates are associated with the goal active when Forge receives
+the trusted result. A read cannot cover another goal unless that path was also
+discovered for that goal. Two bounded empty discovery attempts mark the active
+required goal failed and produce an explicitly incomplete result. Source
+observations retain the context planner's highest priority for final synthesis
+when the model context can hold them.

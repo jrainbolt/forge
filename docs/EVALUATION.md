@@ -258,6 +258,11 @@ the finalization gate. Metrics report required/covered goals, coverage ratio,
 premature finals, source reads, distinct paths, and completion without model
 grading.
 
+The production-decomposition DEC01–DEC04 subset covers relationship planning,
+explicit-item planning, wrong-goal isolation, and required-goal exhaustion. It
+reports plan counts, total/covered/failed goals, premature finals, transitions,
+wrong-goal reads, and complete tasks. These metrics do not grade model prose.
+
 Evidence coverage is separate from retrieval relevance and model interpretation:
 it establishes that each explicit facet has associated trusted evidence, not
 that the retrieved source was ideal or the generated explanation is correct.

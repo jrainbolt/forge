@@ -1025,6 +1025,8 @@ multi-goal plans advance sequentially, dependency and source-kind requirements
 are enforced, changed-path coverage becomes stale, and finalization requires
 both existing grounding and complete required-goal coverage. The fixed
 `coverage-v1` suite validates these behaviors without an LLM planner or judge.
+Normal requests conservatively decompose explicit lists, semicolon tasks, and
+recognized two-aspect relationship questions into production evidence goals.
 
 ---
 

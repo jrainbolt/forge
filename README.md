@@ -409,3 +409,7 @@ exhausted candidates safely reopen discovery, including for multi-file tasks.
 
 For multi-part repository questions, Forge can track which requested areas have
 actual source evidence before accepting a final answer.
+
+Decomposition is intentionally conservative: explicit lists, independent
+semicolon tasks, and narrowly phrased relationship questions are supported;
+ambiguous prose remains one evidence goal.

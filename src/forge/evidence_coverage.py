@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -114,9 +115,21 @@ class EvidenceCoverageState:
             for goal in self.plan.goals
         )
 
+    @property
+    def has_required_failure(self) -> bool:
+        return any(
+            goal.required and self._statuses[goal.goal_id] is EvidenceGoalStatus.FAILED
+            for goal in self.plan.goals
+        )
+
     def note_discovery(self, goal_id: str) -> None:
         if self._statuses[goal_id] is EvidenceGoalStatus.UNRESOLVED:
             self._statuses[goal_id] = EvidenceGoalStatus.DISCOVERY_ONLY
+
+    def mark_failed(self, goal_id: str) -> None:
+        if self._statuses[goal_id] is not EvidenceGoalStatus.SOURCE_COVERED:
+            self._statuses[goal_id] = EvidenceGoalStatus.FAILED
+            self.goal_transitions += 1
 
     def register_source(
         self, goal_id: str, path: str, generation: int, observation_id: str
@@ -187,6 +200,98 @@ def default_evidence_plan(task: str) -> TaskEvidencePlan:
             ),
         )
     )
+
+
+_LIST_ITEM = re.compile(r"^\s*(?:[-*]\s+|\d+[.)]\s+)(\S.*)$")
+_RELATIONSHIP = re.compile(
+    r"^\s*how\s+do\s+(.+?)\s+and\s+(.+?)\s+"
+    r"(work\s+together|interact|connect)(?:\s+.*)?[?.!]?\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def decompose_evidence_plan(task: str) -> TaskEvidencePlan:
+    """Build a conservative, deterministic evidence plan from request structure."""
+    normalized = " ".join(task.strip().split())
+    if not normalized:
+        raise ValueError("task must be non-empty")
+
+    relationship = _RELATIONSHIP.match(normalized)
+    if relationship is not None:
+        left = _clean_description(relationship.group(1))
+        right = _clean_description(relationship.group(2))
+        if (
+            left
+            and right
+            and len(left) <= MAX_GOAL_DESCRIPTION
+            and len(right) <= MAX_GOAL_DESCRIPTION
+        ):
+            return TaskEvidencePlan(
+                (
+                    EvidenceGoal("G1", left, EvidenceGoalKind.IMPLEMENTATION),
+                    EvidenceGoal("G2", right, EvidenceGoalKind.IMPLEMENTATION),
+                    EvidenceGoal(
+                        "G3",
+                        f"relationship between {left} and {right}"[
+                            :MAX_GOAL_DESCRIPTION
+                        ],
+                        EvidenceGoalKind.RELATIONSHIP,
+                        depends_on=("G1", "G2"),
+                    ),
+                )
+            )
+
+    listed = [
+        match.group(1).strip()
+        for line in task.splitlines()
+        if (match := _LIST_ITEM.match(line)) is not None
+    ]
+    if len(listed) >= 2:
+        return _facet_plan(listed, task)
+
+    separated = _split_semicolons(task)
+    if len(separated) >= 2:
+        return _facet_plan(separated, task)
+    return default_evidence_plan(normalized)
+
+
+def _facet_plan(facets: list[str], fallback: str) -> TaskEvidencePlan:
+    cleaned = [_clean_description(item) for item in facets]
+    if len(cleaned) > MAX_EVIDENCE_GOALS or any(
+        not item or len(item) > MAX_GOAL_DESCRIPTION for item in cleaned
+    ):
+        return default_evidence_plan(" ".join(fallback.strip().split()))
+    return TaskEvidencePlan(
+        tuple(
+            EvidenceGoal(f"G{index}", item, EvidenceGoalKind.OTHER)
+            for index, item in enumerate(cleaned, 1)
+        )
+    )
+
+
+def _clean_description(value: str) -> str:
+    return " ".join(value.strip().rstrip("?.!;").split())
+
+
+def _split_semicolons(value: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    in_code = False
+    for character in value:
+        if character == "`":
+            in_code = not in_code
+        elif character in {'"', "'"} and not in_code:
+            quote = (
+                None if quote == character else character if quote is None else quote
+            )
+        if character == ";" and quote is None and not in_code:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(character)
+    parts.append("".join(current).strip())
+    return [part for part in parts if part]
 
 
 def _kind_satisfies(goal: EvidenceGoalKind, source: SourceKind) -> bool:

@@ -41,6 +41,22 @@ class CoverageEvaluationResult:
     source_reads: int
 
 
+@dataclass(frozen=True, slots=True)
+class ProductionDecompositionResult:
+    tasks_passed: int
+    tasks_total: int
+    production_plans_created: int
+    single_goal_plans: int
+    multi_goal_plans: int
+    goals_total: int
+    goals_covered: int
+    goals_failed: int
+    premature_finals: int
+    goal_transitions: int
+    wrong_goal_reads: int
+    coverage_complete_tasks: int
+
+
 def run_coverage_v1(root: Path) -> CoverageEvaluationResult:
     root.mkdir(parents=True, exist_ok=True)
     results = tuple(
@@ -56,6 +72,86 @@ def run_coverage_v1(root: Path) -> CoverageEvaluationResult:
         sum(x.premature_finals for x in results),
         sum(x.source_reads for x in results),
     )
+
+
+def run_production_decomposition_v1(root: Path) -> ProductionDecompositionResult:
+    root.mkdir(parents=True, exist_ok=True)
+    responses = (
+        _production_case(root / "dec01", "relationship"),
+        _production_case(root / "dec02", "explicit"),
+        _production_case(root / "dec03", "wrong_goal"),
+        _production_case(root / "dec04", "exhausted"),
+    )
+    goals = tuple(goal for response in responses for goal in response.evidence_goals)
+    passed = (
+        responses[0].coverage_complete,
+        responses[1].coverage_complete and responses[1].premature_finals == 1,
+        responses[2].coverage_complete and responses[2].wrong_goal_reads == 1,
+        not responses[3].coverage_complete
+        and any(goal.status.value == "failed" for goal in responses[3].evidence_goals),
+    )
+    return ProductionDecompositionResult(
+        sum(passed),
+        len(passed),
+        len(responses),
+        sum(len(response.evidence_goals) == 1 for response in responses),
+        sum(len(response.evidence_goals) > 1 for response in responses),
+        len(goals),
+        sum(goal.status.value == "source_covered" for goal in goals),
+        sum(goal.status.value == "failed" for goal in goals),
+        sum(response.premature_finals for response in responses),
+        sum(response.goal_transitions for response in responses),
+        sum(response.wrong_goal_reads for response in responses),
+        sum(response.coverage_complete for response in responses),
+    )
+
+
+def _production_case(workspace: Path, case: str):
+    workspace.mkdir()
+    (workspace / "a.py").write_text('def alpha():\n    return "ALPHA"\n')
+    (workspace / "b.py").write_text('def beta():\n    return "BETA"\n')
+    request = (
+        "How do subsystem alpha and subsystem beta work together?"
+        if case == "relationship"
+        else "1. Inspect subsystem alpha.\n2. Inspect subsystem beta."
+    )
+    scripted = [
+        _call("s1", "repository.search_files", {"query": "ALPHA"}),
+        _call("r1", "repository.read_file", {"path": "a.py"}),
+    ]
+    if case == "explicit":
+        scripted.append(json.dumps({"type": "final", "answer": "early"}))
+    if case == "wrong_goal":
+        scripted.append(
+            _call(
+                "wrong",
+                "repository.read_range",
+                {"path": "a.py", "start_line": 1, "end_line": 2},
+            )
+        )
+    if case == "exhausted":
+        scripted.extend(
+            (
+                _call("e1", "repository.search_files", {"query": "MISSING"}),
+                _call("e2", "repository.search_files", {"query": "STILL_MISSING"}),
+                json.dumps({"type": "final", "answer": "No beta evidence."}),
+            )
+        )
+    else:
+        scripted.extend(
+            (
+                _call("s2", "repository.search_files", {"query": "BETA"}),
+                _call("r2", "repository.read_file", {"path": "b.py"}),
+                json.dumps({"type": "final", "answer": "Grounded."}),
+            )
+        )
+    return RepositoryChatSession(
+        "production-decomposition-v1",
+        MockModel(tuple(scripted)),
+        workspace,
+        require_relevant_source=False,
+        minimum_source_files=1,
+    ).ask(request)
 
 
 def _call(identifier: str, tool: str, args: dict[str, object]) -> str:

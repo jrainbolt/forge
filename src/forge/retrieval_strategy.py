@@ -202,6 +202,10 @@ class RetrievalStrategy:
         self._candidates = ()
         self._signatures.clear()
 
+    def mark_exhausted(self) -> None:
+        """Record bounded discovery exhaustion for the current evidence goal."""
+        self._transition(RetrievalState.EXHAUSTED)
+
     def _observe_read(
         self, result: ToolResult, generation: int, arguments: Mapping[str, object]
     ) -> bool:

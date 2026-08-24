@@ -24,7 +24,7 @@ from forge.evidence_coverage import (
     EvidenceCoverageState,
     EvidenceGoalResult,
     TaskEvidencePlan,
-    default_evidence_plan,
+    decompose_evidence_plan,
 )
 from forge.interaction import (
     AutonomyMode,
@@ -173,6 +173,8 @@ class RepositoryResponse:
     evidence_goals: tuple[EvidenceGoalResult, ...] = ()
     coverage_complete: bool = True
     premature_finals: int = 0
+    goal_transitions: int = 0
+    wrong_goal_reads: int = 0
 
     @property
     def text(self) -> str:
@@ -533,9 +535,18 @@ class RepositoryChatSession:
         candidate_directories = {"."}
         candidate_queries = _candidate_search_queries(user_text)
         retrieval_strategy = RetrievalStrategy()
-        coverage = EvidenceCoverageState(
-            self._evidence_plan or default_evidence_plan(user_text)
+        evidence_plan = self._evidence_plan or decompose_evidence_plan(user_text)
+        coverage = EvidenceCoverageState(evidence_plan)
+        coverage_required = (
+            self._evidence_plan is not None or len(evidence_plan.goals) > 1
         )
+        goal_candidates: dict[str, set[str]] = {
+            goal.goal_id: set() for goal in evidence_plan.goals
+        }
+        empty_discoveries: dict[str, int] = {
+            goal.goal_id: 0 for goal in evidence_plan.goals
+        }
+        wrong_goal_reads = 0
         observed_hashes: dict[str, str] = {}
         observed_directories: set[str] = set()
         coding_task = self._active_coding_task if self._assist_mode else None
@@ -554,7 +565,7 @@ class RepositoryChatSession:
                 agent_task.model_called()
             evidence_sufficient = _has_completion_evidence(
                 activities, required_source_files, self._require_relevant_source
-            ) and (self._evidence_plan is None or coverage.complete)
+            ) and (not coverage_required or coverage.complete)
             routed_tools = retrieval_strategy.allowed_tools(
                 {metadata.name for metadata in self._registry.metadata},
                 evidence_sufficient=evidence_sufficient,
@@ -620,11 +631,13 @@ class RepositoryChatSession:
                     else []
                 )
                 transcript[:] = (*context_planner.active_messages, *correction_tail)
+            goal_guidance = Message(MessageRole.USER, _evidence_goal_guidance(coverage))
+            goal_messages = (goal_guidance,) if len(evidence_plan.goals) > 1 else ()
             plan = self._conversation.plan_request(
                 user_text,
                 self._generation,
                 context_capacity=self._model.context_capacity,
-                temporary_messages=tuple(transcript),
+                temporary_messages=(*goal_messages, *transcript),
             )
             remaining_context = max(
                 0,
@@ -691,8 +704,11 @@ class RepositoryChatSession:
                     required_source_files,
                     self._require_relevant_source,
                 )
-                coverage_required = self._evidence_plan is not None
-                if not has_grounding or (coverage_required and not coverage.complete):
+                if not has_grounding or (
+                    coverage_required
+                    and not coverage.complete
+                    and not coverage.has_required_failure
+                ):
                     if protocol_corrections:
                         raise RepositoryOrchestrationError(
                             "final answer lacks source-content evidence or required "
@@ -719,13 +735,24 @@ class RepositoryChatSession:
                     )
                     continue
                 self._conversation.discard_oldest_turns(plan.omitted_turns)
+                final_text = parsed.text
+                if coverage.has_required_failure:
+                    failed = ", ".join(
+                        item.goal_id
+                        for item in coverage.results()
+                        if item.status.value == "failed" and item.required
+                    )
+                    final_text = (
+                        f"Incomplete evidence: required goal(s) {failed} failed. "
+                        f"{parsed.text}"
+                    )
                 answer_response = ModelResponse(
-                    parsed.text,
+                    final_text,
                     response.finish_reason,
                     response.identity,
                     response.usage,
                 )
-                self._conversation.commit(user_text, parsed.text)
+                self._conversation.commit(user_text, final_text)
                 self._last_plan = plan
                 self._last_activity = tuple(activities)
                 task_result = (
@@ -759,6 +786,8 @@ class RepositoryChatSession:
                     evidence_goals=coverage.results(),
                     coverage_complete=coverage.complete,
                     premature_finals=coverage.premature_finals,
+                    goal_transitions=coverage.goal_transitions,
+                    wrong_goal_reads=wrong_goal_reads,
                 )
 
             call = parsed.tool_call
@@ -924,11 +953,28 @@ class RepositoryChatSession:
             active_before = coverage.active_goal
             if evidence is ToolEvidence.DISCOVERY and active_before is not None:
                 coverage.note_discovery(active_before.goal_id)
+            retrieval_strategy.observe(
+                result,
+                generation=self._mutation_generation,
+                arguments=call.arguments,
+            )
+            if active_before is not None and evidence is ToolEvidence.DISCOVERY:
+                discovered = {item.path for item in retrieval_strategy.candidates}
+                goal_candidates[active_before.goal_id].update(discovered)
+                if not discovered:
+                    empty_discoveries[active_before.goal_id] += 1
+                    if empty_discoveries[active_before.goal_id] >= 2:
+                        coverage.mark_failed(active_before.goal_id)
+                        retrieval_strategy.mark_exhausted()
             if (
                 result.status is ToolResultStatus.SUCCESS
                 and evidence is ToolEvidence.SOURCE_CONTENT
                 and activity.path is not None
                 and active_before is not None
+                and (
+                    not coverage_required
+                    or activity.path in goal_candidates[active_before.goal_id]
+                )
             ):
                 coverage.register_source(
                     active_before.goal_id,
@@ -936,11 +982,14 @@ class RepositoryChatSession:
                     self._mutation_generation,
                     call.invocation_id,
                 )
-            retrieval_strategy.observe(
-                result,
-                generation=self._mutation_generation,
-                arguments=call.arguments,
-            )
+            elif (
+                result.status is ToolResultStatus.SUCCESS
+                and evidence is ToolEvidence.SOURCE_CONTENT
+                and activity.path is not None
+                and active_before is not None
+                and coverage_required
+            ):
+                wrong_goal_reads += 1
             if (
                 active_before is not coverage.active_goal
                 and coverage.active_goal is not None
@@ -984,7 +1033,7 @@ class RepositoryChatSession:
                 # Explicit A22 plans require generation-current source coverage.
                 # The implicit compatibility goal preserves the pre-A22 coding
                 # workflow, whose verification state already guards mutations.
-                if self._evidence_plan is not None:
+                if coverage_required:
                     coverage.invalidate_path(activity.path)
                 retrieval_strategy.invalidate_path(
                     activity.path, generation=self._mutation_generation
@@ -1307,6 +1356,26 @@ def _repository_system_prompt(
         "metadata:\n"
         f"{definitions}"
     )
+
+
+def _evidence_goal_guidance(coverage: EvidenceCoverageState) -> str:
+    """Render bounded trusted goal state without exposing mutable internals."""
+    active = coverage.active_goal
+    goals = {goal.goal_id: goal for goal in coverage.plan.goals}
+    lines = ["Evidence goals (Forge-managed; inspect source for the active goal):"]
+    for result in coverage.results():
+        goal = goals[result.goal_id]
+        if active is not None and result.goal_id == active.goal_id:
+            status = "active"
+        elif goal.depends_on and result.status.value != "source_covered":
+            status = "blocked"
+        else:
+            status = result.status.value.replace("source_", "")
+        lines.append(f"{result.goal_id} [{status}] — {result.description}")
+    if active is not None:
+        lines.append(f"Current evidence goal: {active.goal_id} — {active.description}")
+        lines.append(f"Required source kind: {active.kind.value}")
+    return "\n".join(lines)
 
 
 def _render_prompt_tool_definitions(registry: ToolRegistry) -> str:
