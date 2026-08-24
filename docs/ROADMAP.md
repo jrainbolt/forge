@@ -952,21 +952,17 @@ Forge Core remains independent of embeddings.
 
 ---
 
-# Milestone A18 — Project Knowledge
+# Milestone A18 — Context Planning & Budget Management v1
 
-**Goal:** Preserve explicit project information across sessions.
+**Goal:** Admit, retain, narrow, and compact repository observations deliberately.
 
-Examples:
+Implemented with a deterministic application-layer context planner that accounts for
+estimated tokens, bytes, and lines; preflights source reads; recommends symbol and
+reference windows; compacts superseded discovery and verification payloads; and keeps
+authoritative task/provenance metadata separate from the model-visible snapshot.
 
-```text
-architecture rules
-build commands
-coding conventions
-important directories
-project-specific constraints
-```
-
-This is distinct from general conversational memory.
+The planner adds no retrieval source, model call, authority, embeddings, or semantic
+summarization.
 
 ---
 

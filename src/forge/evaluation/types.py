@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from forge.context_planner import ContextPlannerMetrics
 from forge.models import ModelUsage
 
 SCHEMA_VERSION = 1
@@ -140,6 +141,7 @@ class TaskResult:
     scores: TaskScores
     failure_reason: FailureReason | None = None
     failure_message: str | None = None
+    context_metrics: ContextPlannerMetrics = ContextPlannerMetrics()
 
     @property
     def tool_count(self) -> int:

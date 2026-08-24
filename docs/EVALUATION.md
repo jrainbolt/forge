@@ -184,3 +184,14 @@ chat now supplies the same structural tools with a persistent local index; deter
 index tests inject temporary cache roots. Index build/refresh metrics are operational
 diagnostics only and do not change grounding: only current source reads receive source
 evidence credit.
+
+## context-budget-v1
+
+A18 adds five separate tasks without changing `context-v1`: B01 measures exact-symbol
+narrowing, B02 discourages inefficient whole-file context, B03 traces references with
+targeted reads, B04 exposes repeated broad-search behavior, and B05 checks final-answer
+survival under compaction. Reports add estimated context admitted/dropped and peak,
+compaction and rejection counts, final remaining budget, and whole-file/range-read
+counts. Scoring remains deterministic and source-grounded; no model grader or semantic
+retrieval is introduced. Large-file admission behavior is exercised through generated
+temporary fixtures in deterministic tests rather than committed filler.

@@ -10,6 +10,8 @@ from forge.evaluation.types import EvaluationTask, RequiredFact, TaskCategory
 CODING_V1 = "coding-v1"
 CONTEXT_V1 = "context-v1"
 CONTEXT_SUITE_VERSION = 1
+CONTEXT_BUDGET_V1 = "context-budget-v1"
+CONTEXT_BUDGET_SUITE_VERSION = 1
 
 
 def fixture_workspace() -> Path:
@@ -228,12 +230,69 @@ CONTEXT_V1_TASKS = (
     ),
 )
 
+CONTEXT_BUDGET_V1_TASKS = (
+    EvaluationTask(
+        "B01",
+        TaskCategory.CONTEXT,
+        "Find RetryPolicy.should_retry and explain it using targeted source context.",
+        ("src/tinyqueue/retry.py",),
+        (_fact("max_attempts"),),
+        ("src/tinyqueue/retry.py",),
+        ("RetryPolicy.should_retry",),
+        3,
+    ),
+    EvaluationTask(
+        "B02",
+        TaskCategory.CONTEXT,
+        "Inspect RetryPolicy.should_retry without reading an unrelated whole module.",
+        ("src/tinyqueue/retry.py",),
+        (_fact("<=", "less than or equal"),),
+        ("src/tinyqueue/retry.py",),
+        ("RetryPolicy.should_retry",),
+        3,
+    ),
+    EvaluationTask(
+        "B03",
+        TaskCategory.CONTEXT,
+        "Trace references to should_retry using structural candidates and "
+        "targeted reads.",
+        ("src/tinyqueue/service.py",),
+        (_fact("fail"),),
+        ("src/tinyqueue/service.py",),
+        ("should_retry",),
+        5,
+    ),
+    EvaluationTask(
+        "B04",
+        TaskCategory.CONTEXT,
+        "Locate QueueService.fail without repeating broad repository searches.",
+        ("src/tinyqueue/service.py",),
+        (_fact("queueservice.fail", "fail"),),
+        ("src/tinyqueue/service.py",),
+        ("QueueService.fail",),
+        4,
+    ),
+    EvaluationTask(
+        "B05",
+        TaskCategory.CONTEXT,
+        "Explain retry exhaustion from focused current source evidence.",
+        ("src/tinyqueue/retry.py",),
+        (_fact("max_attempts"),),
+        ("src/tinyqueue/retry.py",),
+        ("should_retry",),
+        4,
+    ),
+)
+
 
 def load_suite(name: str) -> tuple[EvaluationTask, ...]:
     if name == CODING_V1:
         return CODING_V1_TASKS
     if name == CONTEXT_V1:
         return CONTEXT_V1_TASKS
+    if name == CONTEXT_BUDGET_V1:
+        return CONTEXT_BUDGET_V1_TASKS
     raise ValueError(
-        f"unknown evaluation suite {name!r}; available: {CODING_V1}, {CONTEXT_V1}"
+        f"unknown evaluation suite {name!r}; available: {CODING_V1}, {CONTEXT_V1}, "
+        f"{CONTEXT_BUDGET_V1}"
     )

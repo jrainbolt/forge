@@ -692,6 +692,29 @@ declare `ToolCapability.READ`; CHAT remains tool-free, structural discovery gran
 mutation or execution authority, and model or repository instructions cannot expand
 the fixed policy.
 
+## Context planning and admission
+
+A18 separates complete bounded task events from the active model context.
+`ContextPlanner` assigns each tool observation a deterministic type, generation,
+paths, estimated token/byte/line cost, and retention priority. Before each repository
+model call it builds an active snapshot inside the existing output and safety reserves.
+The generic estimator remains explicitly approximate; no backend tokenizer or second
+model is required.
+
+The tool pipeline is state legality, context preflight, permission/approval, execution,
+observation registration, and deterministic compaction. Whole-file and range reads are
+never silently transformed. Reads that cannot fit receive a structured failure with
+targeted alternatives and any known structural window. Small whole-file reads remain
+legal. Permission and context decisions are independent.
+
+Successful targeted source compacts broad search payloads. Mutation removes stale
+pre-mutation source text while existing hashes and task provenance remain authoritative.
+Successful verification is retained as bounded metadata; current failure diagnostics
+remain high priority until a later-generation result supersedes them. Required current
+source, mutation, and verification evidence is protected from budget-pressure dropping.
+CHAT continues to use the ordinary A4 conversation path without repository planner
+state.
+
 ## Capability discovery
 
 Callers inspect `ModelCapabilities` and query explicit `ModelCapability` values

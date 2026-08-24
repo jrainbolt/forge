@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+from forge.context_planner import ContextPlannerMetrics
 from forge.conversation import ContextBudgetError
 from forge.evaluation.scoring import score_task
 from forge.evaluation.types import (
@@ -78,6 +79,7 @@ class EvaluationRunner:
             usage = ModelUsage()
             failure_reason = None
             failure_message = None
+            context_metrics = ContextPlannerMetrics()
             try:
                 response = session.ask(task.prompt)
                 answer = response.text[:MAX_CAPTURED_ANSWER_CHARS]
@@ -85,6 +87,7 @@ class EvaluationRunner:
                 corrections = response.protocol_corrections
                 steps = response.orchestration_steps
                 usage = response.usage
+                context_metrics = response.context_metrics
             except Exception as error:  # one task must not abort the evaluation run
                 failure_reason = _classify_failure(error)
                 failure_message = str(error)[:1_000]
@@ -121,6 +124,7 @@ class EvaluationRunner:
                     scores,
                     failure_reason,
                     failure_message,
+                    context_metrics,
                 )
             )
             session.clear()

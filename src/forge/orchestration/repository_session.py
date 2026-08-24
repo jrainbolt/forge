@@ -9,7 +9,17 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from forge.conversation import ContextBudgetError, Conversation, RequestPlan
+from forge.context_planner import (
+    ContextAdmissionDecision,
+    ContextPlanner,
+    ContextPlannerMetrics,
+)
+from forge.conversation import (
+    ConservativeTokenEstimator,
+    ContextBudgetError,
+    Conversation,
+    RequestPlan,
+)
 from forge.interaction import (
     AutonomyMode,
     InteractionPolicy,
@@ -148,6 +158,7 @@ class RepositoryResponse:
     coding_task: CodingTaskResult | None = None
     verification_corrections: int = 0
     agent_task: AgentTaskResult | None = None
+    context_metrics: ContextPlannerMetrics = ContextPlannerMetrics()
 
     @property
     def text(self) -> str:
@@ -488,6 +499,10 @@ class RepositoryChatSession:
             raise RepositoryOrchestrationError("repository chat session is closed")
         self._last_activity = ()
         transcript: list[Message] = []
+        context_planner = ContextPlanner(
+            model_capacity=self._model.context_capacity,
+            reserved_output=self._generation.max_tokens,
+        )
         activities: list[ToolActivity] = []
         invocation_ids: set[str] = set()
         call_counts: dict[str, int] = {}
@@ -504,6 +519,7 @@ class RepositoryChatSession:
         required_source_files = self._minimum_source_files or _required_source_files(
             user_text
         )
+        estimator = ConservativeTokenEstimator()
         for _step in range(self._max_steps):
             if agent_task is not None:
                 if agent_task.model_calls >= self._max_model_calls:
@@ -512,33 +528,83 @@ class RepositoryChatSession:
                         "agent model-call limit exceeded"
                     )
                 agent_task.model_called()
+            output_specification = build_repository_output(
+                self._registry,
+                allow_final=_has_completion_evidence(
+                    activities, required_source_files, self._require_relevant_source
+                ),
+                candidate_files=candidate_files,
+                candidate_directories=candidate_directories,
+                candidate_queries=candidate_queries,
+                observed_hashes=observed_hashes,
+                allow_mutations=(
+                    coding_task.may_propose_mutation
+                    if coding_task is not None
+                    else False
+                ),
+                allow_verification=(
+                    coding_task.may_verify if coding_task is not None else True
+                ),
+            )
+            schema_cost = _estimated_schema_cost(output_specification.schema)
+            system_cost = (
+                estimator.estimate(self._conversation.system_message)
+                if self._conversation.system_message is not None
+                else 0
+            )
+            task_cost = estimator.estimate(Message(MessageRole.USER, user_text))
+            maximum_observations = max(
+                0,
+                (self._model.context_capacity or 4096)
+                - self._generation.max_tokens
+                - 64
+                - system_cost
+                - task_cost
+                - schema_cost,
+            )
+            context_planner.compact_to_fit(maximum_observations)
+            if context_planner.history:
+                correction_tail = (
+                    transcript[-2:]
+                    if transcript
+                    and transcript[-1].content
+                    in {
+                        PROTOCOL_CORRECTION,
+                        EVIDENCE_CORRECTION,
+                        VERIFICATION_DECISION_CORRECTION,
+                    }
+                    else []
+                )
+                transcript[:] = (*context_planner.active_messages, *correction_tail)
             plan = self._conversation.plan_request(
                 user_text,
                 self._generation,
                 context_capacity=self._model.context_capacity,
                 temporary_messages=tuple(transcript),
             )
+            remaining_context = max(
+                0,
+                (self._model.context_capacity or 4096)
+                - self._generation.max_tokens
+                - 64
+                - plan.estimated_input_tokens,
+            )
+            context_planner.budget(
+                system_cost=system_cost,
+                tool_definition_cost=schema_cost,
+                durable_conversation_cost=max(
+                    0,
+                    plan.estimated_input_tokens
+                    - system_cost
+                    - task_cost
+                    - context_planner.active_estimated_tokens,
+                ),
+                active_task_cost=task_cost,
+            )
             structured_request = ModelRequest(
                 plan.request.messages,
                 plan.request.generation,
-                build_repository_output(
-                    self._registry,
-                    allow_final=_has_completion_evidence(
-                        activities, required_source_files, self._require_relevant_source
-                    ),
-                    candidate_files=candidate_files,
-                    candidate_directories=candidate_directories,
-                    candidate_queries=candidate_queries,
-                    observed_hashes=observed_hashes,
-                    allow_mutations=(
-                        coding_task.may_propose_mutation
-                        if coding_task is not None
-                        else False
-                    ),
-                    allow_verification=(
-                        coding_task.may_verify if coding_task is not None else True
-                    ),
-                ),
+                output_specification,
             )
             response = self._model.generate(structured_request)
             response_usages.append(response.usage)
@@ -606,6 +672,19 @@ class RepositoryChatSession:
                 task_result = (
                     coding_task.finish(parsed.text) if coding_task is not None else None
                 )
+                context_metrics = context_planner.metrics
+                LOGGER.info(
+                    "Context plan peak=%d admitted=%d dropped=%d compacted=%d "
+                    "rejections=%d whole_reads=%d range_reads=%d remaining=%d",
+                    context_metrics.estimated_context_peak,
+                    context_metrics.estimated_context_admitted,
+                    context_metrics.estimated_context_dropped,
+                    context_metrics.observations_compacted,
+                    context_metrics.context_rejections,
+                    context_metrics.whole_file_reads,
+                    context_metrics.range_reads,
+                    context_metrics.final_remaining_budget,
+                )
                 return RepositoryResponse(
                     answer_response,
                     tuple(activities),
@@ -614,6 +693,7 @@ class RepositoryChatSession:
                     _aggregate_usage(response_usages),
                     task_result,
                     verification_corrections,
+                    context_metrics=context_metrics,
                 )
 
             call = parsed.tool_call
@@ -649,7 +729,26 @@ class RepositoryChatSession:
                 coding_task.record_tool(call.tool_name)
             if agent_task is not None:
                 agent_task.tool_requested()
-            result = self._executor.execute(invocation, self._context)
+            admission = context_planner.preflight(
+                call.tool_name,
+                call.arguments,
+                self._context.workspace,
+                remaining_tokens=remaining_context,
+                generation=self._mutation_generation,
+            )
+            if (
+                not admission.admitted
+                and admission.status.value == "reject_too_large"
+                and maximum_observations == 0
+            ):
+                raise ContextBudgetError(
+                    "requested observation would exceed the estimated input budget"
+                )
+            result = (
+                self._executor.execute(invocation, self._context)
+                if admission.admitted
+                else _context_admission_failure(invocation, admission)
+            )
             if (
                 coding_task is not None
                 and result.error_kind is ToolErrorKind.UNKNOWN_TOOL
@@ -759,6 +858,7 @@ class RepositoryChatSession:
                             "Repository index invalidation failed", exc_info=True
                         )
                 self._mutation_generation += 1
+                context_planner.mutation_succeeded(self._mutation_generation)
                 activities[:] = [
                     replace(item, current_verification=False)
                     if item.evidence
@@ -833,12 +933,15 @@ class RepositoryChatSession:
                 activity.invocation_id,
                 activity.status,
             )
-            transcript.extend(
-                (
-                    Message(MessageRole.ASSISTANT, response.text),
-                    Message(MessageRole.USER, render_tool_result(result, evidence)),
-                )
+            context_planner.register(
+                assistant_text=response.text,
+                rendered_result=render_tool_result(result, evidence),
+                result=result,
+                evidence=evidence,
+                arguments=call.arguments,
+                generation=self._mutation_generation,
             )
+            transcript[:] = context_planner.active_messages
         if agent_task is not None:
             self._agent_stop_hint = AgentStopReason.ITERATION_LIMIT
         raise RepositoryOrchestrationError("orchestration step limit exceeded")
@@ -1230,6 +1333,33 @@ def _provenance_failure(result: ToolResult, message: str) -> ToolResult:
         error_kind=ToolErrorKind.VALIDATION,
         error_message=message,
     )
+
+
+def _context_admission_failure(
+    invocation: ToolInvocation, decision: ContextAdmissionDecision
+) -> ToolResult:
+    output: dict[str, object] = {
+        "context_admission": decision.status.value,
+        "estimated_tokens": decision.estimated_tokens,
+    }
+    if decision.recommendation is not None:
+        output["recommended_path"] = decision.recommendation.path
+        output["recommended_ranges"] = decision.recommendation.ranges
+    return ToolResult(
+        invocation.invocation_id,
+        invocation.tool_name,
+        ToolResultStatus.FAILURE,
+        ToolExecutionMetadata(PermissionDecision.DENY, 0.0),
+        output=output,
+        error_kind=ToolErrorKind.TOOL_FAILURE,
+        error_message=decision.message,
+    )
+
+
+def _estimated_schema_cost(schema: object) -> int:
+    if schema is None:
+        return 0
+    return (len(str(schema).encode("utf-8")) + 2) // 3 + 4
 
 
 def _state_policy_failure(result: ToolResult, message: str) -> ToolResult:

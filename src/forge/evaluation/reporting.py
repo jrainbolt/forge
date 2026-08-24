@@ -121,6 +121,20 @@ def _task_to_dict(result: TaskResult) -> dict[str, object]:
             result.failure_reason.value if result.failure_reason is not None else None
         ),
         "failure_message": result.failure_message,
+        "context": {
+            "estimated_context_peak": result.context_metrics.estimated_context_peak,
+            "estimated_context_admitted": (
+                result.context_metrics.estimated_context_admitted
+            ),
+            "estimated_context_dropped": (
+                result.context_metrics.estimated_context_dropped
+            ),
+            "observations_compacted": result.context_metrics.observations_compacted,
+            "context_rejections": result.context_metrics.context_rejections,
+            "whole_file_reads": result.context_metrics.whole_file_reads,
+            "range_reads": result.context_metrics.range_reads,
+            "final_remaining_budget": result.context_metrics.final_remaining_budget,
+        },
     }
 
 

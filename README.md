@@ -327,6 +327,12 @@ It is not a semantic call graph, embedding search, or refactoring engine. Actual
 source ranges or files must still be read before an implementation answer or
 provenance-constrained write.
 
+Repository workflows also plan active context deterministically. Forge estimates
+observation cost, rejects source reads that cannot fit, recommends bounded ranges from
+structural locations, and compacts superseded discovery or verification payloads.
+Tools still return their real structured results, source reads remain explicit, and
+context planning cannot grant permissions or authorize writes.
+
 The derived cache can be inspected or maintained without loading a model:
 
 ```bash
