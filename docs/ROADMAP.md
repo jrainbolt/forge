@@ -1003,7 +1003,8 @@ Forge should remain fully usable with network disabled.
 
 # Milestone A21 — Retrieval Strategy & Tool Routing v1
 
-**Status:** Implemented.
+**Status:** Implemented and deterministically closed by the production
+`routing-v1` orchestration evaluation.
 
 Forge now tracks a bounded, generation-aware queue of discovery candidates and
 deterministically narrows repository tool schemas toward targeted inspection.

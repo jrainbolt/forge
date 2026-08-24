@@ -231,3 +231,19 @@ source acquisition, and queue truncation without retaining source contents.
 CI uses scripted results and dynamic-schema assertions. Real qwen-small runs
 remain opt-in observations used to compare unrestricted behavior; they do not
 alter deterministic suite scores.
+
+The completed runner sends scripted `MockModel` structured responses through
+the production `RepositoryChatSession`, dynamic routed schemas,
+`RetrievalStrategy`, `ToolExecutor`, and real tools operating on temporary
+repositories. Its six tasks aggregate attempted/executed/suppressed discovery,
+candidate inspection and failure, repeated candidate sets, acquired source
+files, completion, final state, and tool count.
+
+These measurements distinguish three boundaries. Routing correctness concerns
+whether candidate state narrows and reopens tools deterministically. Retrieval
+relevance concerns which candidates lexical, structural, or semantic retrieval
+returns. Generative interpretation quality concerns whether a model correctly
+understands valid inspected source. Unrestricted qwen-small observations showed
+that A21 removed broad-discovery and repeated-invalid-range loops, while nearby
+source interpretation and conceptual coverage remain model/retrieval-quality
+limitations rather than router correctness failures.

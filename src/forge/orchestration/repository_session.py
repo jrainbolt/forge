@@ -56,7 +56,7 @@ from forge.orchestration.protocol import (
     render_tool_result,
 )
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
-from forge.retrieval_strategy import RetrievalStrategy
+from forge.retrieval_strategy import RetrievalMetrics, RetrievalState, RetrievalStrategy
 from forge.semantic_index import SemanticIndex, SemanticIndexError
 from forge.tools import (
     ExecutionContext,
@@ -161,6 +161,9 @@ class RepositoryResponse:
     verification_corrections: int = 0
     agent_task: AgentTaskResult | None = None
     context_metrics: ContextPlannerMetrics = ContextPlannerMetrics()
+    retrieval_state: RetrievalState = RetrievalState.UNSTARTED
+    retrieval_candidate_count: int = 0
+    retrieval_metrics: RetrievalMetrics = RetrievalMetrics()
 
     @property
     def text(self) -> str:
@@ -227,6 +230,7 @@ class RepositoryChatSession:
         ) = None,
         repository_index: RepositoryIndex | None = None,
         semantic_index: SemanticIndex | None = None,
+        enforce_retrieval_routing: bool = False,
     ) -> None:
         if not isinstance(model, Model):
             raise TypeError("model must implement Model")
@@ -364,6 +368,7 @@ class RepositoryChatSession:
         self._approval_callback = approval_callback
         self._repository_index = repository_index
         self._semantic_index = semantic_index
+        self._enforce_retrieval_routing = enforce_retrieval_routing
         self._closed = False
         self._last_plan: RequestPlan | None = None
         self._last_activity: tuple[ToolActivity, ...] = ()
@@ -719,10 +724,35 @@ class RepositoryChatSession:
                     task_result,
                     verification_corrections,
                     context_metrics=context_metrics,
+                    retrieval_state=retrieval_strategy.state,
+                    retrieval_candidate_count=len(retrieval_strategy.candidates),
+                    retrieval_metrics=retrieval_strategy.metrics,
                 )
 
             call = parsed.tool_call
             assert call is not None
+            if (
+                self._enforce_retrieval_routing
+                and call.tool_name not in routed_tools
+                and call.tool_name
+                in {
+                    "repository.semantic_search",
+                    "repository.search_files",
+                    "repository.list_directory",
+                }
+            ):
+                retrieval_strategy.note_suppressed_discovery()
+                transcript.extend(
+                    (
+                        Message(MessageRole.ASSISTANT, response.text),
+                        Message(
+                            MessageRole.USER,
+                            "Concrete candidates are available. Inspect an unresolved "
+                            "candidate before restarting broad discovery.",
+                        ),
+                    )
+                )
+                continue
             if call.invocation_id in invocation_ids:
                 raise RepositoryOrchestrationError("duplicate tool-call id within turn")
             invocation_ids.add(call.invocation_id)

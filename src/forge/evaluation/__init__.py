@@ -48,8 +48,11 @@ from forge.evaluation.routing import (
     ROUTING_SUITE_VERSION,
     ROUTING_V1,
     ROUTING_V1_TASKS,
+    RoutingEvaluationResult,
     RoutingTask,
+    RoutingTaskResult,
     load_routing_suite,
+    run_routing_v1,
 )
 from forge.evaluation.runner import EvaluationRunner
 from forge.evaluation.scoring import score_task
@@ -116,6 +119,8 @@ __all__ = [
     "ROUTING_V1",
     "ROUTING_V1_TASKS",
     "RoutingTask",
+    "RoutingTaskResult",
+    "RoutingEvaluationResult",
     "CodingWriteEvaluationRunner",
     "CODING_V1_TASKS",
     "SCHEMA_VERSION",
@@ -144,6 +149,7 @@ __all__ = [
     "load_write_suite",
     "load_repair_suite",
     "load_routing_suite",
+    "run_routing_v1",
     "render_terminal_report",
     "run_to_dict",
     "score_task",
