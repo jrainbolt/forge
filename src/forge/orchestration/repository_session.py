@@ -540,10 +540,18 @@ class RepositoryChatSession:
                 {metadata.name for metadata in self._registry.metadata},
                 evidence_sufficient=evidence_sufficient,
             )
+            routed_candidates = retrieval_strategy.recommended
+            routed_candidate_files = (
+                {routed_candidates[0].path}
+                if routed_candidates
+                else set()
+                if retrieval_strategy.candidates
+                else candidate_files
+            )
             output_specification = build_repository_output(
                 self._registry,
                 allow_final=evidence_sufficient,
-                candidate_files=candidate_files,
+                candidate_files=routed_candidate_files,
                 candidate_directories=candidate_directories,
                 candidate_queries=candidate_queries,
                 observed_hashes=observed_hashes,
@@ -556,6 +564,12 @@ class RepositoryChatSession:
                     coding_task.may_verify if coding_task is not None else True
                 ),
                 allowed_tool_names=routed_tools,
+                candidate_ranges={
+                    candidate.path: (candidate.start_line, candidate.end_line)
+                    for candidate in routed_candidates[:1]
+                    if candidate.start_line is not None
+                    and candidate.end_line is not None
+                },
             )
             schema_cost = _estimated_schema_cost(output_specification.schema)
             system_cost = (
@@ -845,7 +859,11 @@ class RepositoryChatSession:
                 returned_lines=_returned_lines(result),
             )
             activities.append(activity)
-            retrieval_strategy.observe(result, generation=self._mutation_generation)
+            retrieval_strategy.observe(
+                result,
+                generation=self._mutation_generation,
+                arguments=call.arguments,
+            )
             if (
                 result.status is ToolResultStatus.SUCCESS
                 and evidence in {ToolEvidence.WRITE_SUCCESS, ToolEvidence.PATCH_SUCCESS}

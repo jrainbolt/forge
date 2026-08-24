@@ -6,8 +6,10 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from pathlib import Path
 from types import MappingProxyType
 
+from forge.retrieval import SourceKind
 from forge.tools import ToolResult, ToolResultStatus
 
 LOGGER = logging.getLogger(__name__)
@@ -65,6 +67,7 @@ class RetrievalCandidateState:
     priority: int
     generation: int
     inspection: InspectionState = InspectionState.UNINSPECTED
+    source_kind: SourceKind = SourceKind.OTHER_TEXT
 
     @property
     def identity(self) -> tuple[str, int | None, int | None, str | None, int]:
@@ -115,6 +118,15 @@ class RetrievalStrategy:
             c for c in self._candidates if c.inspection is InspectionState.UNINSPECTED
         )
 
+    @property
+    def recommended(self) -> tuple[RetrievalCandidateState, ...]:
+        implementation = tuple(
+            item
+            for item in self.unresolved
+            if item.source_kind is SourceKind.IMPLEMENTATION
+        )
+        return (implementation or self.unresolved)[:3]
+
     def allowed_tools(
         self, available: set[str], *, evidence_sufficient: bool
     ) -> set[str]:
@@ -125,7 +137,13 @@ class RetrievalStrategy:
             allowed -= BROAD_DISCOVERY_TOOLS
         return allowed
 
-    def observe(self, result: ToolResult, *, generation: int) -> bool:
+    def observe(
+        self,
+        result: ToolResult,
+        *,
+        generation: int,
+        arguments: Mapping[str, object] | None = None,
+    ) -> bool:
         """Consume one trusted tool result and report candidate-set novelty."""
         tool = result.tool_name
         if tool in BROAD_DISCOVERY_TOOLS:
@@ -138,7 +156,7 @@ class RetrievalStrategy:
                 self._metrics,
                 targeted_inspections=self._metrics.targeted_inspections + 1,
             )
-            return self._observe_read(result, generation)
+            return self._observe_read(result, generation, arguments or {})
         produced = _result_candidates(result, generation)
         if not produced:
             if tool in BROAD_DISCOVERY_TOOLS or tool in TARGETED_TOOLS:
@@ -178,8 +196,12 @@ class RetrievalStrategy:
             + 1,
         )
 
-    def _observe_read(self, result: ToolResult, generation: int) -> bool:
-        path = _result_path(result)
+    def _observe_read(
+        self, result: ToolResult, generation: int, arguments: Mapping[str, object]
+    ) -> bool:
+        path = _result_path(result) or (
+            arguments.get("path") if isinstance(arguments.get("path"), str) else None
+        )
         if path is None:
             return False
         context_rejection = (
@@ -200,9 +222,28 @@ class RetrievalStrategy:
             self._metrics = replace(
                 self._metrics, candidate_failures=self._metrics.candidate_failures + 1
             )
+        start, end = arguments.get("start_line"), arguments.get("end_line")
+        bound = [
+            candidate
+            for candidate in self.unresolved
+            if candidate.path == path
+            and candidate.generation == generation
+            and _overlaps(
+                candidate.start_line,
+                candidate.end_line,
+                start if isinstance(start, int) else None,
+                end if isinstance(end, int) else None,
+            )
+        ]
+        same_path = [
+            candidate
+            for candidate in self.unresolved
+            if candidate.path == path and candidate.generation == generation
+        ]
+        target = min(bound or same_path, key=_span) if (bound or same_path) else None
         self._candidates = tuple(
             replace(candidate, inspection=inspection)
-            if candidate.path == path and candidate.generation == generation
+            if candidate is target
             else candidate
             for candidate in self._candidates
         )
@@ -215,8 +256,16 @@ class RetrievalStrategy:
         additions = [
             candidate for candidate in produced if candidate.identity not in existing
         ]
+        active = list(self._candidates)
+        for addition in additions:
+            active = [
+                replace(item, inspection=InspectionState.STALE)
+                if _supersedes(addition, item)
+                else item
+                for item in active
+            ]
         combined = sorted(
-            (*self._candidates, *additions),
+            (*active, *additions),
             key=lambda c: (
                 c.inspection is not InspectionState.UNINSPECTED,
                 c.priority,
@@ -283,6 +332,21 @@ def _result_candidates(
         values = (MappingProxyType({"path": result.output.get("path")}),)
     if not isinstance(values, tuple):
         return ()
+    query = result.output.get("query", result.output.get("symbol"))
+    preferred_stems = (
+        {part.casefold() for part in query.split(".") if part}
+        if isinstance(query, str) and "." in query
+        else set()
+    )
+    preferred = tuple(
+        item
+        for item in values
+        if isinstance(item, Mapping)
+        and isinstance(item.get("path"), str)
+        and Path(item["path"]).stem.casefold() in preferred_stems
+    )
+    if preferred:
+        values = preferred
     candidates = []
     for priority, item in enumerate(values):
         if (
@@ -293,12 +357,10 @@ def _result_candidates(
             continue
         start = item.get("line_start", item.get("line_number"))
         end = item.get("line_end", start)
-        recommended = item.get("recommended_range")
-        if isinstance(recommended, Mapping):
-            start, end = (
-                recommended.get("start_line", start),
-                recommended.get("end_line", end),
-            )
+        try:
+            source_kind = SourceKind(item.get("source_kind", "other_text"))
+        except ValueError:
+            source_kind = SourceKind.OTHER_TEXT
         candidates.append(
             RetrievalCandidateState(
                 item["path"],
@@ -310,6 +372,31 @@ def _result_candidates(
                 source,
                 priority,
                 generation,
+                source_kind=source_kind,
             )
         )
     return tuple(candidates)
+
+
+def _span(candidate: RetrievalCandidateState) -> int:
+    if candidate.start_line is None or candidate.end_line is None:
+        return 1 << 30
+    return candidate.end_line - candidate.start_line
+
+
+def _overlaps(a: int | None, b: int | None, c: int | None, d: int | None) -> bool:
+    if None in {a, b, c, d}:
+        return True
+    assert a is not None and b is not None and c is not None and d is not None
+    return a <= d and c <= b
+
+
+def _supersedes(new: RetrievalCandidateState, old: RetrievalCandidateState) -> bool:
+    return (
+        new.path == old.path
+        and new.generation == old.generation
+        and None not in {new.start_line, new.end_line, old.start_line, old.end_line}
+        and old.start_line <= new.start_line <= new.end_line <= old.end_line  # type: ignore[operator]
+        and (new.start_line, new.end_line) != (old.start_line, old.end_line)
+        and (new.symbol is not None or _span(new) < _span(old))
+    )

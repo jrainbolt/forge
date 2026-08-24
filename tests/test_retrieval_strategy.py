@@ -52,7 +52,7 @@ def test_semantic_candidates_narrow_broad_discovery_until_inspection() -> None:
         evidence_sufficient=False,
     )
     assert allowed == {"repository.read_range"}
-    assert strategy.candidates[0].start_line == 80
+    assert strategy.candidates[0].start_line == 100
 
 
 def test_exact_symbol_identifies_target_and_successful_read_acquires_source() -> None:
@@ -154,3 +154,56 @@ def test_prompt_injection_text_cannot_change_router_state() -> None:
         generation=0,
     )
     assert strategy.state is RetrievalState.SOURCE_ACQUIRED
+
+
+def test_precise_overlapping_candidate_supersedes_broad_candidate() -> None:
+    strategy = RetrievalStrategy()
+    strategy.observe(
+        _result(
+            "repository.semantic_search",
+            {"matches": ({"path": "foo.py", "line_start": 100, "line_end": 300},)},
+        ),
+        generation=0,
+    )
+    strategy.observe(
+        _result(
+            "repository.find_symbol",
+            {
+                "matches": (
+                    {
+                        "path": "foo.py",
+                        "line_start": 140,
+                        "line_end": 170,
+                        "qualified_name": "Foo.run",
+                    },
+                )
+            },
+        ),
+        generation=0,
+    )
+    assert [(item.start_line, item.end_line) for item in strategy.unresolved] == [
+        (140, 170)
+    ]
+
+
+def test_failed_range_advances_to_distinct_alternate_candidate() -> None:
+    strategy = RetrievalStrategy()
+    strategy.observe(
+        _result(
+            "repository.semantic_search",
+            {
+                "matches": (
+                    {"path": "foo.py", "line_start": 1, "line_end": 20},
+                    {"path": "foo.py", "line_start": 80, "line_end": 100},
+                )
+            },
+        ),
+        generation=0,
+    )
+    strategy.observe(
+        _result("repository.read_range", {"path": "foo.py"}, ToolResultStatus.FAILURE),
+        generation=0,
+        arguments={"path": "foo.py", "start_line": 1, "end_line": 20},
+    )
+    assert strategy.recommended[0].start_line == 80
+    assert strategy.metrics.candidate_failures == 1

@@ -72,6 +72,7 @@ def build_repository_output(
     allow_mutations: bool = False,
     allow_verification: bool = True,
     allowed_tool_names: set[str] | None = None,
+    candidate_ranges: Mapping[str, tuple[int, int]] | None = None,
 ) -> OutputSpecification:
     """Build a strict schema from registered tools and discovered path provenance."""
     branches: list[dict[str, object]] = []
@@ -165,6 +166,16 @@ def build_repository_output(
                 and argument.name == "query"
             ):
                 property_schema["enum"] = sorted(candidate_queries)
+            elif (
+                metadata.name == "repository.read_range"
+                and argument.name in {"start_line", "end_line"}
+                and candidate_ranges
+                and len(candidate_ranges) == 1
+            ):
+                start, end = next(iter(candidate_ranges.values()))
+                property_schema["enum"] = [
+                    start if argument.name == "start_line" else end
+                ]
             elif argument.name == "mode":
                 property_schema["enum"] = ["create", "replace"]
             elif argument.name == "expected_sha256" and hashes:
