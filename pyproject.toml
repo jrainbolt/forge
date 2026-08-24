@@ -21,6 +21,9 @@ dev = [
 llama = [
     "llama-cpp-python>=0.3.35,<0.4",
 ]
+semantic = [
+    "llama-cpp-python>=0.3.35,<0.4",
+]
 
 [project.scripts]
 forge = "forge.cli:main"

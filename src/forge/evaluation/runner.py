@@ -23,6 +23,9 @@ from forge.orchestration import (
     RepositoryOrchestrationError,
     ToolActivity,
 )
+from forge.repository_index import RepositoryIndex
+from forge.semantic_index import SemanticIndex
+from forge.tools import create_readonly_repository_registry
 
 Clock = Callable[[], float]
 
@@ -38,6 +41,7 @@ class EvaluationRunner:
         *,
         generation: GenerationConfig | None = None,
         clock: Clock = time.perf_counter,
+        semantic_index: SemanticIndex | None = None,
     ) -> None:
         self._profile = model_profile
         self._model = model
@@ -46,6 +50,7 @@ class EvaluationRunner:
             max_tokens=512, temperature=0.0
         )
         self._clock = clock
+        self._semantic_index = semantic_index
 
     def run(
         self,
@@ -66,6 +71,11 @@ class EvaluationRunner:
             self._workspace,
             generation=self._generation,
             activity_callback=record,
+            registry=create_readonly_repository_registry(
+                RepositoryIndex(self._workspace), self._semantic_index
+            ),
+            repository_index=RepositoryIndex(self._workspace),
+            semantic_index=self._semantic_index,
         )
         run_started = self._clock()
         results = []

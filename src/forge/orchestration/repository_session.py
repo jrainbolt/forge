@@ -56,6 +56,7 @@ from forge.orchestration.protocol import (
     render_tool_result,
 )
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
+from forge.semantic_index import SemanticIndex, SemanticIndexError
 from forge.tools import (
     ExecutionContext,
     InvocationApproval,
@@ -224,6 +225,7 @@ class RepositoryChatSession:
             | None
         ) = None,
         repository_index: RepositoryIndex | None = None,
+        semantic_index: SemanticIndex | None = None,
     ) -> None:
         if not isinstance(model, Model):
             raise TypeError("model must implement Model")
@@ -360,6 +362,7 @@ class RepositoryChatSession:
         self._activity_callback = activity_callback
         self._approval_callback = approval_callback
         self._repository_index = repository_index
+        self._semantic_index = semantic_index
         self._closed = False
         self._last_plan: RequestPlan | None = None
         self._last_activity: tuple[ToolActivity, ...] = ()
@@ -856,6 +859,13 @@ class RepositoryChatSession:
                     except RepositoryIndexError:
                         LOGGER.warning(
                             "Repository index invalidation failed", exc_info=True
+                        )
+                if self._semantic_index is not None:
+                    try:
+                        self._semantic_index.invalidate(activity.path)
+                    except SemanticIndexError:
+                        LOGGER.warning(
+                            "Semantic index invalidation failed", exc_info=True
                         )
                 self._mutation_generation += 1
                 context_planner.mutation_succeeded(self._mutation_generation)
@@ -1422,6 +1432,21 @@ def _agent_progress(
         if (isinstance(matches, tuple) and matches) or (
             isinstance(entries, tuple) and entries
         ):
+            if result.tool_name == "repository.semantic_search" and isinstance(
+                matches, tuple
+            ):
+                candidates = tuple(
+                    sorted(
+                        (
+                            str(item.get("path")),
+                            int(item.get("line_start", 0)),
+                            int(item.get("line_end", 0)),
+                        )
+                        for item in matches
+                        if isinstance(item, Mapping)
+                    )
+                )
+                return f"semantic-candidates:{candidates!r}:{generation}", None
             return f"discovery:{result.tool_name}:{dict(arguments)!r}", None
         return None, None
     if evidence in {ToolEvidence.WRITE_SUCCESS, ToolEvidence.PATCH_SUCCESS}:

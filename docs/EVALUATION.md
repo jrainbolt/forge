@@ -185,6 +185,15 @@ index tests inject temporary cache roots. Index build/refresh metrics are operat
 diagnostics only and do not change grounding: only current source reads receive source
 evidence credit.
 
+## semantic-v1
+
+A19 defines conceptual navigation scenarios for approval policy, context planning,
+repair eligibility, persistent indexing, and configured project execution. Semantic
+metrics distinguish whether conceptual retrieval was used, its top-k candidates, and
+which candidates were subsequently read as current source. Deterministic CI uses the
+mock embedding model; real local embedding and qwen-small runs are optional smoke
+evidence, not historical-suite score gates. Existing suites remain frozen.
+
 ## context-budget-v1
 
 A18 adds five separate tasks without changing `context-v1`: B01 measures exact-symbol

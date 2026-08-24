@@ -753,6 +753,24 @@ without chat-template metadata instead of allowing llama.cpp's fallback format.
 only when constructing the adapter. Base Forge installations, the CLI, unit
 tests, and hosted CI remain usable without the native inference dependency.
 
+## Semantic retrieval
+
+A19 adds a separate generic embedding boundary and an optional lazy llama.cpp
+adapter for user-owned local GGUF embedding models. Semantic configuration is
+independent from generative model profiles. Query execution is offline and never
+downloads a model.
+
+Deterministic structural and line-window chunks are stored in `semantic.sqlite3`
+beside, but not inside, the A17 structural index. The semantic database contains
+locations, hashes, model identity, and little-endian float32 vectors; it does not
+store source text or pickle data. Model identity, dimensions, or chunker-version
+changes cause an atomic semantic rebuild without altering structural state.
+
+`repository.semantic_search` is conditionally exposed as READ/DISCOVERY. Its ranked
+locations and recommended ranges are navigation hints only. Current source from
+`repository.read_range` or `repository.read_file` remains required for grounded
+implementation claims and mutation provenance.
+
 ## Tool isolation
 
 Models cannot directly access the filesystem, shell, Git, network, compilers,

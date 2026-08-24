@@ -10,6 +10,7 @@ from pathlib import Path
 
 from forge import __version__
 from forge.config import ForgeConfig
+from forge.embedding_config import load_embedding_profile
 from forge.evaluation import (
     SUITE_VERSION,
     EvaluationRunner,
@@ -36,6 +37,7 @@ from forge.orchestration import RepositoryChatSession
 from forge.project_config import ProjectCommands
 from forge.repl import run_repl
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
+from forge.semantic_index import SemanticIndex, SemanticIndexError
 from forge.session import DEFAULT_SYSTEM_MESSAGE, ChatSession
 from forge.tools import (
     create_repository_registry,
@@ -68,6 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--config",
         type=Path,
         help="model configuration path (or set FORGE_CONFIG)",
+    )
+    chat.add_argument(
+        "--embedding-config", type=Path, help="separate embedding configuration path"
+    )
+    chat.add_argument(
+        "--embedding-profile", help="configured local embedding profile name"
     )
     chat.add_argument("--max-tokens", type=int, default=256)
     chat.add_argument("--temperature", type=float, default=0.4)
@@ -128,6 +136,9 @@ def build_parser() -> argparse.ArgumentParser:
     evaluation.add_argument(
         "--verbose", action="store_true", help="include answers and files in report"
     )
+    evaluation.add_argument("--workspace", type=Path)
+    evaluation.add_argument("--embedding-config", type=Path)
+    evaluation.add_argument("--embedding-profile")
     index = commands.add_parser(
         "index", help="inspect or maintain the local repository index"
     )
@@ -135,6 +146,16 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("status", "build", "refresh", "clear"):
         operation = index_commands.add_parser(name)
         operation.add_argument("--workspace", type=Path, default=Path.cwd())
+    for name in (
+        "semantic-status",
+        "semantic-build",
+        "semantic-refresh",
+        "semantic-clear",
+    ):
+        operation = index_commands.add_parser(name)
+        operation.add_argument("--workspace", type=Path, default=Path.cwd())
+        operation.add_argument("--embedding-config", type=Path, required=True)
+        operation.add_argument("--embedding-profile", required=True)
     return parser
 
 
@@ -148,6 +169,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     LOGGER.debug("Forge CLI initialized")
     if args.command == "index":
         try:
+            if args.index_command.startswith("semantic-"):
+                embedding = load_embedding_profile(
+                    args.embedding_config, args.embedding_profile
+                )
+                semantic = SemanticIndex(args.workspace, embedding)
+                operation = args.index_command.removeprefix("semantic-")
+                if operation == "status":
+                    result = semantic.status()
+                elif operation == "build":
+                    result = semantic.build()
+                elif operation == "refresh":
+                    result = semantic.refresh()
+                else:
+                    semantic.clear()
+                    result = {"state": "cleared", "path": str(semantic.database_path)}
+                semantic.close()
+                print(result)
+                return 0
             index = RepositoryIndex(args.workspace)
             if args.index_command == "status":
                 result = index.status()
@@ -160,7 +199,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 result = {"state": "cleared", "path": str(index.database_path)}
             print(result)
             return 0
-        except (OSError, RepositoryIndexError, ValueError) as error:
+        except (OSError, RepositoryIndexError, SemanticIndexError, ValueError) as error:
             LOGGER.error("%s", error)
             return 2
     if args.command == "chat":
@@ -190,6 +229,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             LOGGER.info("Selected model profile %s", args.model)
             load_started = time.perf_counter()
             model = catalog.create(args.model)
+            if bool(args.embedding_config) != bool(args.embedding_profile):
+                raise ValueError(
+                    "--embedding-config and --embedding-profile must be "
+                    "supplied together"
+                )
+            semantic_index = None
+            if args.embedding_config is not None:
+                if args.workspace is None:
+                    raise ValueError("semantic retrieval requires --workspace")
+                semantic_index = SemanticIndex(
+                    args.workspace,
+                    load_embedding_profile(
+                        args.embedding_config, args.embedding_profile
+                    ),
+                )
             LOGGER.debug(
                 "Loaded model profile %s in %.2f seconds",
                 args.model,
@@ -214,15 +268,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                             interaction,
                             getattr(catalog, "project_commands", ProjectCommands()),
                             repository_index,
+                            semantic_index,
                         )
                     ),
                     policy=interaction,
                     mode=mode,
                     interaction_policy=interaction,
                     repository_index=repository_index,
+                    semantic_index=semantic_index,
                 )
             with model, session:
-                return run_repl(session)
+                result = run_repl(session)
+            if semantic_index is not None:
+                semantic_index.close()
+            return result
         except (
             ModelConfigurationError,
             ModelSelectionError,
@@ -242,18 +301,47 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         try:
             tasks = load_suite(args.suite)
-            workspace = fixture_workspace().resolve(strict=True)
+            workspace = (
+                args.workspace.resolve(strict=True)
+                if args.workspace is not None
+                else fixture_workspace().resolve(strict=True)
+            )
+            if args.suite == "semantic-v1" and args.workspace is None:
+                raise ValueError("semantic-v1 requires --workspace")
+            if bool(args.embedding_config) != bool(args.embedding_profile):
+                raise ValueError(
+                    "--embedding-config and --embedding-profile must be "
+                    "supplied together"
+                )
+            semantic_index = None
+            if args.embedding_config is not None:
+                semantic_index = SemanticIndex(
+                    workspace,
+                    load_embedding_profile(
+                        args.embedding_config, args.embedding_profile
+                    ),
+                )
             print(f"Evaluation workspace: {workspace}")
             catalog = load_model_catalog(config_path, default_backend_registry())
             model = catalog.create(args.model)
             with model:
-                result = EvaluationRunner(args.model, model, workspace).run(
-                    args.suite, tasks, suite_version=SUITE_VERSION
+                runner = (
+                    EvaluationRunner(args.model, model, workspace)
+                    if semantic_index is None
+                    else EvaluationRunner(
+                        args.model,
+                        model,
+                        workspace,
+                        semantic_index=semantic_index,
+                    )
                 )
+                result = runner.run(args.suite, tasks, suite_version=SUITE_VERSION)
             print(render_terminal_report(result, verbose=args.verbose))
             if args.output is not None:
                 write_json_report(result, args.output)
                 print(f"JSON report: {args.output}")
+            if semantic_index is not None:
+                semantic_index.close()
             return 0
         except (
             ModelConfigurationError,

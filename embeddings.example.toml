@@ -1,0 +1,7 @@
+# Copy outside the repository and point this at a user-owned local embedding GGUF.
+[embeddings.code]
+backend = "llama.cpp"
+model_path = "/path/to/local-embedding-model.gguf"
+dimensions = 768
+context_size = 2048
+gpu_layers = 0

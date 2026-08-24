@@ -382,3 +382,14 @@ python scripts/smoke_repo_chat.py qwen-small \
 The architectural direction and milestone boundaries are described in
 [`docs/ROADMAP.md`](docs/ROADMAP.md). Current invariants are summarized in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Semantic repository search is optional and separately configured. Copy
+[`embeddings.example.toml`](embeddings.example.toml), select it with
+`--embedding-config` and `--embedding-profile`, and explicitly build its local cache:
+
+```text
+forge index semantic-build --workspace . \
+  --embedding-config /path/to/embeddings.toml --embedding-profile code
+```
+
+Forge never downloads embedding models. Semantic matches are discovery candidates;
+the agent must read the recommended source range before using them as evidence.

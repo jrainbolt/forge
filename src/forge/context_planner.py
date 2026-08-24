@@ -25,6 +25,7 @@ OBSERVATION_FRAMING_TOKENS = 32
 
 class ObservationType(Enum):
     SEARCH_DISCOVERY = "search_discovery"
+    SEMANTIC_DISCOVERY = "semantic_discovery"
     SYMBOL_DISCOVERY = "symbol_discovery"
     REFERENCE_DISCOVERY = "reference_discovery"
     OUTLINE_DISCOVERY = "outline_discovery"
@@ -385,7 +386,10 @@ class ContextPlanner:
             ObservationType.SOURCE_RANGE,
         }:
             for item in tuple(self._active[:-1]):
-                if item.record.observation_type is ObservationType.SEARCH_DISCOVERY:
+                if item.record.observation_type in {
+                    ObservationType.SEARCH_DISCOVERY,
+                    ObservationType.SEMANTIC_DISCOVERY,
+                }:
                     self._compact(item, "targeted source supersedes broad search")
                 elif (
                     newest.observation_type is ObservationType.SOURCE_RANGE
@@ -541,6 +545,7 @@ def _line_count(path: Path) -> int:
 def _observation_type(tool_name: str) -> ObservationType:
     return {
         "repository.search_files": ObservationType.SEARCH_DISCOVERY,
+        "repository.semantic_search": ObservationType.SEMANTIC_DISCOVERY,
         "repository.find_symbol": ObservationType.SYMBOL_DISCOVERY,
         "repository.find_references": ObservationType.REFERENCE_DISCOVERY,
         "repository.file_outline": ObservationType.OUTLINE_DISCOVERY,
@@ -566,6 +571,8 @@ def _priority(kind: ObservationType, status: ToolResultStatus) -> int:
         return 95 if status is not ToolResultStatus.SUCCESS else 85
     if kind in {ObservationType.SYMBOL_DISCOVERY, ObservationType.REFERENCE_DISCOVERY}:
         return 60
+    if kind is ObservationType.SEMANTIC_DISCOVERY:
+        return 45
     return 30
 
 

@@ -12,6 +12,8 @@ CONTEXT_V1 = "context-v1"
 CONTEXT_SUITE_VERSION = 1
 CONTEXT_BUDGET_V1 = "context-budget-v1"
 CONTEXT_BUDGET_SUITE_VERSION = 1
+SEMANTIC_V1 = "semantic-v1"
+SEMANTIC_SUITE_VERSION = 1
 
 
 def fixture_workspace() -> Path:
@@ -284,6 +286,59 @@ CONTEXT_BUDGET_V1_TASKS = (
     ),
 )
 
+SEMANTIC_V1_TASKS = (
+    EvaluationTask(
+        "S01",
+        TaskCategory.ARCHITECTURE,
+        "What code controls whether repository changes need user confirmation?",
+        ("src/forge/interaction.py",),
+        (_fact("permission profile", "permission"),),
+        ("src/forge/interaction.py",),
+        ("InteractionPolicy",),
+        4,
+    ),
+    EvaluationTask(
+        "S02",
+        TaskCategory.CONTEXT,
+        "Where does Forge discard or compact old context observations?",
+        ("src/forge/context_planner.py",),
+        (_fact("compact", "drop"),),
+        ("src/forge/context_planner.py",),
+        ("ContextPlanner",),
+        4,
+    ),
+    EvaluationTask(
+        "S03",
+        TaskCategory.ARCHITECTURE,
+        "What determines whether a failed verification allows another code change?",
+        ("src/forge/orchestration/coding_task.py",),
+        (_fact("repair", "verification"),),
+        ("src/forge/orchestration/coding_task.py",),
+        ("CodingTaskState",),
+        5,
+    ),
+    EvaluationTask(
+        "S04",
+        TaskCategory.ARCHITECTURE,
+        "Where does Forge persist symbol and reference metadata between runs?",
+        ("src/forge/repository_index.py",),
+        (_fact("sqlite", "repository index"),),
+        ("src/forge/repository_index.py",),
+        ("RepositoryIndex",),
+        4,
+    ),
+    EvaluationTask(
+        "S05",
+        TaskCategory.ARCHITECTURE,
+        "Where are configured build and test commands executed safely?",
+        ("src/forge/tools/project.py",),
+        (_fact("configured", "argv", "subprocess"),),
+        ("src/forge/tools/project.py", "src/forge/project_config.py"),
+        ("ProjectCommandTool",),
+        5,
+    ),
+)
+
 
 def load_suite(name: str) -> tuple[EvaluationTask, ...]:
     if name == CODING_V1:
@@ -292,7 +347,9 @@ def load_suite(name: str) -> tuple[EvaluationTask, ...]:
         return CONTEXT_V1_TASKS
     if name == CONTEXT_BUDGET_V1:
         return CONTEXT_BUDGET_V1_TASKS
+    if name == SEMANTIC_V1:
+        return SEMANTIC_V1_TASKS
     raise ValueError(
         f"unknown evaluation suite {name!r}; available: {CODING_V1}, {CONTEXT_V1}, "
-        f"{CONTEXT_BUDGET_V1}"
+        f"{CONTEXT_BUDGET_V1}, {SEMANTIC_V1}"
     )

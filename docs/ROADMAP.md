@@ -1585,4 +1585,10 @@ Therefore the next implementation task is:
 
 **Forge Milestone A0 — Project Bootstrap**
 
+Milestone A19 adds optional local semantic repository retrieval: a generic embedding
+API, deterministic chunking, source-free incremental vector persistence, conceptual
+search, context-planner compaction, and explicit semantic index lifecycle commands.
+It preserves exact structural/text lookup precedence and requires targeted source
+reads before semantic candidates become evidence.
+
 No model should be downloaded and no inference code should be written until A0 establishes the repository structure, architecture documents, Python project configuration, CLI skeleton, tests, and engineering conventions.
