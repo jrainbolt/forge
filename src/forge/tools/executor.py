@@ -37,6 +37,16 @@ class ToolExecutor:
         self._policy = policy
         self._clock = clock
 
+    def permission(
+        self, invocation: ToolInvocation, context: ExecutionContext
+    ) -> PermissionDecision:
+        """Return the effective decision without executing or requesting approval."""
+        try:
+            tool = self._registry.get(invocation.tool_name)
+        except ToolRegistrationError:
+            return PermissionDecision.DENY
+        return self._policy.evaluate(tool, invocation, context)
+
     def execute(
         self,
         invocation: ToolInvocation,

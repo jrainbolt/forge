@@ -74,6 +74,13 @@ def main() -> int:
             f"premature_finals={response.premature_finals} "
             f"wrong_goal_reads={response.wrong_goal_reads}"
         )
+        bootstrap = response.bootstrap_metrics
+        print(
+            f"[bootstrap] executions={bootstrap.executions} "
+            f"successes={bootstrap.successes} candidates={bootstrap.candidates} "
+            f"empty={bootstrap.empty_results} failures={bootstrap.failures} "
+            f"model_discovery_after={bootstrap.model_discovery_calls_after_bootstrap}"
+        )
         print(response.text)
     if semantic_index is not None:
         semantic_index.close()

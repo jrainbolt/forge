@@ -413,3 +413,7 @@ actual source evidence before accepting a final answer.
 Decomposition is intentionally conservative: explicit lists, independent
 semicolon tasks, and narrowly phrased relationship questions are supported;
 ambiguous prose remains one evidence goal.
+
+When semantic retrieval is configured, Forge can seed each unresolved evidence
+goal with one bounded semantic discovery step before the local model chooses source
+to inspect.

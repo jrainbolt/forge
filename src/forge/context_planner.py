@@ -301,6 +301,7 @@ class ContextPlanner:
         evidence: ToolEvidence,
         arguments: Mapping[str, object],
         generation: int,
+        assistant_role: MessageRole = MessageRole.ASSISTANT,
     ) -> None:
         rendered_result = self._enrich_windows(result, rendered_result)
         observation_type = _observation_type(result.tool_name)
@@ -337,7 +338,7 @@ class ContextPlanner:
             self._targeted_failed = True
 
         result_message = Message(MessageRole.USER, rendered_result)
-        assistant_message = Message(MessageRole.ASSISTANT, assistant_text)
+        assistant_message = Message(assistant_role, assistant_text)
         cost = self.estimator.estimate(result_message) + self.estimator.estimate(
             assistant_message
         )

@@ -1030,7 +1030,18 @@ recognized two-aspect relationship questions into production evidence goals.
 
 ---
 
-# Milestone A23 — VS Code Integration
+# Milestone A23 — Goal-Directed Retrieval Bootstrap v1
+
+**Status:** Implemented.
+
+Forge may perform one permission-checked semantic discovery through the existing
+tool pipeline for each unresolved source-bearing evidence goal and generation.
+Candidates flow through A20/A21/A18/A22 normally; source inspection remains
+model-directed and the existing tool budget is unchanged.
+
+---
+
+# Future — VS Code Integration
 
 **Goal:** Use Forge directly inside the development environment.
 

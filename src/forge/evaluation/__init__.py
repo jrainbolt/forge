@@ -10,6 +10,13 @@ from forge.evaluation.agent import (
     AgentTaskScore,
     load_agent_suite,
 )
+from forge.evaluation.bootstrap import (
+    BOOTSTRAP_SUITE_VERSION,
+    BOOTSTRAP_V1,
+    BootstrapEvaluationResult,
+    BootstrapTaskResult,
+    run_bootstrap_v1,
+)
 from forge.evaluation.coding_write import (
     CODING_WRITE_SUITE_VERSION,
     CODING_WRITE_V1,
@@ -102,6 +109,10 @@ __all__ = [
     "AgentEvaluationRunner",
     "AgentEvaluationTask",
     "AgentTaskScore",
+    "BOOTSTRAP_SUITE_VERSION",
+    "BOOTSTRAP_V1",
+    "BootstrapEvaluationResult",
+    "BootstrapTaskResult",
     "CODING_V1",
     "COVERAGE_SUITE_VERSION",
     "COVERAGE_V1",
@@ -169,5 +180,6 @@ __all__ = [
     "score_task",
     "write_json_report",
     "run_coverage_v1",
+    "run_bootstrap_v1",
     "run_production_decomposition_v1",
 ]

@@ -905,3 +905,19 @@ discovered for that goal. Two bounded empty discovery attempts mark the active
 required goal failed and produce an explicitly incomplete result. Source
 observations retain the context planner's highest priority for final synthesis
 when the model context can hold them.
+
+## Goal-directed bootstrap
+
+A23 gives each unresolved source-bearing evidence goal one optional Forge-owned
+semantic discovery execution per workspace generation. Eligibility requires a
+configured `repository.semantic_search` tool, no actionable A21 candidates, and
+an effective `ALLOW` permission. Forge uses the bounded goal description directly
+as the query and executes it through `ToolExecutor`; ASK, DENY, missing backends,
+empty results, and failures fall back to ordinary model-directed discovery.
+
+Bootstrap results remain discovery-only. They enter A20 candidate ranking, A21
+routing, A18 context admission, and A22 goal association through the same paths as
+model-requested semantic results. The model still chooses every source inspection.
+Bootstrap consumes one normal tool execution but no additional model call, cannot
+authorize writes, and never runs for dependency-only relationship goals. A22 owns
+obligations, A23 seeds discovery, A20 ranks, A21 routes, and A18 bounds context.

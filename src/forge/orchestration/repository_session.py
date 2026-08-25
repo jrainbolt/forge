@@ -62,6 +62,11 @@ from forge.orchestration.protocol import (
     render_tool_result,
 )
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
+from forge.retrieval_bootstrap import (
+    SEMANTIC_TOOL,
+    BootstrapMetrics,
+    RetrievalBootstrap,
+)
 from forge.retrieval_strategy import RetrievalMetrics, RetrievalState, RetrievalStrategy
 from forge.semantic_index import SemanticIndex, SemanticIndexError
 from forge.tools import (
@@ -175,6 +180,7 @@ class RepositoryResponse:
     premature_finals: int = 0
     goal_transitions: int = 0
     wrong_goal_reads: int = 0
+    bootstrap_metrics: BootstrapMetrics = BootstrapMetrics()
 
     @property
     def text(self) -> str:
@@ -535,6 +541,7 @@ class RepositoryChatSession:
         candidate_directories = {"."}
         candidate_queries = _candidate_search_queries(user_text)
         retrieval_strategy = RetrievalStrategy()
+        retrieval_bootstrap = RetrievalBootstrap()
         evidence_plan = self._evidence_plan or decompose_evidence_plan(user_text)
         coverage = EvidenceCoverageState(evidence_plan)
         coverage_required = (
@@ -563,6 +570,89 @@ class RepositoryChatSession:
                         "agent model-call limit exceeded"
                     )
                 agent_task.model_called()
+            active_for_bootstrap = coverage.active_goal
+            bootstrap_probe = ToolInvocation(
+                "forge-bootstrap-permission-probe",
+                SEMANTIC_TOOL,
+                {
+                    "query": (
+                        active_for_bootstrap.description
+                        if active_for_bootstrap is not None
+                        else "unavailable"
+                    )
+                },
+            )
+            bootstrap_request, _bootstrap_reason = retrieval_bootstrap.prepare(
+                active_for_bootstrap,
+                generation=self._mutation_generation,
+                retrieval_state=retrieval_strategy.state,
+                actionable_candidates=len(retrieval_strategy.unresolved),
+                semantic_available=any(
+                    item.name == SEMANTIC_TOOL for item in self._registry.metadata
+                ),
+                permission=self._executor.permission(bootstrap_probe, self._context),
+            )
+            if (
+                bootstrap_request is not None
+                and len(activities) < self._max_tool_executions
+            ):
+                result = self._executor.execute(
+                    bootstrap_request.invocation, self._context
+                )
+                evidence = _tool_evidence(
+                    self._registry,
+                    bootstrap_request.invocation.tool_name,
+                    bootstrap_request.invocation.arguments,
+                )
+                activity = ToolActivity(
+                    bootstrap_request.invocation.invocation_id,
+                    bootstrap_request.invocation.tool_name,
+                    result.status.value,
+                    evidence.value,
+                    False,
+                    generation=self._mutation_generation,
+                )
+                activities.append(activity)
+                if active_for_bootstrap is not None:
+                    coverage.note_discovery(active_for_bootstrap.goal_id)
+                before_candidates = len(retrieval_strategy.candidates)
+                retrieval_strategy.observe(
+                    result,
+                    generation=self._mutation_generation,
+                    arguments=bootstrap_request.invocation.arguments,
+                )
+                new_candidates = max(
+                    0, len(retrieval_strategy.candidates) - before_candidates
+                )
+                retrieval_bootstrap.record(result, new_candidates)
+                if active_for_bootstrap is not None:
+                    goal_candidates[active_for_bootstrap.goal_id].update(
+                        item.path for item in retrieval_strategy.candidates
+                    )
+                _update_candidates(
+                    result,
+                    candidate_files=candidate_files,
+                    candidate_directories=candidate_directories,
+                )
+                context_planner.register(
+                    assistant_text=json.dumps(
+                        {
+                            "type": "forge_retrieval_bootstrap",
+                            "goal_id": bootstrap_request.goal_id,
+                            "query": bootstrap_request.query,
+                        },
+                        sort_keys=True,
+                    ),
+                    rendered_result=render_tool_result(result, evidence),
+                    result=result,
+                    evidence=evidence,
+                    arguments=bootstrap_request.invocation.arguments,
+                    generation=self._mutation_generation,
+                    assistant_role=MessageRole.SYSTEM,
+                )
+                transcript[:] = context_planner.active_messages
+                if self._activity_callback is not None:
+                    self._activity_callback(activity)
             evidence_sufficient = _has_completion_evidence(
                 activities, required_source_files, self._require_relevant_source
             ) and (not coverage_required or coverage.complete)
@@ -788,10 +878,17 @@ class RepositoryChatSession:
                     premature_finals=coverage.premature_finals,
                     goal_transitions=coverage.goal_transitions,
                     wrong_goal_reads=wrong_goal_reads,
+                    bootstrap_metrics=retrieval_bootstrap.metrics,
                 )
 
             call = parsed.tool_call
             assert call is not None
+            if call.tool_name in {
+                "repository.semantic_search",
+                "repository.search_files",
+                "repository.list_directory",
+            }:
+                retrieval_bootstrap.note_model_discovery()
             if (
                 self._enforce_retrieval_routing
                 and call.tool_name not in routed_tools

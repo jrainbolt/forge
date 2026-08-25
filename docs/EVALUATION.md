@@ -263,6 +263,16 @@ explicit-item planning, wrong-goal isolation, and required-goal exhaustion. It
 reports plan counts, total/covered/failed goals, premature finals, transitions,
 wrong-goal reads, and complete tasks. These metrics do not grade model prose.
 
+## bootstrap-v1
+
+`bootstrap-v1` runs B01–B06 through normal production decomposition, orchestration,
+`ToolExecutor`, a `MockEmbeddingModel` semantic index, A20/A21, and model-directed
+source reads. It covers single and sequential goals, broad-search suppression,
+empty-result fallback, unavailable semantics, and candidate exhaustion without a
+repeat bootstrap. Metrics separate automatic executions/candidates from subsequent
+model discovery calls. Bootstrap correctness does not imply candidate relevance,
+good model candidate choice, or correct source interpretation.
+
 Evidence coverage is separate from retrieval relevance and model interpretation:
 it establishes that each explicit facet has associated trusted evidence, not
 that the retrieved source was ideal or the generated explanation is correct.
