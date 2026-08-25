@@ -1041,6 +1041,17 @@ model-directed and the existing tool budget is unchanged.
 
 ---
 
+# Milestone A24 — Evidence-Locked Finalization & Answer Synthesis v1
+
+**Status:** Implemented.
+
+When trusted evidence coverage and grounding complete a read-only repository task,
+Forge enters a final-only phase, removes tool-call alternatives, and supplies a
+bounded goal-balanced synthesis snapshot to the selected model. Tool calls cannot
+execute after this transition, and coding/repair state machines remain unchanged.
+
+---
+
 # Future — VS Code Integration
 
 **Goal:** Use Forge directly inside the development environment.

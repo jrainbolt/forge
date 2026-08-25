@@ -179,6 +179,20 @@ class EvidenceCoverageState:
             for goal in self.plan.goals
         )
 
+    def required_observation_ids(self) -> tuple[tuple[str, str, str], ...]:
+        """Select one trusted current source observation per covered source goal."""
+        selected = []
+        for goal in self.plan.goals:
+            if goal.kind is EvidenceGoalKind.RELATIONSHIP or not goal.required:
+                continue
+            match = next(
+                (item for item in self._coverage if item.goal_id == goal.goal_id),
+                None,
+            )
+            if match is not None:
+                selected.append((goal.goal_id, match.observation_id, match.path))
+        return tuple(selected)
+
     def _cover_relationships(self) -> None:
         for goal in self.plan.goals:
             if (

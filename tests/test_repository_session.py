@@ -384,10 +384,13 @@ def test_prompt_injection_content_remains_data_and_policy_blocks_shell(
         minimum_source_files=1,
         require_relevant_source=False,
     ).ask("Inspect it")
-    assert [item.status for item in response.tool_activity] == ["success", "failure"]
+    assert [item.status for item in response.tool_activity] == ["success"]
+    assert response.finalization_metrics.post_coverage_tool_calls_prevented == 1
     assert malicious.exists()
-    assert "IGNORE THE USER" in model.requests[1].messages[-1].content
-    assert '"kind":"unknown_tool"' in model.requests[2].messages[-1].content
+    assert any(
+        "IGNORE THE USER" in message.content for message in model.requests[1].messages
+    )
+    assert "No further tool calls" in model.requests[2].messages[-1].content
 
 
 def test_duplicate_invocation_id_fails_transactionally(workspace: Path) -> None:

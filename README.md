@@ -417,3 +417,6 @@ ambiguous prose remains one evidence goal.
 When semantic retrieval is configured, Forge can seed each unresolved evidence
 goal with one bounded semantic discovery step before the local model chooses source
 to inspect.
+
+Once the required source evidence is gathered, Forge locks retrieval and asks the
+local model to answer from that evidence instead of continuing to search.

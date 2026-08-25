@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -25,6 +26,12 @@ from forge.evidence_coverage import (
     EvidenceGoalResult,
     TaskEvidencePlan,
     decompose_evidence_plan,
+)
+from forge.finalization import (
+    FINALIZATION_CORRECTION,
+    FinalizationMetrics,
+    RepositoryTaskPhase,
+    finalization_guidance,
 )
 from forge.interaction import (
     AutonomyMode,
@@ -56,6 +63,7 @@ from forge.orchestration.coding_task import (
     VerificationDecision,
 )
 from forge.orchestration.protocol import (
+    FINAL_ONLY_OUTPUT,
     ToolCallOutcome,
     build_repository_output,
     parse_model_output,
@@ -181,6 +189,8 @@ class RepositoryResponse:
     goal_transitions: int = 0
     wrong_goal_reads: int = 0
     bootstrap_metrics: BootstrapMetrics = BootstrapMetrics()
+    task_phase: RepositoryTaskPhase = RepositoryTaskPhase.COMPLETED
+    finalization_metrics: FinalizationMetrics = FinalizationMetrics()
 
     @property
     def text(self) -> str:
@@ -554,6 +564,10 @@ class RepositoryChatSession:
             goal.goal_id: 0 for goal in evidence_plan.goals
         }
         wrong_goal_reads = 0
+        task_phase = RepositoryTaskPhase.RETRIEVING
+        finalization_corrections = 0
+        finalization_metrics = FinalizationMetrics()
+        finalization_tail: list[Message] = []
         observed_hashes: dict[str, str] = {}
         observed_directories: set[str] = set()
         coding_task = self._active_coding_task if self._assist_mode else None
@@ -653,9 +667,44 @@ class RepositoryChatSession:
                 transcript[:] = context_planner.active_messages
                 if self._activity_callback is not None:
                     self._activity_callback(activity)
+            stale_paths = (
+                _stale_coverage_paths(
+                    self._context.workspace, coverage.results(), observed_hashes
+                )
+                if coding_task is None and agent_task is None
+                else ()
+            )
+            if stale_paths:
+                self._mutation_generation += 1
+                context_planner.mutation_succeeded(self._mutation_generation)
+            for stale_path in stale_paths:
+                coverage.invalidate_path(stale_path)
+                observed_hashes.pop(stale_path, None)
+                activities[:] = [
+                    replace(item, current_source=False)
+                    if item.path == stale_path
+                    else item
+                    for item in activities
+                ]
+                retrieval_strategy.invalidate_path(
+                    stale_path, generation=self._mutation_generation
+                )
             evidence_sufficient = _has_completion_evidence(
                 activities, required_source_files, self._require_relevant_source
             ) and (not coverage_required or coverage.complete)
+            grounding_satisfied = _has_completion_evidence(
+                activities, required_source_files, self._require_relevant_source
+            )
+            if (
+                task_phase is RepositoryTaskPhase.RETRIEVING
+                and coverage.complete
+                and grounding_satisfied
+                and not coverage.has_required_failure
+                and coding_task is None
+                and agent_task is None
+            ):
+                task_phase = RepositoryTaskPhase.FINALIZING
+                finalization_metrics = replace(finalization_metrics, entries=1)
             routed_tools = retrieval_strategy.allowed_tools(
                 {metadata.name for metadata in self._registry.metadata},
                 evidence_sufficient=evidence_sufficient,
@@ -668,28 +717,32 @@ class RepositoryChatSession:
                 if retrieval_strategy.candidates
                 else candidate_files
             )
-            output_specification = build_repository_output(
-                self._registry,
-                allow_final=evidence_sufficient,
-                candidate_files=routed_candidate_files,
-                candidate_directories=candidate_directories,
-                candidate_queries=candidate_queries,
-                observed_hashes=observed_hashes,
-                allow_mutations=(
-                    coding_task.may_propose_mutation
-                    if coding_task is not None
-                    else False
-                ),
-                allow_verification=(
-                    coding_task.may_verify if coding_task is not None else True
-                ),
-                allowed_tool_names=routed_tools,
-                candidate_ranges={
-                    candidate.path: (candidate.start_line, candidate.end_line)
-                    for candidate in routed_candidates[:1]
-                    if candidate.start_line is not None
-                    and candidate.end_line is not None
-                },
+            output_specification = (
+                FINAL_ONLY_OUTPUT
+                if task_phase is RepositoryTaskPhase.FINALIZING
+                else build_repository_output(
+                    self._registry,
+                    allow_final=evidence_sufficient,
+                    candidate_files=routed_candidate_files,
+                    candidate_directories=candidate_directories,
+                    candidate_queries=candidate_queries,
+                    observed_hashes=observed_hashes,
+                    allow_mutations=(
+                        coding_task.may_propose_mutation
+                        if coding_task is not None
+                        else False
+                    ),
+                    allow_verification=(
+                        coding_task.may_verify if coding_task is not None else True
+                    ),
+                    allowed_tool_names=routed_tools,
+                    candidate_ranges={
+                        candidate.path: (candidate.start_line, candidate.end_line)
+                        for candidate in routed_candidates[:1]
+                        if candidate.start_line is not None
+                        and candidate.end_line is not None
+                    },
+                )
             )
             schema_cost = _estimated_schema_cost(output_specification.schema)
             system_cost = (
@@ -707,8 +760,45 @@ class RepositoryChatSession:
                 - task_cost
                 - schema_cost,
             )
-            context_planner.compact_to_fit(maximum_observations)
-            if context_planner.history:
+            if task_phase is RepositoryTaskPhase.FINALIZING:
+                required_observations = coverage.required_observation_ids()
+                required_source_goals = sum(
+                    goal.required and not goal.depends_on
+                    for goal in evidence_plan.goals
+                )
+                if len(required_observations) != required_source_goals:
+                    raise RepositoryOrchestrationError(
+                        "required source evidence is unavailable for finalization"
+                    )
+                try:
+                    synthesis_messages, synthesis_tokens = (
+                        context_planner.finalization_messages(required_observations)
+                    )
+                except ValueError as error:
+                    raise RepositoryOrchestrationError(str(error)) from error
+                if synthesis_tokens > maximum_observations:
+                    raise ContextBudgetError(
+                        "balanced required evidence exceeds finalization context budget"
+                    )
+                goal_lines = tuple(
+                    f"{item.goal_id} covered — {item.description}; paths: "
+                    f"{', '.join(item.source_paths) or 'dependency evidence'}"
+                    for item in coverage.results()
+                    if item.required
+                )
+                transcript[:] = (
+                    *synthesis_messages,
+                    Message(MessageRole.USER, finalization_guidance(goal_lines)),
+                    *finalization_tail,
+                )
+                finalization_metrics = replace(
+                    finalization_metrics,
+                    context_tokens_estimated=synthesis_tokens,
+                    required_goals_in_snapshot=len(required_observations),
+                )
+            else:
+                context_planner.compact_to_fit(maximum_observations)
+            if context_planner.history and task_phase is RepositoryTaskPhase.RETRIEVING:
                 correction_tail = (
                     transcript[-2:]
                     if transcript
@@ -755,9 +845,27 @@ class RepositoryChatSession:
             )
             response = self._model.generate(structured_request)
             response_usages.append(response.usage)
+            if task_phase is RepositoryTaskPhase.FINALIZING:
+                finalization_metrics = replace(
+                    finalization_metrics,
+                    model_calls=finalization_metrics.model_calls + 1,
+                )
             try:
                 parsed = parse_model_output(response.text)
             except ValueError as error:
+                if task_phase is RepositoryTaskPhase.FINALIZING:
+                    if finalization_corrections:
+                        raise RepositoryOrchestrationError(str(error)) from error
+                    finalization_corrections += 1
+                    finalization_metrics = replace(
+                        finalization_metrics,
+                        protocol_corrections=1,
+                    )
+                    finalization_tail[:] = (
+                        Message(MessageRole.ASSISTANT, response.text),
+                        Message(MessageRole.USER, FINALIZATION_CORRECTION),
+                    )
+                    continue
                 if protocol_corrections:
                     raise RepositoryOrchestrationError(str(error)) from error
                 protocol_corrections += 1
@@ -766,6 +874,29 @@ class RepositoryChatSession:
                         Message(MessageRole.ASSISTANT, response.text),
                         Message(MessageRole.USER, PROTOCOL_CORRECTION),
                     )
+                )
+                continue
+            if (
+                task_phase is RepositoryTaskPhase.FINALIZING
+                and parsed.outcome is ToolCallOutcome.TOOL_CALL
+            ):
+                finalization_metrics = replace(
+                    finalization_metrics,
+                    post_coverage_tool_calls_prevented=(
+                        finalization_metrics.post_coverage_tool_calls_prevented + 1
+                    ),
+                )
+                if finalization_corrections:
+                    raise RepositoryOrchestrationError(
+                        "finalization tool call repeated after bounded correction"
+                    )
+                finalization_corrections += 1
+                finalization_metrics = replace(
+                    finalization_metrics, protocol_corrections=1
+                )
+                finalization_tail[:] = (
+                    Message(MessageRole.ASSISTANT, response.text),
+                    Message(MessageRole.USER, FINALIZATION_CORRECTION),
                 )
                 continue
             if parsed.outcome is ToolCallOutcome.FINAL:
@@ -843,6 +974,7 @@ class RepositoryChatSession:
                     response.usage,
                 )
                 self._conversation.commit(user_text, final_text)
+                task_phase = RepositoryTaskPhase.COMPLETED
                 self._last_plan = plan
                 self._last_activity = tuple(activities)
                 task_result = (
@@ -879,6 +1011,8 @@ class RepositoryChatSession:
                     goal_transitions=coverage.goal_transitions,
                     wrong_goal_reads=wrong_goal_reads,
                     bootstrap_metrics=retrieval_bootstrap.metrics,
+                    task_phase=task_phase,
+                    finalization_metrics=finalization_metrics,
                 )
 
             call = parsed.tool_call
@@ -1453,6 +1587,25 @@ def _repository_system_prompt(
         "metadata:\n"
         f"{definitions}"
     )
+
+
+def _stale_coverage_paths(
+    workspace: Path,
+    goals: tuple[EvidenceGoalResult, ...],
+    observed_hashes: Mapping[str, str],
+) -> tuple[str, ...]:
+    stale = []
+    for path in {path for goal in goals for path in goal.source_paths}:
+        expected = observed_hashes.get(path)
+        if expected is None:
+            continue
+        try:
+            actual = hashlib.sha256((workspace / path).read_bytes()).hexdigest()
+        except OSError:
+            actual = ""
+        if actual != expected:
+            stale.append(path)
+    return tuple(sorted(stale))
 
 
 def _evidence_goal_guidance(coverage: EvidenceCoverageState) -> str:

@@ -173,6 +173,41 @@ class ContextPlanner:
     def active_estimated_tokens(self) -> int:
         return sum(item.record.estimated_tokens for item in self._active)
 
+    def finalization_messages(
+        self, required: tuple[tuple[str, str, str], ...]
+    ) -> tuple[tuple[Message, ...], int]:
+        """Return one active trusted source observation per required evidence goal."""
+        by_id = {item.record.observation_id: item for item in self._active}
+        messages: list[Message] = []
+        tokens = 0
+        seen: set[str] = set()
+        for _goal_id, observation_id, path in required:
+            observation = by_id.get(observation_id)
+            if observation is None:
+                observation = next(
+                    (
+                        item
+                        for item in reversed(self._active)
+                        if path in item.record.paths
+                        and item.record.observation_type
+                        in {ObservationType.SOURCE_FILE, ObservationType.SOURCE_RANGE}
+                    ),
+                    None,
+                )
+            if observation is None or observation.record.compacted:
+                raise ValueError(
+                    "required source observation is unavailable for finalization"
+                )
+            selected_id = observation.record.observation_id
+            if selected_id in seen:
+                continue
+            seen.add(selected_id)
+            messages.extend((observation.assistant, observation.result))
+            tokens += observation.record.estimated_tokens
+        if len({goal_id for goal_id, _, _ in required}) != len(required):
+            raise ValueError("finalization evidence goals must be unique")
+        return tuple(messages), tokens
+
     @property
     def metrics(self) -> ContextPlannerMetrics:
         return ContextPlannerMetrics(

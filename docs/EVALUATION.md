@@ -273,6 +273,16 @@ repeat bootstrap. Metrics separate automatic executions/candidates from subseque
 model discovery calls. Bootstrap correctness does not imply candidate relevance,
 good model candidate choice, or correct source interpretation.
 
+## finalization-v1
+
+`finalization-v1` runs F01–F06 through normal repository orchestration. It covers
+single and multi-goal final-only transitions, a blocked post-coverage tool call,
+goal-balanced synthesis evidence, stale-source invalidation and reread, and failed
+required-goal non-finalization. Metrics report entries, final model calls, bounded
+protocol corrections, prevented/executed post-coverage tools, represented required
+goals, and grounded completions. These measurements establish workflow locking and
+evidence availability, not semantic answer correctness.
+
 Evidence coverage is separate from retrieval relevance and model interpretation:
 it establishes that each explicit facet has associated trusted evidence, not
 that the retrieved source was ideal or the generated explanation is correct.

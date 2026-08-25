@@ -81,6 +81,15 @@ def main() -> int:
             f"empty={bootstrap.empty_results} failures={bootstrap.failures} "
             f"model_discovery_after={bootstrap.model_discovery_calls_after_bootstrap}"
         )
+        finalization = response.finalization_metrics
+        print(
+            f"[finalization] phase={response.task_phase.value} "
+            f"entries={finalization.entries} calls={finalization.model_calls} "
+            f"corrections={finalization.protocol_corrections} "
+            f"prevented_tools={finalization.post_coverage_tool_calls_prevented} "
+            f"context_tokens={finalization.context_tokens_estimated} "
+            f"snapshot_goals={finalization.required_goals_in_snapshot}"
+        )
         print(response.text)
     if semantic_index is not None:
         semantic_index.close()

@@ -59,6 +59,7 @@ REPOSITORY_TOOL_CALL_OUTPUT = OutputSpecification(ResponseFormat.JSON, TOOL_CALL
 REPOSITORY_RESPONSE_OUTPUT = OutputSpecification(
     ResponseFormat.JSON, REPOSITORY_RESPONSE_SCHEMA
 )
+FINAL_ONLY_OUTPUT = OutputSpecification(ResponseFormat.JSON, FINAL_SCHEMA)
 
 
 def build_repository_output(

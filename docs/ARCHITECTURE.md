@@ -921,3 +921,24 @@ model-requested semantic results. The model still chooses every source inspectio
 Bootstrap consumes one normal tool execution but no additional model call, cannot
 authorize writes, and never runs for dependency-only relationship goals. A22 owns
 obligations, A23 seeds discovery, A20 ranks, A21 routes, and A18 bounds context.
+
+## Evidence-locked finalization
+
+A24 introduces a repository task phase separate from A21 retrieval state. A
+read-only task enters `FINALIZING` only when trusted A22 coverage is complete,
+ordinary source grounding is satisfied, and no required goal has failed. The next
+generic structured-output request uses a final-only JSON schema with no model-visible
+tool metadata. A tool call emitted anyway never reaches `ToolExecutor`; one bounded
+correction asks for the final answer and a repeated violation fails safely.
+
+The final synthesis snapshot contains the original task, covered-goal labels and
+paths, and one current A18-owned source observation per required source-bearing goal.
+Discovery chatter and failed ranges are omitted. Shared active observations are not
+duplicated, and failure to fit balanced required evidence raises a context-budget
+error. Current hashes are rechecked before read-only finalization; concurrent edits
+outside Forge remain limited to this synchronous check rather than filesystem
+watching. A24 guarantees evidence availability, not perfect model interpretation.
+
+A22 defines required evidence, A23 seeds discovery, A24 ends retrieval and locks
+synthesis, while A18 continues to own context budgeting. Coding, agent, and repair
+state machines remain authoritative and retain their established final behavior.

@@ -36,6 +36,13 @@ from forge.evaluation.coverage import (
     run_coverage_v1,
     run_production_decomposition_v1,
 )
+from forge.evaluation.finalization import (
+    FINALIZATION_SUITE_VERSION,
+    FINALIZATION_V1,
+    FinalizationEvaluationResult,
+    FinalizationTaskResult,
+    run_finalization_v1,
+)
 from forge.evaluation.repair import (
     REPAIR_SUITE_VERSION,
     REPAIR_V1,
@@ -118,6 +125,10 @@ __all__ = [
     "COVERAGE_V1",
     "CoverageEvaluationResult",
     "CoverageTaskResult",
+    "FINALIZATION_SUITE_VERSION",
+    "FINALIZATION_V1",
+    "FinalizationEvaluationResult",
+    "FinalizationTaskResult",
     "ProductionDecompositionResult",
     "CODING_WRITE_V1",
     "CONTEXT_SUITE_VERSION",
@@ -180,6 +191,7 @@ __all__ = [
     "score_task",
     "write_json_report",
     "run_coverage_v1",
+    "run_finalization_v1",
     "run_bootstrap_v1",
     "run_production_decomposition_v1",
 ]
