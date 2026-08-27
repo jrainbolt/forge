@@ -36,6 +36,13 @@ from forge.evaluation.coverage import (
     run_coverage_v1,
     run_production_decomposition_v1,
 )
+from forge.evaluation.discovery import (
+    DISCOVERY_SUITE_VERSION,
+    DISCOVERY_V1,
+    DiscoveryEvaluationResult,
+    DiscoveryTaskResult,
+    run_discovery_v1,
+)
 from forge.evaluation.finalization import (
     FINALIZATION_SUITE_VERSION,
     FINALIZATION_V1,
@@ -207,6 +214,10 @@ __all__ = [
     "SCHEMA_VERSION",
     "SUITE_VERSION",
     "DimensionScore",
+    "DISCOVERY_SUITE_VERSION",
+    "DISCOVERY_V1",
+    "DiscoveryEvaluationResult",
+    "DiscoveryTaskResult",
     "EvaluationRun",
     "EvaluationRunner",
     "EvaluationTask",
@@ -236,6 +247,7 @@ __all__ = [
     "score_task",
     "write_json_report",
     "run_coverage_v1",
+    "run_discovery_v1",
     "run_finalization_v1",
     "run_bootstrap_v1",
     "run_production_decomposition_v1",

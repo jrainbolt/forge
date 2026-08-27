@@ -12,6 +12,7 @@ from forge.tools.builtin import (
 )
 from forge.tools.executor import ToolExecutor
 from forge.tools.git import GitDiffTool, GitStatusTool
+from forge.tools.lexical import LexicalSearchTool
 from forge.tools.paths import (
     WorkspacePathError,
     resolve_workspace_path,
@@ -93,6 +94,7 @@ __all__ = [
     "FindReferencesTool",
     "FindSymbolTool",
     "ListDirectoryTool",
+    "LexicalSearchTool",
     "MAX_READ_BYTES",
     "MAX_ANALYSIS_FILE_BYTES",
     "MAX_ANALYSIS_FILES",

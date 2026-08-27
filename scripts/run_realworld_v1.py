@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import time
+from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 
 from forge.embedding_config import load_embedding_profile
@@ -22,14 +24,22 @@ def main() -> int:
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--model", default="qwen-small")
-    parser.add_argument("--embedding-config", type=Path, required=True)
-    parser.add_argument("--embedding-profile", required=True)
+    parser.add_argument("--embedding-config", type=Path)
+    parser.add_argument("--embedding-profile")
     parser.add_argument(
         "--skip-semantic-index",
         action="store_true",
         help="measure the lexical fallback after separately observing cold-index cost",
     )
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--tasks",
+        help="Optional comma-separated task IDs; task definitions remain unchanged.",
+    )
+    parser.add_argument(
+        "--seeds",
+        help="Optional comma-separated fixed seeds applied to selected tasks.",
+    )
     args = parser.parse_args()
 
     configure = ("cmake", "-S", ".", "-B", "build", "-DBUILD_TESTING=ON")
@@ -46,21 +56,37 @@ def main() -> int:
     )
     if snapshot.baseline_outcome.value != "PASS":
         raise RuntimeError("benchmark baseline build/tests failed")
-    embedding_started = time.perf_counter()
-    embedding = load_embedding_profile(args.embedding_config, args.embedding_profile)
-    embedding_load = time.perf_counter() - embedding_started
+    embedding = None
+    embedding_load = 0.0
+    if not args.skip_semantic_index:
+        if args.embedding_config is None or args.embedding_profile is None:
+            parser.error("semantic evaluation requires embedding configuration")
+        embedding_started = time.perf_counter()
+        embedding = load_embedding_profile(
+            args.embedding_config, args.embedding_profile
+        )
+        embedding_load = time.perf_counter() - embedding_started
     catalog = load_model_catalog(args.config, default_backend_registry())
     model_started = time.perf_counter()
     model = catalog.create(args.model)
     model_load = time.perf_counter() - model_started
     try:
-        with model, embedding:
+        tasks = foundation_realworld_tasks()
+        if args.tasks:
+            selected = {value.strip() for value in args.tasks.split(",")}
+            tasks = tuple(task for task in tasks if task.task_id in selected)
+            if {task.task_id for task in tasks} != selected:
+                raise ValueError("unknown realworld task ID")
+        if args.seeds:
+            seeds = tuple(int(value) for value in args.seeds.split(","))
+            tasks = tuple(replace(task, seeds=seeds) for task in tasks)
+        with model, embedding if embedding is not None else nullcontext():
             run = RealWorldEvaluationRunner(
                 args.model,
                 model,
                 args.repository,
-                embedding_model=None if args.skip_semantic_index else embedding,
-            ).run(foundation_realworld_tasks(), snapshot)
+                embedding_model=embedding,
+            ).run(tasks, snapshot)
         write_realworld_json(run, args.output)
         print(render_realworld_report(run))
         print(f"Model load: {model_load:.3f}s")
@@ -68,7 +94,8 @@ def main() -> int:
         print(f"Canonical unchanged: {run.canonical_unchanged}")
     finally:
         model.close()
-        embedding.close()
+        if embedding is not None:
+            embedding.close()
     return 0
 
 

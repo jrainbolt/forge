@@ -1064,6 +1064,18 @@ level; real qwen/Nomic runs remain local and CI remains model-free.
 
 ---
 
+# Milestone A26 — Fast Language-Agnostic Repository Discovery v1
+
+**Status:** Implemented.
+
+Forge has a persistent, source-free lexical repository map with bounded multilingual
+token metadata, deterministic ranking, incremental hash refresh, and generated-file
+confinement. A23 now prefers a compatible warm semantic index and otherwise uses
+the fast lexical provider. Candidates remain discovery-only until trusted source is
+read, and `discovery-v1` provides model-free regression coverage.
+
+---
+
 # Future — VS Code Integration
 
 **Goal:** Use Forge directly inside the development environment.

@@ -909,11 +909,12 @@ when the model context can hold them.
 ## Goal-directed bootstrap
 
 A23 gives each unresolved source-bearing evidence goal one optional Forge-owned
-semantic discovery execution per workspace generation. Eligibility requires a
-configured `repository.semantic_search` tool, no actionable A21 candidates, and
-an effective `ALLOW` permission. Forge uses the bounded goal description directly
-as the query and executes it through `ToolExecutor`; ASK, DENY, missing backends,
-empty results, and failures fall back to ordinary model-directed discovery.
+discovery execution per workspace generation. A compatible current semantic index
+has priority; otherwise A26 selects the fast lexical provider when available.
+Eligibility requires no actionable A21 candidates and an effective `ALLOW`
+permission. Forge uses the bounded goal description directly as the query and
+executes it through `ToolExecutor`; ASK, DENY, missing providers, empty results,
+and failures fall back to ordinary model-directed discovery.
 
 Bootstrap results remain discovery-only. They enter A20 candidate ranking, A21
 routing, A18 context admission, and A22 goal association through the same paths as
@@ -921,6 +922,48 @@ model-requested semantic results. The model still chooses every source inspectio
 Bootstrap consumes one normal tool execution but no additional model call, cannot
 authorize writes, and never runs for dependency-only relationship goals. A22 owns
 obligations, A23 seeds discovery, A20 ranks, A21 routes, and A18 bounds context.
+
+## Fast repository discovery
+
+A26 maintains a rebuildable SQLite repository map separate from the Python-only
+structural index and model-bound semantic vectors. It recognizes common source,
+header, test, configuration, and documentation formats without parsing a language.
+Generated/build directories, binary files, oversized files, and symlinks are
+excluded; vendored source is retained with an explicit third-party classification.
+
+## Lexical retrieval
+
+The versioned tokenizer splits paths, punctuation, snake case, and camel case.
+The index stores hashes, path/basename tokens, bounded content-token counts,
+document frequency, and a few representative line positions. It never stores
+repository source text. Ranking combines path and basename coverage, content,
+rarity, goal-aware source-kind preference, and deterministic path/line tie breaks.
+
+## Bootstrap provider selection
+
+A compatible semantic index remains the preferred bootstrap provider. A missing,
+cold, or incompatible semantic index selects `repository.lexical_search`; absence
+of both providers leaves discovery to the model. The lexical index builds lazily
+and all providers share the existing one-tool-per-goal-generation and tool-budget
+rules.
+
+## Authority
+
+Lexical candidates are hints, not evidence. A21 associates candidates with the
+active A22 goal, while A24 finalization still requires a trusted confined source
+read. Tokens cannot grant permissions or extend read/write capability.
+
+## Incremental freshness
+
+Per-file SHA-256 values make unchanged refreshes reuse all postings. Only added or
+changed files are tokenized, and deleted paths are removed. Incompatible or corrupt
+derived state is rebuilt from the authoritative workspace.
+
+## Limitations
+
+Lexical discovery is not semantic understanding, a symbol parser, or a call graph.
+Its bounded representative ranges can only direct the model toward source that
+must subsequently be read and interpreted.
 
 ## Evidence-locked finalization
 

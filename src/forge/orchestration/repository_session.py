@@ -38,6 +38,7 @@ from forge.interaction import (
     InteractionPolicy,
     resolve_interaction_policy,
 )
+from forge.lexical_index import LexicalIndexError, RepositoryLexicalIndex
 from forge.models import (
     GenerationConfig,
     Message,
@@ -71,6 +72,7 @@ from forge.orchestration.protocol import (
 )
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
 from forge.retrieval_bootstrap import (
+    LEXICAL_TOOL,
     SEMANTIC_TOOL,
     BootstrapMetrics,
     RetrievalBootstrap,
@@ -257,6 +259,7 @@ class RepositoryChatSession:
         ) = None,
         repository_index: RepositoryIndex | None = None,
         semantic_index: SemanticIndex | None = None,
+        lexical_index: RepositoryLexicalIndex | None = None,
         enforce_retrieval_routing: bool = False,
         evidence_plan: TaskEvidencePlan | None = None,
     ) -> None:
@@ -383,6 +386,7 @@ class RepositoryChatSession:
                 assist_mode=self._assist_mode,
                 agent_mode=self._agent_mode,
                 repair_enabled=self._repair_enabled,
+                semantic_ready=_semantic_ready(semantic_index),
             )
         )
         self._max_steps = effective_steps
@@ -396,6 +400,7 @@ class RepositoryChatSession:
         self._approval_callback = approval_callback
         self._repository_index = repository_index
         self._semantic_index = semantic_index
+        self._lexical_index = lexical_index
         self._enforce_retrieval_routing = enforce_retrieval_routing
         self._evidence_plan = evidence_plan
         self._closed = False
@@ -585,9 +590,14 @@ class RepositoryChatSession:
                     )
                 agent_task.model_called()
             active_for_bootstrap = coverage.active_goal
+            semantic_ready = _semantic_ready(self._semantic_index)
+            lexical_available = any(
+                item.name == LEXICAL_TOOL for item in self._registry.metadata
+            )
+            bootstrap_tool = SEMANTIC_TOOL if semantic_ready else LEXICAL_TOOL
             bootstrap_probe = ToolInvocation(
                 "forge-bootstrap-permission-probe",
-                SEMANTIC_TOOL,
+                bootstrap_tool,
                 {
                     "query": (
                         active_for_bootstrap.description
@@ -604,6 +614,8 @@ class RepositoryChatSession:
                 semantic_available=any(
                     item.name == SEMANTIC_TOOL for item in self._registry.metadata
                 ),
+                semantic_ready=semantic_ready,
+                lexical_available=lexical_available,
                 permission=self._executor.permission(bootstrap_probe, self._context),
             )
             if (
@@ -638,7 +650,9 @@ class RepositoryChatSession:
                 new_candidates = max(
                     0, len(retrieval_strategy.candidates) - before_candidates
                 )
-                retrieval_bootstrap.record(result, new_candidates)
+                retrieval_bootstrap.record(
+                    result, new_candidates, bootstrap_request.provider
+                )
                 if active_for_bootstrap is not None:
                     goal_candidates[active_for_bootstrap.goal_id].update(
                         item.path for item in retrieval_strategy.candidates
@@ -1019,6 +1033,7 @@ class RepositoryChatSession:
             assert call is not None
             if call.tool_name in {
                 "repository.semantic_search",
+                "repository.lexical_search",
                 "repository.search_files",
                 "repository.list_directory",
             }:
@@ -1029,6 +1044,7 @@ class RepositoryChatSession:
                 and call.tool_name
                 in {
                     "repository.semantic_search",
+                    "repository.lexical_search",
                     "repository.search_files",
                     "repository.list_directory",
                 }
@@ -1260,6 +1276,13 @@ class RepositoryChatSession:
                         LOGGER.warning(
                             "Semantic index invalidation failed", exc_info=True
                         )
+                if self._lexical_index is not None:
+                    try:
+                        self._lexical_index.invalidate(activity.path)
+                    except LexicalIndexError:
+                        LOGGER.warning(
+                            "Lexical index invalidation failed", exc_info=True
+                        )
                 self._mutation_generation += 1
                 # Explicit A22 plans require generation-current source coverage.
                 # The implicit compatibility goal preserves the pre-A22 coding
@@ -1320,7 +1343,8 @@ class RepositoryChatSession:
                 candidate_directories=candidate_directories,
             )
             if (
-                result.tool_name == "repository.semantic_search"
+                result.tool_name
+                in {"repository.semantic_search", "repository.lexical_search"}
                 and result.status is ToolResultStatus.SUCCESS
                 and isinstance(result.output, Mapping)
                 and result.output.get("matches")
@@ -1464,6 +1488,7 @@ def _repository_system_prompt(
     assist_mode: bool = False,
     agent_mode: bool = False,
     repair_enabled: bool = False,
+    semantic_ready: bool = False,
 ) -> str:
     definitions = _render_prompt_tool_definitions(registry)
     build_availability = (
@@ -1526,7 +1551,10 @@ def _repository_system_prompt(
         if repair_enabled
         else ""
     )
-    semantic_available = any(
+    lexical_available = any(
+        metadata.name == "repository.lexical_search" for metadata in registry.metadata
+    )
+    semantic_available = (semantic_ready or not lexical_available) and any(
         metadata.name == "repository.semantic_search" for metadata in registry.metadata
     )
     semantic_instruction = (
@@ -1539,6 +1567,12 @@ def _repository_system_prompt(
         if semantic_available
         else ""
     )
+    if lexical_available and not semantic_available:
+        semantic_instruction = (
+            "For conceptual questions without a known exact symbol or text, begin "
+            "with repository.lexical_search. Its ranked path/token matches are "
+            "discovery only; read a recommended source range before explaining. "
+        )
     tool_example = (
         '{"type":"tool_call","id":"call-1","tool":'
         '"repository.semantic_search","arguments":{"query":'
@@ -1547,6 +1581,12 @@ def _repository_system_prompt(
         else '{"type":"tool_call","id":"call-1","tool":'
         '"repository.search_files","arguments":{"query":"class Model"}}. '
     )
+    if lexical_available and not semantic_available:
+        tool_example = (
+            '{"type":"tool_call","id":"call-1","tool":'
+            '"repository.lexical_search","arguments":{"query":'
+            '"conceptual question"}}. '
+        )
     return (
         "You are Forge inspecting one local repository. "
         "Every response must be exactly one JSON object matching the requested "
@@ -1883,6 +1923,15 @@ def _has_configured_verification(registry: ToolRegistry) -> bool:
     )
 
 
+def _semantic_ready(index: SemanticIndex | None) -> bool:
+    if index is None:
+        return False
+    try:
+        return index.status().get("state") == "ready"
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def _agent_progress(
     result: ToolResult,
     evidence: ToolEvidence,
@@ -1903,9 +1952,10 @@ def _agent_progress(
         if (isinstance(matches, tuple) and matches) or (
             isinstance(entries, tuple) and entries
         ):
-            if result.tool_name == "repository.semantic_search" and isinstance(
-                matches, tuple
-            ):
+            if result.tool_name in {
+                "repository.semantic_search",
+                "repository.lexical_search",
+            } and isinstance(matches, tuple):
                 candidates = tuple(
                     sorted(
                         (
@@ -2043,6 +2093,7 @@ def _update_candidates(
     if result.tool_name in {
         "repository.search_files",
         "repository.semantic_search",
+        "repository.lexical_search",
         "repository.find_symbol",
         "repository.find_references",
     }:

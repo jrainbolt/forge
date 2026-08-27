@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -17,6 +18,7 @@ from forge.evaluation.types import (
     TaskResult,
     ToolRecord,
 )
+from forge.lexical_index import RepositoryLexicalIndex
 from forge.models import GenerationConfig, Model, ModelError, ModelUsage
 from forge.orchestration import (
     RepositoryChatSession,
@@ -65,6 +67,10 @@ class EvaluationRunner:
         def record(activity: ToolActivity) -> None:
             active.append(activity)
 
+        lexical_index = RepositoryLexicalIndex(
+            self._workspace,
+            cache_root=Path(tempfile.gettempdir()) / "forge-evaluation-cache",
+        )
         session = RepositoryChatSession(
             self._profile,
             self._model,
@@ -72,10 +78,13 @@ class EvaluationRunner:
             generation=self._generation,
             activity_callback=record,
             registry=create_readonly_repository_registry(
-                RepositoryIndex(self._workspace), self._semantic_index
+                RepositoryIndex(self._workspace),
+                self._semantic_index,
+                lexical_index,
             ),
             repository_index=RepositoryIndex(self._workspace),
             semantic_index=self._semantic_index,
+            lexical_index=lexical_index,
         )
         run_started = self._clock()
         results = []

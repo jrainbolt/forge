@@ -2,7 +2,11 @@ from pathlib import Path
 
 from forge.evaluation.bootstrap import run_bootstrap_v1
 from forge.evidence_coverage import EvidenceGoal, EvidenceGoalKind
-from forge.retrieval_bootstrap import BootstrapReason, RetrievalBootstrap
+from forge.retrieval_bootstrap import (
+    BootstrapProvider,
+    BootstrapReason,
+    RetrievalBootstrap,
+)
 from forge.retrieval_strategy import RetrievalState
 from forge.tools import PermissionDecision
 
@@ -76,3 +80,47 @@ def test_bootstrap_requires_allow_and_semantic_provider() -> None:
             permission=decision,
         )
         assert request is None and reason is expected
+
+
+def test_bootstrap_selects_ready_semantic_then_fast_lexical_fallback() -> None:
+    goal = EvidenceGoal("G1", "clock sunset boundary")
+    semantic, _ = RetrievalBootstrap().prepare(
+        goal,
+        generation=0,
+        retrieval_state=RetrievalState.UNSTARTED,
+        actionable_candidates=0,
+        semantic_available=True,
+        semantic_ready=True,
+        lexical_available=True,
+        permission=PermissionDecision.ALLOW,
+    )
+    assert semantic is not None
+    assert semantic.provider is BootstrapProvider.SEMANTIC
+    assert semantic.invocation.tool_name == "repository.semantic_search"
+
+    lexical, _ = RetrievalBootstrap().prepare(
+        goal,
+        generation=0,
+        retrieval_state=RetrievalState.UNSTARTED,
+        actionable_candidates=0,
+        semantic_available=True,
+        semantic_ready=False,
+        lexical_available=True,
+        permission=PermissionDecision.ALLOW,
+    )
+    assert lexical is not None
+    assert lexical.provider is BootstrapProvider.LEXICAL
+    assert lexical.invocation.tool_name == "repository.lexical_search"
+    assert lexical.invocation.arguments["preferred_source_kind"] == "implementation"
+
+    unavailable, reason = RetrievalBootstrap().prepare(
+        goal,
+        generation=0,
+        retrieval_state=RetrievalState.UNSTARTED,
+        actionable_candidates=0,
+        semantic_available=True,
+        semantic_ready=False,
+        lexical_available=False,
+        permission=PermissionDecision.ALLOW,
+    )
+    assert unavailable is None and reason is BootstrapReason.UNAVAILABLE

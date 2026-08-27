@@ -331,3 +331,18 @@ Forge is an everyday production coding agent. Fresh absolute workspace identitie
 can make every semantic index cold; `--skip-semantic-index` exists only for an
 explicitly documented lexical-fallback measurement after cold-index cost has been
 measured separately.
+
+## discovery-v1
+
+`discovery-v1` is the model-free A26 suite. D01-D08 cover C implementation and
+header discovery, Java implementation discovery, configuration/test/documentation
+preferences, exact incremental refresh accounting, generated-directory exclusion,
+and third-party classification. It records ranked paths without treating them as
+source evidence.
+
+The local Foundation A25→A26 comparison preserves the fixed A25 task definitions,
+seeds, prompts, budgets, disposable-copy rules, and independent oracle. Reports add
+the selected bootstrap provider, expected implementation acquisition, lexical cold
+and warm index timing, postings, and search latency. The A25 baseline is retained;
+A26 results are a comparison rather than a replacement. Foundation and model runs
+remain local and are not CI gates.

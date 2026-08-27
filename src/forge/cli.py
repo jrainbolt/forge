@@ -24,6 +24,7 @@ from forge.interaction import (
     AutonomyMode,
     resolve_interaction_policy,
 )
+from forge.lexical_index import RepositoryLexicalIndex
 from forge.logging import configure_logging
 from forge.models import (
     GenerationConfig,
@@ -258,6 +259,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             else:
                 repository_index = RepositoryIndex(args.workspace)
+                lexical_index = RepositoryLexicalIndex(args.workspace)
                 session = RepositoryChatSession(
                     args.model,
                     model,
@@ -269,6 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             getattr(catalog, "project_commands", ProjectCommands()),
                             repository_index,
                             semantic_index,
+                            lexical_index,
                         )
                     ),
                     policy=interaction,
@@ -276,6 +279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     interaction_policy=interaction,
                     repository_index=repository_index,
                     semantic_index=semantic_index,
+                    lexical_index=lexical_index,
                 )
             with model, session:
                 result = run_repl(session)

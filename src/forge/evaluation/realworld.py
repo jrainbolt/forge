@@ -15,6 +15,7 @@ from pathlib import Path
 
 from forge.embeddings import EmbeddingModel
 from forge.interaction import AutonomyMode, resolve_interaction_policy
+from forge.lexical_index import RepositoryLexicalIndex
 from forge.models import GenerationConfig, Model, ModelError, ModelUsage
 from forge.orchestration import RepositoryChatSession, RepositoryOrchestrationError
 from forge.project_config import ProjectCommand, ProjectCommands
@@ -141,6 +142,12 @@ class RealWorldMetrics:
     model_calls: int = 0
     tool_executions: int = 0
     bootstrap_executions: int = 0
+    bootstrap_provider: str = "none"
+    expected_implementation_acquired: bool = False
+    lexical_index_builds: int = 0
+    lexical_index_refreshes: int = 0
+    lexical_files_retokenized: int = 0
+    lexical_index_duration_seconds: float = 0.0
     discovery_calls: int = 0
     source_reads: int = 0
     range_reads: int = 0
@@ -271,6 +278,9 @@ class RealWorldEvaluationRunner:
             approvals = ExpectedApproval(task, workspace, commands)
             policy = resolve_interaction_policy(task.mode)
             index = RepositoryIndex(workspace)
+            lexical_index = RepositoryLexicalIndex(
+                workspace, cache_root=Path(name) / "cache"
+            )
             semantic_index = None
             if self._embedding_model is not None:
                 semantic_index = SemanticIndex(
@@ -287,12 +297,13 @@ class RealWorldEvaluationRunner:
                 mode=task.mode,
                 generation=GenerationConfig(max_tokens=512, temperature=0.0, seed=seed),
                 registry=create_repository_registry(
-                    policy, commands, index, semantic_index
+                    policy, commands, index, semantic_index, lexical_index
                 ),
                 interaction_policy=policy,
                 approval_callback=approvals,
                 repository_index=index,
                 semantic_index=semantic_index,
+                lexical_index=lexical_index,
                 require_relevant_source=False,
                 activity_callback=activity.append,
             )
@@ -324,6 +335,7 @@ class RealWorldEvaluationRunner:
                 approvals,
                 time.perf_counter() - started,
                 tuple(activity),
+                lexical_index,
             )
 
 
@@ -482,6 +494,7 @@ def score_task_result(
     approvals: ExpectedApproval,
     elapsed: float,
     recorded_activity: tuple[object, ...] = (),
+    lexical_index: RepositoryLexicalIndex | None = None,
 ) -> RealWorldTaskResult:
     activities = tuple(getattr(response, "tool_activity", ())) or recorded_activity
     inspected = tuple(
@@ -536,11 +549,29 @@ def score_task_result(
         bootstrap_executions=getattr(
             getattr(response, "bootstrap_metrics", None), "executions", 0
         ),
+        bootstrap_provider=next(
+            (
+                "semantic"
+                if activity.tool_name == "repository.semantic_search"
+                else "lexical"
+                for activity in activities
+                if getattr(activity, "invocation_id", "").startswith("forge-bootstrap")
+            ),
+            "none",
+        ),
+        expected_implementation_acquired=grounded,
+        lexical_index_builds=getattr(lexical_index, "builds", 0),
+        lexical_index_refreshes=getattr(lexical_index, "refreshes", 0),
+        lexical_files_retokenized=getattr(lexical_index, "total_files_retokenized", 0),
+        lexical_index_duration_seconds=getattr(
+            lexical_index, "total_duration_seconds", 0.0
+        ),
         discovery_calls=sum(
             a.tool_name
             in {
                 "repository.search_files",
                 "repository.semantic_search",
+                "repository.lexical_search",
                 "repository.find_symbol",
                 "repository.find_references",
             }

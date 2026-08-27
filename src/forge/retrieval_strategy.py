@@ -17,6 +17,7 @@ MAX_RETRIEVAL_CANDIDATES = 32
 BROAD_DISCOVERY_TOOLS = frozenset(
     {
         "repository.semantic_search",
+        "repository.lexical_search",
         "repository.search_files",
         "repository.list_directory",
     }
@@ -327,6 +328,7 @@ def _result_candidates(
         return ()
     source = {
         "repository.semantic_search": CandidateSource.SEMANTIC,
+        "repository.lexical_search": CandidateSource.LEXICAL,
         "repository.search_files": CandidateSource.LEXICAL,
         "repository.find_symbol": CandidateSource.SYMBOL,
         "repository.find_references": CandidateSource.REFERENCE,

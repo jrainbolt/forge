@@ -67,15 +67,16 @@ def test_context_runner_records_structural_targeted_context_metrics() -> None:
     assert result.scores.total == result.scores.maximum
     assert result.files_inspected == ("src/tinyqueue/retry.py",)
     assert [tool.name for tool in result.tools] == [
+        "repository.lexical_search",
         "repository.find_symbol",
         "repository.read_range",
     ]
-    assert result.tools[1].returned_bytes is not None
-    assert result.tools[1].returned_lines is not None
+    assert result.tools[2].returned_bytes is not None
+    assert result.tools[2].returned_lines is not None
     payload = run_to_dict(run)
     tools = payload["tasks"][0]["tools"]  # type: ignore[index]
-    assert tools[1]["returned_bytes"] > 0
-    assert tools[1]["returned_lines"] > 0
+    assert tools[2]["returned_bytes"] > 0
+    assert tools[2]["returned_lines"] > 0
 
 
 def test_symbol_tool_transcript_remains_ephemeral() -> None:

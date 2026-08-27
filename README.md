@@ -421,9 +421,11 @@ Decomposition is intentionally conservative: explicit lists, independent
 semicolon tasks, and narrowly phrased relationship questions are supported;
 ambiguous prose remains one evidence goal.
 
-When semantic retrieval is configured, Forge can seed each unresolved evidence
-goal with one bounded semantic discovery step before the local model chooses source
-to inspect.
+Forge can build a fast language-agnostic repository map for immediate source
+discovery, while using semantic retrieval when a compatible semantic index is
+already available. Each unresolved evidence goal receives at most one bounded
+bootstrap before the local model chooses source to inspect; lexical and semantic
+results remain discovery-only until Forge reads the source.
 
 Once the required source evidence is gathered, Forge locks retrieval and asks the
 local model to answer from that evidence instead of continuing to search.

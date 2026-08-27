@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from forge.embeddings import MockEmbeddingModel
+from forge.lexical_index import RepositoryLexicalIndex
 from forge.models import MockModel
 from forge.orchestration import RepositoryChatSession, ToolActivity
 from forge.semantic_index import SemanticIndex
@@ -90,7 +91,14 @@ def _run(task: str, workspace: Path) -> BootstrapTaskResult:
         if semantic
         else None
     )
-    registry = create_readonly_repository_registry(semantic_index=index)
+    lexical = (
+        RepositoryLexicalIndex(workspace, cache_root=workspace / ".lexical-cache")
+        if semantic
+        else None
+    )
+    registry = create_readonly_repository_registry(
+        semantic_index=index, lexical_index=lexical
+    )
     question = "Where is alpha implemented?"
     scripted: list[str]
     callback = None
@@ -158,6 +166,7 @@ def _run(task: str, workspace: Path) -> BootstrapTaskResult:
         workspace,
         registry=registry,
         semantic_index=index,
+        lexical_index=lexical,
         activity_callback=callback,
         require_relevant_source=False,
         minimum_source_files=1,

@@ -10,10 +10,12 @@ from forge.retrieval_strategy import RetrievalState
 from forge.tools import PermissionDecision, ToolInvocation, ToolResult, ToolResultStatus
 
 SEMANTIC_TOOL = "repository.semantic_search"
+LEXICAL_TOOL = "repository.lexical_search"
 
 
 class BootstrapProvider(StrEnum):
     SEMANTIC = "semantic"
+    LEXICAL = "lexical"
     NONE = "none"
 
 
@@ -46,10 +48,12 @@ class BootstrapMetrics:
     candidates: int = 0
     tool_executions: int = 0
     model_discovery_calls_after_bootstrap: int = 0
+    semantic_ready_bootstraps: int = 0
+    lexical_fallback_bootstraps: int = 0
 
 
 class RetrievalBootstrap:
-    """Own one automatic semantic discovery attempt per goal and generation."""
+    """Own one automatic discovery attempt per goal and generation."""
 
     def __init__(self) -> None:
         self._used: set[tuple[str, int]] = set()
@@ -69,6 +73,8 @@ class RetrievalBootstrap:
         actionable_candidates: int,
         semantic_available: bool,
         permission: PermissionDecision,
+        semantic_ready: bool | None = None,
+        lexical_available: bool = False,
     ) -> tuple[BootstrapRequest | None, BootstrapReason]:
         self._metrics = replace(self._metrics, attempts=self._metrics.attempts + 1)
         if goal is None:
@@ -83,7 +89,16 @@ class RetrievalBootstrap:
         key = (goal.goal_id, generation)
         if key in self._used:
             return None, BootstrapReason.ALREADY_USED
-        if not semantic_available:
+        semantic_is_ready = (
+            semantic_available if semantic_ready is None else semantic_ready
+        )
+        if semantic_available and semantic_is_ready:
+            provider = BootstrapProvider.SEMANTIC
+            tool = SEMANTIC_TOOL
+        elif lexical_available:
+            provider = BootstrapProvider.LEXICAL
+            tool = LEXICAL_TOOL
+        else:
             return None, BootstrapReason.UNAVAILABLE
         if permission is not PermissionDecision.ALLOW:
             return None, BootstrapReason.PERMISSION
@@ -91,21 +106,34 @@ class RetrievalBootstrap:
         self._sequence += 1
         invocation = ToolInvocation(
             f"forge-bootstrap-{self._sequence}-{goal.goal_id}-g{generation}",
-            SEMANTIC_TOOL,
-            {"query": goal.description},
+            tool,
+            {
+                "query": goal.description,
+                **(
+                    {"preferred_source_kind": goal.kind.value}
+                    if provider is BootstrapProvider.LEXICAL
+                    and goal.kind.value in {"implementation", "test", "configuration"}
+                    else {}
+                ),
+            },
         )
         return (
             BootstrapRequest(
                 goal.goal_id,
                 generation,
-                BootstrapProvider.SEMANTIC,
+                provider,
                 goal.description,
                 invocation,
             ),
             BootstrapReason.ELIGIBLE,
         )
 
-    def record(self, result: ToolResult, candidate_count: int) -> None:
+    def record(
+        self,
+        result: ToolResult,
+        candidate_count: int,
+        provider: BootstrapProvider | None = None,
+    ) -> None:
         success = result.status is ToolResultStatus.SUCCESS
         self._metrics = replace(
             self._metrics,
@@ -116,6 +144,10 @@ class RetrievalBootstrap:
             failures=self._metrics.failures + int(not success),
             candidates=self._metrics.candidates + candidate_count,
             tool_executions=self._metrics.tool_executions + 1,
+            semantic_ready_bootstraps=self._metrics.semantic_ready_bootstraps
+            + int(provider is BootstrapProvider.SEMANTIC),
+            lexical_fallback_bootstraps=self._metrics.lexical_fallback_bootstraps
+            + int(provider is BootstrapProvider.LEXICAL),
         )
 
     def note_model_discovery(self) -> None:

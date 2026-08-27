@@ -6,10 +6,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from forge.interaction import InteractionPolicy
+    from forge.lexical_index import RepositoryLexicalIndex
     from forge.repository_index import RepositoryIndex
     from forge.semantic_index import SemanticIndex
 from forge.project_config import ProjectCommands
 from forge.tools.git import GitDiffTool, GitStatusTool
+from forge.tools.lexical import LexicalSearchTool
 from forge.tools.permissions import RuleBasedPolicy
 from forge.tools.project import ProjectCommandTool
 from forge.tools.registry import ToolRegistry
@@ -43,6 +45,7 @@ PROJECT_TOOL_NAMES = ("project.build", "project.test")
 def create_readonly_repository_registry(
     index: RepositoryIndex | None = None,
     semantic_index: SemanticIndex | None = None,
+    lexical_index: RepositoryLexicalIndex | None = None,
 ) -> ToolRegistry:
     """Create a fresh registry containing only A6 read-only capabilities."""
     candidates = [
@@ -58,6 +61,8 @@ def create_readonly_repository_registry(
     ]
     if semantic_index is not None:
         candidates.append(SemanticSearchTool(semantic_index))
+    if lexical_index is not None:
+        candidates.append(LexicalSearchTool(lexical_index))
     return ToolRegistry(candidates)
 
 
@@ -66,6 +71,7 @@ def create_readonly_repository_policy(
 ) -> RuleBasedPolicy:
     """Apply one explicit decision to exactly the built-in read-only tools."""
     rules = {name: decision for name in READ_ONLY_TOOL_NAMES}
+    rules["repository.lexical_search"] = decision
     rules[SEMANTIC_TOOL_NAME] = decision
     return RuleBasedPolicy(rules)
 
@@ -74,6 +80,7 @@ def create_assist_repository_registry(
     commands: ProjectCommands | None = None,
     index: RepositoryIndex | None = None,
     semantic_index: SemanticIndex | None = None,
+    lexical_index: RepositoryLexicalIndex | None = None,
 ) -> ToolRegistry:
     """Create the explicit A6 read plus A9 controlled-write registry."""
     configured = commands or ProjectCommands()
@@ -94,12 +101,15 @@ def create_assist_repository_registry(
     ]
     if semantic_index is not None:
         candidates.append(SemanticSearchTool(semantic_index))
+    if lexical_index is not None:
+        candidates.append(LexicalSearchTool(lexical_index))
     return ToolRegistry(candidates)
 
 
 def create_assist_repository_policy() -> RuleBasedPolicy:
     """Allow reads, require approval for writes, and deny unknown tools."""
     rules = {name: PermissionDecision.ALLOW for name in READ_ONLY_TOOL_NAMES}
+    rules["repository.lexical_search"] = PermissionDecision.ALLOW
     rules[SEMANTIC_TOOL_NAME] = PermissionDecision.ALLOW
     rules.update({name: PermissionDecision.ASK for name in WRITE_TOOL_NAMES})
     rules.update({name: PermissionDecision.ASK for name in PROJECT_TOOL_NAMES})
@@ -111,6 +121,7 @@ def create_repository_registry(
     commands: ProjectCommands | None = None,
     index: RepositoryIndex | None = None,
     semantic_index: SemanticIndex | None = None,
+    lexical_index: RepositoryLexicalIndex | None = None,
 ) -> ToolRegistry:
     """Create one fixed registry under autonomy ceiling and permanent DENYs."""
     configured = commands or ProjectCommands()
@@ -131,6 +142,8 @@ def create_repository_registry(
     ]
     if semantic_index is not None:
         candidates.append(SemanticSearchTool(semantic_index))
+    if lexical_index is not None:
+        candidates.append(LexicalSearchTool(lexical_index))
     return ToolRegistry(
         tool for tool in candidates if interaction.exposes(tool.metadata)
     )

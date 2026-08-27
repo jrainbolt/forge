@@ -379,7 +379,7 @@ def test_assist_requires_workspace_and_is_explicitly_write_capable(
         )
         == 0
     )
-    assert observed == {"assist": True, "tools": 13}
+    assert observed == {"assist": True, "tools": 14}
     assert second.closed
 
 
@@ -431,7 +431,7 @@ def test_agent_requires_workspace_and_selects_bounded_agent_mode(
     assert observed == {
         "agent": True,
         "mode": "agent",
-        "tools": 13,
+        "tools": 14,
         "iterations": 16,
         "tool_limit": 12,
     }

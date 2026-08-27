@@ -72,6 +72,7 @@ class SourceKind(StrEnum):
     DOCUMENTATION = "documentation"
     CONFIGURATION = "configuration"
     GENERATED_METADATA = "generated_metadata"
+    THIRD_PARTY = "third_party"
     OTHER_TEXT = "other_text"
 
 
@@ -103,6 +104,8 @@ def classify_source(path: str) -> SourceKind:
     parts = tuple(part.casefold() for part in PurePosixPath(normalized).parts)
     name = parts[-1] if parts else ""
     suffix = PurePosixPath(name).suffix
+    if any(part in {"vendor", "third_party", "external"} for part in parts):
+        return SourceKind.THIRD_PARTY
     if any(part.endswith((".egg-info", ".dist-info")) for part in parts) or name in {
         "pkg-info",
         "sources.txt",
@@ -122,8 +125,11 @@ def classify_source(path: str) -> SourceKind:
     ):
         return SourceKind.DOCUMENTATION
     if suffix in _CONFIG_SUFFIXES or name in {
+        "build.gradle",
+        "cmakelists.txt",
         "dockerfile",
         "makefile",
+        "pom.xml",
         "pyproject.toml",
     }:
         return SourceKind.CONFIGURATION
@@ -177,6 +183,7 @@ def rank_candidates(
             SourceKind.DOCUMENTATION: -0.01,
             SourceKind.OTHER_TEXT: -0.01,
             SourceKind.GENERATED_METADATA: -0.08,
+            SourceKind.THIRD_PARTY: -0.035,
         }[kind]
         final = (
             SEMANTIC_WEIGHT * candidate.semantic_similarity

@@ -127,6 +127,7 @@ def test_runner_uses_real_orchestration_and_records_grounded_result(
     assert result.success
     assert result.files_inspected == ("src/widget.py",)
     assert [tool.name for tool in result.tools] == [
+        "repository.lexical_search",
         "repository.search_files",
         "repository.read_file",
     ]
