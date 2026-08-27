@@ -1052,6 +1052,18 @@ execute after this transition, and coding/repair state machines remain unchanged
 
 ---
 
+# Milestone A25 — Real-World Coding Evaluation & Baseline v1
+
+**Status:** Implemented.
+
+Forge has an opt-in, model-independent real-repository measurement harness with
+eight fixed task classes, disposable copies, exact setup preconditions, constrained
+evaluation approvals, independent hash/test oracles, per-seed metrics, and explicit
+failure/capability-gap reporting. A25 is a capability assessment, not a new autonomy
+level; real qwen/Nomic runs remain local and CI remains model-free.
+
+---
+
 # Future — VS Code Integration
 
 **Goal:** Use Forge directly inside the development environment.

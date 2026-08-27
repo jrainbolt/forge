@@ -286,3 +286,48 @@ evidence availability, not semantic answer correctness.
 Evidence coverage is separate from retrieval relevance and model interpretation:
 it establishes that each explicit facet has associated trusted evidence, not
 that the retrieved source was ideal or the generated explanation is correct.
+
+## realworld-v1
+
+`realworld-v1` is an opt-in realistic coding baseline, not a CI model-quality
+gate. Its eight fixed tasks measure repository reasoning (E01–E03), single-file
+coding (E04–E06), bounded repair (E07), and the current multi-file capability
+ceiling (E08). Read-only tasks run seeds 7 and 42; mutation tasks use seed 42.
+
+The source repository is copied without `.git`, build products, or caches into a
+fresh temporary directory for every run. Evaluator-owned defect transformations
+require one exact source match. File hashes before and after Forge detect created,
+modified, and deleted paths independently of Git. The source repository is hashed
+before and after the suite and any canonical change is an infrastructure failure.
+
+Writes are approved only when their `MutationPreview.path` is declared by the task.
+Build and test approvals require the exact evaluator-configured argument array,
+workspace, and timeout. An independent evaluator oracle may subsequently execute
+fixed build/test arrays with `shell=False` inside the disposable copy. Forge
+verification, model completion, evaluator infrastructure, and oracle outcome are
+reported separately.
+
+Statuses are `PASS`, `PARTIAL`, `FAIL`, and `UNSUPPORTED`. The bounded failure
+taxonomy is model quality, retrieval, context, protocol, tool limit, mutation,
+verification, repair, unsupported capability, and infrastructure. No LLM judge is
+used. Reports contain paths, hashes, metrics, timing, seed, and bounded failure text,
+not repository source excerpts.
+
+Run the local Foundation C baseline with a user-owned repository and model paths:
+
+```bash
+PYTHONPATH=src python scripts/run_realworld_v1.py \
+  --repository /path/to/foundation \
+  --config /path/to/forge.toml \
+  --model qwen-small \
+  --embedding-config /path/to/embeddings.toml \
+  --embedding-profile nomic \
+  --output eval-results/realworld-v1-qwen-small.json
+```
+
+Real-model results measure current behavior; poor scores do not fail deterministic
+CI. A `PASS` for A25 means the measurement is isolated and trustworthy, not that
+Forge is an everyday production coding agent. Fresh absolute workspace identities
+can make every semantic index cold; `--skip-semantic-index` exists only for an
+explicitly documented lexical-fallback measurement after cold-index cost has been
+measured separately.

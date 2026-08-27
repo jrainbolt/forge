@@ -942,3 +942,13 @@ watching. A24 guarantees evidence availability, not perfect model interpretation
 A22 defines required evidence, A23 seeds discovery, A24 ends retrieval and locks
 synthesis, while A18 continues to own context budgeting. Coding, agent, and repair
 state machines remain authoritative and retain their established final behavior.
+
+## Real-world evaluation authority
+
+The A25 evaluation harness is outside normal runtime authority. It creates a fresh
+non-Git repository copy for each task, applies exact-precondition fixture changes,
+injects an approval callback restricted to declared paths and exact project command
+snapshots, and independently hashes and verifies the disposable result. Evaluator
+oracle subprocesses use fixed argument arrays with `shell=False`; they are not tools
+exposed to the model. This adds no shell, write, Git, network, repair, or approval
+authority to ordinary Forge sessions.

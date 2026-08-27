@@ -370,6 +370,13 @@ repository orchestration. Real-model runs remain local and are not part of CI.
 See [`docs/EVALUATION.md`](docs/EVALUATION.md) for tasks, scoring, and report
 details.
 
+Forge also includes an opt-in `realworld-v1` baseline for an explicitly supplied
+local C repository. It runs production repository modes only in disposable copies,
+uses constrained evaluator approvals and independent oracles, and records model
+failures without treating benchmark quality as a CI gate. See
+[`docs/EVALUATION.md`](docs/EVALUATION.md#realworld-v1); the harness never downloads
+or clones a benchmark repository.
+
 An opt-in non-interactive repository smoke request is also available:
 
 ```bash
