@@ -346,3 +346,17 @@ the selected bootstrap provider, expected implementation acquisition, lexical co
 and warm index timing, postings, and search latency. The A25 baseline is retained;
 A26 results are a comparison rather than a replacement. Foundation and model runs
 remain local and are not CI gates.
+
+## mutation-transition-v1
+
+`mutation-transition-v1` is the model-free A27 production-orchestration suite.
+M01-M06 cover source-backed phase entry and approved mutation, suppression of broad
+discovery, premature-final correction, one bounded candidate reread, stale-source
+invalidation and reacquisition, and write-policy denial. Metrics distinguish
+mutation-ready entry, model calls, proposals, post-ready discovery attempts,
+targeted rereads, approvals, successful mutations, and tools before transition.
+
+The unchanged Foundation E04 comparison separates retrieval success from coding
+action: A26 acquired source but exhausted context before mutation; A27 reports
+whether mutation readiness and an actual patch proposal were reached independently
+from patch correctness, verification, and the evaluator oracle.

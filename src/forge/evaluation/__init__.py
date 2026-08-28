@@ -50,6 +50,13 @@ from forge.evaluation.finalization import (
     FinalizationTaskResult,
     run_finalization_v1,
 )
+from forge.evaluation.mutation_transition import (
+    MUTATION_TRANSITION_SUITE_VERSION,
+    MUTATION_TRANSITION_V1,
+    MutationTransitionEvaluationResult,
+    MutationTransitionTaskResult,
+    run_mutation_transition_v1,
+)
 from forge.evaluation.realworld import (
     REALWORLD_SCHEMA_VERSION,
     REALWORLD_SUITE_VERSION,
@@ -214,6 +221,10 @@ __all__ = [
     "SCHEMA_VERSION",
     "SUITE_VERSION",
     "DimensionScore",
+    "MUTATION_TRANSITION_SUITE_VERSION",
+    "MUTATION_TRANSITION_V1",
+    "MutationTransitionEvaluationResult",
+    "MutationTransitionTaskResult",
     "DISCOVERY_SUITE_VERSION",
     "DISCOVERY_V1",
     "DiscoveryEvaluationResult",
@@ -249,6 +260,7 @@ __all__ = [
     "run_coverage_v1",
     "run_discovery_v1",
     "run_finalization_v1",
+    "run_mutation_transition_v1",
     "run_bootstrap_v1",
     "run_production_decomposition_v1",
     "apply_task_setup",

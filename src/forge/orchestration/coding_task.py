@@ -9,6 +9,7 @@ from enum import Enum
 
 class CodingTaskPhase(Enum):
     INSPECTING = "inspecting"
+    MUTATION_READY = "mutation_ready"
     AWAITING_MUTATION_APPROVAL = "awaiting_mutation_approval"
     MUTATED = "mutated"
     VERIFYING = "verifying"
@@ -64,6 +65,33 @@ class MutationRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class MutationCandidate:
+    path: str
+    sha256: str
+    generation: int
+    observation_id: str
+    start_line: int | None = None
+    end_line: int | None = None
+    targeted_reread_available: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class MutationTransitionMetrics:
+    entries: int = 0
+    model_calls: int = 0
+    proposals: int = 0
+    premature_finals: int = 0
+    post_ready_discovery_attempts: int = 0
+    post_ready_discovery_executions: int = 0
+    targeted_rereads: int = 0
+    write_approvals: int = 0
+    successful_mutations: int = 0
+    tools_before_ready: int | None = None
+    tools_before_proposal: int | None = None
+    invalidations: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class CodingTaskResult:
     answer: str
     status: CodingTaskStatus
@@ -84,6 +112,7 @@ class CodingTaskResult:
     mutations: tuple[MutationRecord, ...] = ()
     build_attempts: tuple[VerificationRecord, ...] = ()
     test_attempts: tuple[VerificationRecord, ...] = ()
+    transition_metrics: MutationTransitionMetrics = MutationTransitionMetrics()
 
     @property
     def footer(self) -> str:
@@ -111,7 +140,13 @@ class CodingTaskResult:
 class CodingTaskState:
     """Small mutable transition authority scoped to one user request."""
 
-    def __init__(self, generation: int, *, repair_enabled: bool = False) -> None:
+    def __init__(
+        self,
+        generation: int,
+        *,
+        repair_enabled: bool = False,
+        transition_required: bool = True,
+    ) -> None:
         self.phase = CodingTaskPhase.INSPECTING
         self.mutation_count = 0
         self.mutation_tool: str | None = None
@@ -131,6 +166,10 @@ class CodingTaskState:
         self.build_attempts: list[VerificationRecord] = []
         self.test_attempts: list[VerificationRecord] = []
         self._terminal_status: CodingTaskStatus | None = None
+        self.mutation_candidates: list[MutationCandidate] = []
+        self.transition_metrics = MutationTransitionMetrics()
+        self._mutation_ready_correction_used = False
+        self.transition_required = transition_required
 
     @property
     def terminal(self) -> bool:
@@ -139,7 +178,11 @@ class CodingTaskState:
     @property
     def may_propose_mutation(self) -> bool:
         return not self.terminal and (
-            self.phase is CodingTaskPhase.INSPECTING
+            self.phase is CodingTaskPhase.MUTATION_READY
+            or (
+                not self.transition_required
+                and self.phase is CodingTaskPhase.INSPECTING
+            )
             or (
                 self.repair_enabled
                 and self.repair_eligible
@@ -148,6 +191,132 @@ class CodingTaskState:
                 and self.phase is CodingTaskPhase.DIAGNOSING
             )
         )
+
+    @property
+    def mutation_ready(self) -> bool:
+        return self.phase is CodingTaskPhase.MUTATION_READY and not self.terminal
+
+    @property
+    def inspecting(self) -> bool:
+        return self.phase is CodingTaskPhase.INSPECTING and not self.terminal
+
+    @property
+    def mutation_candidate_paths(self) -> tuple[str, ...]:
+        return tuple(candidate.path for candidate in self.mutation_candidates)
+
+    def consider_source(
+        self,
+        path: str,
+        sha256: str,
+        generation: int,
+        observation_id: str,
+        *,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        targeted_reread_available: bool = False,
+    ) -> None:
+        if self.terminal or self.mutation_count or generation != self.generation:
+            return
+        if not self.transition_required:
+            return
+        candidate = MutationCandidate(
+            path,
+            sha256,
+            generation,
+            observation_id,
+            start_line,
+            end_line,
+            targeted_reread_available,
+        )
+        self.mutation_candidates = [
+            item for item in self.mutation_candidates if item.path != path
+        ]
+        self.mutation_candidates.append(candidate)
+        self.mutation_candidates = self.mutation_candidates[-4:]
+
+    def enter_mutation_ready(self, tool_count: int | None = None) -> bool:
+        if (
+            self.terminal
+            or self.mutation_count
+            or not self.mutation_candidates
+            or self.phase is not CodingTaskPhase.INSPECTING
+        ):
+            return False
+        self.phase = CodingTaskPhase.MUTATION_READY
+        self.transition_metrics = _transition_replace(
+            self.transition_metrics,
+            entries=self.transition_metrics.entries + 1,
+            tools_before_ready=(
+                len(self.tool_sequence) if tool_count is None else tool_count
+            ),
+        )
+        return True
+
+    def note_ready_model_call(self) -> None:
+        self.transition_metrics = _transition_replace(
+            self.transition_metrics,
+            model_calls=self.transition_metrics.model_calls + 1,
+        )
+
+    def note_post_ready_discovery(self) -> bool:
+        self.transition_metrics = _transition_replace(
+            self.transition_metrics,
+            post_ready_discovery_attempts=(
+                self.transition_metrics.post_ready_discovery_attempts + 1
+            ),
+        )
+        if self._mutation_ready_correction_used:
+            return False
+        self._mutation_ready_correction_used = True
+        return True
+
+    def note_premature_final(self) -> bool:
+        self.transition_metrics = _transition_replace(
+            self.transition_metrics,
+            premature_finals=self.transition_metrics.premature_finals + 1,
+        )
+        if self._mutation_ready_correction_used:
+            return False
+        self._mutation_ready_correction_used = True
+        return True
+
+    def use_targeted_reread(self) -> bool:
+        candidate = self.mutation_candidates[-1] if self.mutation_candidates else None
+        if candidate is None or not candidate.targeted_reread_available:
+            return False
+        self.mutation_candidates[-1] = MutationCandidate(
+            candidate.path,
+            candidate.sha256,
+            candidate.generation,
+            candidate.observation_id,
+            candidate.start_line,
+            candidate.end_line,
+            False,
+        )
+        self.transition_metrics = _transition_replace(
+            self.transition_metrics,
+            targeted_rereads=self.transition_metrics.targeted_rereads + 1,
+        )
+        return True
+
+    def invalidate_mutation_ready(self, generation: int | None = None) -> None:
+        if self.mutation_count:
+            return
+        self.mutation_candidates.clear()
+        self.phase = CodingTaskPhase.INSPECTING
+        if generation is not None:
+            self.generation = generation
+        self._mutation_ready_correction_used = False
+        self.transition_metrics = _transition_replace(
+            self.transition_metrics,
+            invalidations=self.transition_metrics.invalidations + 1,
+        )
+
+    def mutation_blocked_by_policy(self) -> None:
+        if self.mutation_count or self.terminal:
+            return
+        self.phase = CodingTaskPhase.FAILED
+        self._terminal_status = CodingTaskStatus.FAILED_BEFORE_MUTATION
 
     @property
     def may_verify(self) -> bool:
@@ -161,7 +330,7 @@ class CodingTaskState:
     def record_tool(self, name: str) -> None:
         self.tool_sequence.append(name)
 
-    def mutation_proposed(self) -> bool:
+    def mutation_proposed(self, tool_count: int | None = None) -> bool:
         if not self.may_propose_mutation:
             self.fail_after_mutation()
             return False
@@ -170,6 +339,21 @@ class CodingTaskState:
             self.phase = CodingTaskPhase.AWAITING_REPAIR_APPROVAL
         else:
             self.phase = CodingTaskPhase.AWAITING_MUTATION_APPROVAL
+            self.transition_metrics = _transition_replace(
+                self.transition_metrics,
+                proposals=self.transition_metrics.proposals + 1,
+                tools_before_proposal=(
+                    max(0, len(self.tool_sequence) - 1)
+                    if tool_count is None
+                    else tool_count
+                ),
+            )
+        return True
+
+    def creation_proposed(self) -> bool:
+        if self.terminal or self.mutation_count or not self.inspecting:
+            return False
+        self.phase = CodingTaskPhase.AWAITING_MUTATION_APPROVAL
         return True
 
     def mutation_rejected(self) -> None:
@@ -180,6 +364,12 @@ class CodingTaskState:
             CodingTaskStatus.REPAIR_REJECTED
             if self.mutation_count == 1 and self.repair_enabled
             else CodingTaskStatus.REJECTED
+        )
+
+    def note_write_approval(self) -> None:
+        self.transition_metrics = _transition_replace(
+            self.transition_metrics,
+            write_approvals=self.transition_metrics.write_approvals + 1,
         )
 
     def mutation_failed(self) -> None:
@@ -228,6 +418,11 @@ class CodingTaskState:
             CodingTaskPhase.REPAIRED
             if self.mutation_count == 2
             else CodingTaskPhase.MUTATED
+        )
+        self.mutation_candidates.clear()
+        self.transition_metrics = _transition_replace(
+            self.transition_metrics,
+            successful_mutations=self.transition_metrics.successful_mutations + 1,
         )
 
     def verification_requested(self, operation: str) -> bool:
@@ -377,6 +572,7 @@ class CodingTaskState:
             tuple(self.mutations),
             tuple(self.build_attempts),
             tuple(self.test_attempts),
+            self.transition_metrics,
         )
 
     def _verification(self, operation: str) -> VerificationRecord:
@@ -406,6 +602,17 @@ def _stale(record: VerificationRecord) -> VerificationRecord:
         record.generation,
         record.outcome,
     )
+
+
+def _transition_replace(
+    metrics: MutationTransitionMetrics, **changes: object
+) -> MutationTransitionMetrics:
+    values = {
+        field: getattr(metrics, field)
+        for field in MutationTransitionMetrics.__dataclass_fields__
+    }
+    values.update(changes)
+    return MutationTransitionMetrics(**values)  # type: ignore[arg-type]
 
 
 def _attempt_label(

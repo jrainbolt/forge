@@ -135,6 +135,28 @@ EVIDENCE_STOP_WORDS = frozenset(
         "which",
     }
 )
+MUTATION_READY_GUIDANCE = (
+    "Current source evidence is sufficient for a mutation proposal. Propose the "
+    "bounded code change using the current source. Do not continue broad repository "
+    "discovery."
+)
+MUTATION_REQUIRED_CORRECTION = (
+    "This coding task requires a code change. Current source evidence is sufficient "
+    "for a mutation proposal. Propose the change using repository.apply_patch or "
+    "explicitly state that no safe mutation can be made."
+)
+MUTATION_READY_BROAD_TOOLS = frozenset(
+    {
+        "repository.semantic_search",
+        "repository.lexical_search",
+        "repository.search_files",
+        "repository.find_symbol",
+        "repository.find_references",
+        "repository.list_directory",
+        "repository.file_outline",
+        "repository.read_file",
+    }
+)
 PROTOCOL_CORRECTION = (
     "Your previous response did not match the Forge JSON response schema. Return "
     "exactly one valid tool_call or final JSON object and no other text."
@@ -522,7 +544,9 @@ class RepositoryChatSession:
                 "coding tasks require explicit assist mode"
             )
         self._active_coding_task = CodingTaskState(
-            self._mutation_generation, repair_enabled=self._repair_enabled
+            self._mutation_generation,
+            repair_enabled=self._repair_enabled,
+            transition_required=not self._agent_mode,
         )
         self._last_coding_task = None
         try:
@@ -589,7 +613,29 @@ class RepositoryChatSession:
                         "agent model-call limit exceeded"
                     )
                 agent_task.model_called()
-            active_for_bootstrap = coverage.active_goal
+            if coding_task is not None and coding_task.mutation_ready:
+                stale_candidates = tuple(
+                    candidate
+                    for candidate in coding_task.mutation_candidates
+                    if not _source_hash_matches(
+                        self._context.workspace, candidate.path, candidate.sha256
+                    )
+                )
+                if stale_candidates:
+                    self._mutation_generation += 1
+                    context_planner.mutation_succeeded(self._mutation_generation)
+                    for candidate in stale_candidates:
+                        observed_hashes.pop(candidate.path, None)
+                        coverage.invalidate_path(candidate.path)
+                        retrieval_strategy.invalidate_path(
+                            candidate.path, generation=self._mutation_generation
+                        )
+                    coding_task.invalidate_mutation_ready(self._mutation_generation)
+            active_for_bootstrap = (
+                None
+                if coding_task is not None and coding_task.mutation_ready
+                else coverage.active_goal
+            )
             semantic_ready = _semantic_ready(self._semantic_index)
             lexical_available = any(
                 item.name == LEXICAL_TOOL for item in self._registry.metadata
@@ -731,16 +777,43 @@ class RepositoryChatSession:
                 if retrieval_strategy.candidates
                 else candidate_files
             )
+            mutation_ready = coding_task is not None and coding_task.mutation_ready
+            mutation_candidate_ranges: dict[str, tuple[int, int]] = {}
+            if mutation_ready:
+                routed_candidate_files = set(coding_task.mutation_candidate_paths)
+                reread_candidates = [
+                    candidate
+                    for candidate in coding_task.mutation_candidates
+                    if candidate.targeted_reread_available
+                    and candidate.start_line is not None
+                    and candidate.end_line is not None
+                ]
+                routed_tools = {"repository.apply_patch"}
+                if reread_candidates:
+                    routed_tools.add("repository.read_range")
+                    candidate = reread_candidates[-1]
+                    mutation_candidate_ranges[candidate.path] = (
+                        candidate.start_line,
+                        candidate.end_line,
+                    )
             output_specification = (
                 FINAL_ONLY_OUTPUT
                 if task_phase is RepositoryTaskPhase.FINALIZING
                 else build_repository_output(
                     self._registry,
-                    allow_final=evidence_sufficient,
+                    allow_final=evidence_sufficient or mutation_ready,
                     candidate_files=routed_candidate_files,
                     candidate_directories=candidate_directories,
                     candidate_queries=candidate_queries,
-                    observed_hashes=observed_hashes,
+                    observed_hashes=(
+                        {
+                            path: observed_hashes[path]
+                            for path in routed_candidate_files
+                            if path in observed_hashes
+                        }
+                        if mutation_ready
+                        else observed_hashes
+                    ),
                     allow_mutations=(
                         coding_task.may_propose_mutation
                         if coding_task is not None
@@ -750,12 +823,19 @@ class RepositoryChatSession:
                         coding_task.may_verify if coding_task is not None else True
                     ),
                     allowed_tool_names=routed_tools,
-                    candidate_ranges={
-                        candidate.path: (candidate.start_line, candidate.end_line)
-                        for candidate in routed_candidates[:1]
-                        if candidate.start_line is not None
-                        and candidate.end_line is not None
-                    },
+                    candidate_ranges=(
+                        mutation_candidate_ranges
+                        if mutation_ready
+                        else {
+                            candidate.path: (
+                                candidate.start_line,
+                                candidate.end_line,
+                            )
+                            for candidate in routed_candidates[:1]
+                            if candidate.start_line is not None
+                            and candidate.end_line is not None
+                        }
+                    ),
                 )
             )
             schema_cost = _estimated_schema_cost(output_specification.schema)
@@ -827,11 +907,16 @@ class RepositoryChatSession:
                 transcript[:] = (*context_planner.active_messages, *correction_tail)
             goal_guidance = Message(MessageRole.USER, _evidence_goal_guidance(coverage))
             goal_messages = (goal_guidance,) if len(evidence_plan.goals) > 1 else ()
+            mutation_messages = (
+                (Message(MessageRole.USER, MUTATION_READY_GUIDANCE),)
+                if mutation_ready
+                else ()
+            )
             plan = self._conversation.plan_request(
                 user_text,
                 self._generation,
                 context_capacity=self._model.context_capacity,
-                temporary_messages=(*goal_messages, *transcript),
+                temporary_messages=(*goal_messages, *transcript, *mutation_messages),
             )
             remaining_context = max(
                 0,
@@ -859,6 +944,8 @@ class RepositoryChatSession:
             )
             response = self._model.generate(structured_request)
             response_usages.append(response.usage)
+            if mutation_ready and coding_task is not None:
+                coding_task.note_ready_model_call()
             if task_phase is RepositoryTaskPhase.FINALIZING:
                 finalization_metrics = replace(
                     finalization_metrics,
@@ -914,6 +1001,26 @@ class RepositoryChatSession:
                 )
                 continue
             if parsed.outcome is ToolCallOutcome.FINAL:
+                if (
+                    coding_task is not None
+                    and coding_task.mutation_ready
+                    and coding_task.mutation_count == 0
+                ):
+                    if coding_task.note_premature_final():
+                        transcript.extend(
+                            (
+                                Message(MessageRole.ASSISTANT, response.text),
+                                Message(
+                                    MessageRole.USER,
+                                    MUTATION_REQUIRED_CORRECTION,
+                                ),
+                            )
+                        )
+                        continue
+                    coding_task.fail_after_mutation()
+                    raise RepositoryOrchestrationError(
+                        "no mutation proposed after bounded mutation-ready correction"
+                    )
                 if (
                     coding_task is not None
                     and coding_task.mutation_count in {1, 2}
@@ -1031,6 +1138,48 @@ class RepositoryChatSession:
 
             call = parsed.tool_call
             assert call is not None
+            if (
+                coding_task is not None
+                and coding_task.mutation_ready
+                and call.tool_name in MUTATION_READY_BROAD_TOOLS
+            ):
+                if coding_task.note_post_ready_discovery():
+                    transcript.extend(
+                        (
+                            Message(MessageRole.ASSISTANT, response.text),
+                            Message(MessageRole.USER, MUTATION_READY_GUIDANCE),
+                        )
+                    )
+                    continue
+                coding_task.fail_after_mutation()
+                raise RepositoryOrchestrationError(
+                    "broad discovery repeated after mutation-ready correction"
+                )
+            if (
+                coding_task is not None
+                and coding_task.mutation_ready
+                and call.tool_name == "repository.read_range"
+            ):
+                path = call.arguments.get("path")
+                candidate = next(
+                    (
+                        item
+                        for item in coding_task.mutation_candidates
+                        if item.path == path
+                    ),
+                    None,
+                )
+                valid_range = (
+                    candidate is not None
+                    and candidate.start_line == call.arguments.get("start_line")
+                    and candidate.end_line == call.arguments.get("end_line")
+                    and coding_task.use_targeted_reread()
+                )
+                if not valid_range:
+                    coding_task.fail_after_mutation()
+                    raise RepositoryOrchestrationError(
+                        "targeted mutation-ready reread is unavailable"
+                    )
             if call.tool_name in {
                 "repository.semantic_search",
                 "repository.lexical_search",
@@ -1121,7 +1270,31 @@ class RepositoryChatSession:
                 "repository.write_file",
                 "repository.apply_patch",
             }:
-                if coding_task is not None and not coding_task.mutation_proposed():
+                legacy_create = (
+                    coding_task is not None
+                    and coding_task.transition_required
+                    and coding_task.inspecting
+                    and call.tool_name == "repository.write_file"
+                    and call.arguments.get("mode") == "create"
+                    and coding_task.creation_proposed()
+                )
+                provenance_only = (
+                    coding_task is not None
+                    and coding_task.transition_required
+                    and coding_task.inspecting
+                    and not legacy_create
+                )
+                if provenance_only:
+                    result = self._execute_mutation_proposal(
+                        invocation,
+                        call.arguments,
+                        result,
+                        observed_hashes,
+                        observed_directories,
+                    )
+                elif coding_task is not None and not (
+                    legacy_create or coding_task.mutation_proposed(len(activities))
+                ):
                     if agent_task is not None:
                         self._agent_stop_hint = (
                             AgentStopReason.REPAIR_BUDGET_EXHAUSTED
@@ -1134,7 +1307,7 @@ class RepositoryChatSession:
                         result,
                         "mutation is not legal in the current coding-task phase",
                     )
-                else:
+                elif not provenance_only:
                     result = self._execute_mutation_proposal(
                         invocation,
                         call.arguments,
@@ -1238,6 +1411,56 @@ class RepositoryChatSession:
             ):
                 wrong_goal_reads += 1
             if (
+                coding_task is not None
+                and coding_task.mutation_count == 0
+                and result.status is ToolResultStatus.SUCCESS
+                and evidence is ToolEvidence.SOURCE_CONTENT
+                and activity.path is not None
+                and isinstance(result.output, Mapping)
+            ):
+                source_hash = result.output.get("sha256")
+                if isinstance(source_hash, str):
+                    actual_start = result.output.get("actual_start_line")
+                    actual_end = result.output.get("actual_end_line")
+                    file_lines = result.output.get("file_line_count")
+                    coding_task.consider_source(
+                        activity.path,
+                        source_hash,
+                        self._mutation_generation,
+                        call.invocation_id,
+                        start_line=(
+                            actual_start if isinstance(actual_start, int) else None
+                        ),
+                        end_line=actual_end if isinstance(actual_end, int) else None,
+                        targeted_reread_available=(
+                            isinstance(actual_end, int)
+                            and isinstance(file_lines, int)
+                            and actual_end < file_lines
+                        ),
+                    )
+                    write_available = any(
+                        item.name == "repository.apply_patch"
+                        for item in self._registry.metadata
+                    )
+                    write_decision = self._executor.permission(
+                        ToolInvocation(
+                            "forge-mutation-permission-probe",
+                            "repository.apply_patch",
+                            {},
+                        ),
+                        self._context,
+                    )
+                    if not write_available or write_decision is PermissionDecision.DENY:
+                        coding_task.mutation_blocked_by_policy()
+                    elif (
+                        coverage.complete or not coverage_required
+                    ) and coding_task.enter_mutation_ready(len(activities)):
+                        LOGGER.info(
+                            "mutation_ready_entered path=%s generation=%d",
+                            activity.path,
+                            self._mutation_generation,
+                        )
+            if (
                 active_before is not coverage.active_goal
                 and coverage.active_goal is not None
             ):
@@ -1307,6 +1530,7 @@ class RepositoryChatSession:
                     activities[-1], generation=self._mutation_generation
                 )
                 if coding_task is not None and isinstance(result.output, Mapping):
+                    coding_task.note_write_approval()
                     coding_task.mutation_succeeded(
                         call.tool_name, result.output, self._mutation_generation
                     )
@@ -1320,6 +1544,19 @@ class RepositoryChatSession:
             }:
                 if result.status is ToolResultStatus.APPROVAL_REQUIRED:
                     coding_task.mutation_rejected()
+                elif coding_task.mutation_count == 0 and _is_stale_write_failure(
+                    result
+                ):
+                    stale_path = call.arguments.get("path")
+                    self._mutation_generation += 1
+                    if isinstance(stale_path, str):
+                        observed_hashes.pop(stale_path, None)
+                        coverage.invalidate_path(stale_path)
+                        retrieval_strategy.invalidate_path(
+                            stale_path, generation=self._mutation_generation
+                        )
+                    coding_task.invalidate_mutation_ready(self._mutation_generation)
+                    context_planner.mutation_succeeded(self._mutation_generation)
                 else:
                     coding_task.mutation_failed()
             if (
@@ -1930,6 +2167,24 @@ def _semantic_ready(index: SemanticIndex | None) -> bool:
         return index.status().get("state") == "ready"
     except (OSError, RuntimeError, ValueError):
         return False
+
+
+def _source_hash_matches(workspace: Path, relative: str, expected: str) -> bool:
+    try:
+        path = (workspace / relative).resolve(strict=True)
+        if workspace != path and workspace not in path.parents:
+            return False
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        return path.is_file() and actual == expected
+    except OSError:
+        return False
+
+
+def _is_stale_write_failure(result: ToolResult) -> bool:
+    message = (result.error_message or "").casefold()
+    return result.status is ToolResultStatus.FAILURE and any(
+        marker in message for marker in ("sha256", "hash", "changed", "stale")
+    )
 
 
 def _agent_progress(

@@ -986,6 +986,43 @@ A22 defines required evidence, A23 seeds discovery, A24 ends retrieval and locks
 synthesis, while A18 continues to own context budgeting. Coding, agent, and repair
 state machines remain authoritative and retain their established final behavior.
 
+## Coding transition
+
+A27 extends the existing A11 coding state with `MUTATION_READY`. In ordinary
+single-step assist tasks, a successful current source read that satisfies the active
+evidence requirement can move the task from inspection to mutation preparation.
+Discovery metadata and model assertions cannot cause this transition.
+
+## Mutation candidate
+
+A mutation candidate is a bounded immutable path, current SHA-256, workspace
+generation, source-observation identity, and optional trusted range. At most four
+current candidates are retained. They are separate from A21 retrieval candidates:
+only an A9-authoritative source read creates write provenance.
+
+## Tool narrowing
+
+While mutation-ready, the dynamic schema exposes `repository.apply_patch` for the
+current candidates and, only for an incomplete trusted range, one exact targeted
+`repository.read_range`. Broad search, semantic/lexical discovery, outlines,
+references, directory listing, and unrelated reads are withheld and cannot execute.
+One premature final or broad-search attempt receives bounded guidance; repetition
+fails truthfully.
+
+## Authority
+
+Forge never authors or automatically calls a patch. The model must emit the existing
+patch protocol. `ToolExecutor`, compare-before-write hashing, workspace confinement,
+the permission policy, exact preview, and invocation-bound approval remain the only
+mutation authority.
+
+## Invalidations
+
+Before each mutation-ready model call Forge rechecks candidate hashes. Missing or
+changed source invalidates readiness, advances the workspace generation, removes
+stale provenance, and returns to evidence acquisition. Successful mutation hands
+control back to the unchanged A11 verification and A13 repair state machines.
+
 ## Real-world evaluation authority
 
 The A25 evaluation harness is outside normal runtime authority. It creates a fresh

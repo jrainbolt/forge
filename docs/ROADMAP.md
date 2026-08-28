@@ -1076,6 +1076,19 @@ read, and `discovery-v1` provides model-free regression coverage.
 
 ---
 
+# Milestone A27 — Coding Intent & Mutation Transition v1
+
+**Status:** Implemented.
+
+Ordinary single-step assist tasks now enter an explicit mutation-ready phase after
+trusted current source establishes bounded write provenance. Broad retrieval closes,
+the model must propose an existing policy-gated patch or fail truthfully, stale
+source returns to acquisition, and successful writes hand back to A11/A13. The
+model-free `mutation-transition-v1` suite protects the transition and authority
+boundaries.
+
+---
+
 # Future — VS Code Integration
 
 **Goal:** Use Forge directly inside the development environment.

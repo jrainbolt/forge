@@ -429,3 +429,8 @@ results remain discovery-only until Forge reads the source.
 
 Once the required source evidence is gathered, Forge locks retrieval and asks the
 local model to answer from that evidence instead of continuing to search.
+
+For coding tasks, once Forge has current source evidence for a safe write target,
+it narrows the session toward proposing the code change instead of continuing broad
+repository discovery. The model still authors the patch and every write remains
+subject to normal preview, policy, and approval enforcement.

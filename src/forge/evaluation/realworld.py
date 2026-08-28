@@ -148,6 +148,12 @@ class RealWorldMetrics:
     lexical_index_refreshes: int = 0
     lexical_files_retokenized: int = 0
     lexical_index_duration_seconds: float = 0.0
+    mutation_ready_reached: bool = False
+    tools_before_mutation_ready: int | None = None
+    mutation_proposed: bool = False
+    tools_before_mutation_proposal: int | None = None
+    post_ready_discovery_attempts: int = 0
+    targeted_rereads: int = 0
     discovery_calls: int = 0
     source_reads: int = 0
     range_reads: int = 0
@@ -308,6 +314,7 @@ class RealWorldEvaluationRunner:
                 activity_callback=activity.append,
             )
             response = None
+            coding_result = None
             failure = None
             message = None
             try:
@@ -317,6 +324,7 @@ class RealWorldEvaluationRunner:
             ) as error:  # isolation: a model failure cannot abort a suite
                 failure = classify_realworld_failure(error)
                 message = str(error)[:1_000]
+                coding_result = session.last_coding_task
             after = hash_workspace(workspace)
             changed = changed_paths(before, after)
             unexpected = tuple(sorted(set(changed) - set(task.allowed_paths)))
@@ -336,6 +344,7 @@ class RealWorldEvaluationRunner:
                 time.perf_counter() - started,
                 tuple(activity),
                 lexical_index,
+                coding_result,
             )
 
 
@@ -495,13 +504,14 @@ def score_task_result(
     elapsed: float,
     recorded_activity: tuple[object, ...] = (),
     lexical_index: RepositoryLexicalIndex | None = None,
+    coding_result: object | None = None,
 ) -> RealWorldTaskResult:
     activities = tuple(getattr(response, "tool_activity", ())) or recorded_activity
     inspected = tuple(
         dict.fromkeys(a.path for a in activities if a.path and a.status == "success")
     )
     found = tuple(path for path in task.expected_files if path in inspected)
-    coding = getattr(response, "coding_task", None)
+    coding = getattr(response, "coding_task", None) or coding_result
     agent = getattr(response, "agent_task", None)
     mutations = getattr(agent, "mutation_count", getattr(coding, "mutation_count", 0))
     attempts = (
@@ -520,6 +530,7 @@ def score_task_result(
     model_pass = response is not None and (
         grounded if task.max_mutations == 0 else expected_changes and not unexpected
     )
+    transition = getattr(coding, "transition_metrics", None)
     oracle_pass = oracle in {EvaluationOutcome.PASS, EvaluationOutcome.NOT_RUN}
     if model_pass and oracle_pass:
         status = RealWorldStatus.PASS
@@ -529,6 +540,8 @@ def score_task_result(
         status = RealWorldStatus.FAIL
     if failure is None and unexpected:
         failure = RealWorldFailure.MUTATION
+    elif failure is None and getattr(transition, "proposals", 0) > 0 and mutations == 0:
+        failure = RealWorldFailure.MODEL_QUALITY
     elif failure is None and not oracle_pass:
         failure = RealWorldFailure.VERIFICATION
     elif failure is None and not model_pass:
@@ -566,6 +579,16 @@ def score_task_result(
         lexical_index_duration_seconds=getattr(
             lexical_index, "total_duration_seconds", 0.0
         ),
+        mutation_ready_reached=getattr(transition, "entries", 0) > 0,
+        tools_before_mutation_ready=getattr(transition, "tools_before_ready", None),
+        mutation_proposed=getattr(transition, "proposals", 0) > 0,
+        tools_before_mutation_proposal=getattr(
+            transition, "tools_before_proposal", None
+        ),
+        post_ready_discovery_attempts=getattr(
+            transition, "post_ready_discovery_attempts", 0
+        ),
+        targeted_rereads=getattr(transition, "targeted_rereads", 0),
         discovery_calls=sum(
             a.tool_name
             in {
