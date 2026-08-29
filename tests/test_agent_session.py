@@ -222,9 +222,6 @@ def test_agent_failed_verification_can_read_but_not_repair(workspace: Path) -> N
         (
             call("read", "repository.read_file", {"path": "src/value.py"}),
             call("patch", "repository.apply_patch", patch_arguments(workspace)),
-            call("test", "project.test", {}),
-            call("inspect", "repository.read_file", {"path": "src/value.py"}),
-            call("repair", "repository.apply_patch", patch_arguments(workspace)),
             final("Verification failed; the change remains."),
         )
     )
@@ -234,7 +231,7 @@ def test_agent_failed_verification_can_read_but_not_repair(workspace: Path) -> N
     assert response.agent_task.stop_reason is AgentStopReason.VERIFICATION_FAILED
     assert response.agent_task.test.exit_code == 3
     assert response.agent_task.mutation_count == 1
-    assert response.tool_activity[-1].status == "denied"
+    assert response.tool_activity[-1].status == "failure"
 
 
 def test_agent_mutation_rejection_and_cancellation(workspace: Path) -> None:

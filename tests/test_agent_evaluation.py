@@ -70,8 +70,6 @@ def test_agent_evaluation_isolated_fixtures_and_deterministic_scores() -> None:
         final("next_attempt advances attempts."),
         call("g04-read", "repository.read_file", {"path": "src/tinyqueue/retry.py"}),
         retry_patch("g04-patch"),
-        call("g04-test", "project.test", {}),
-        call("g04-inspect", "repository.read_file", {"path": "tests/test_retry.py"}),
         final("The boundary changed, but verification failed."),
     )
     fixture_before = {
@@ -89,10 +87,10 @@ def test_agent_evaluation_isolated_fixtures_and_deterministic_scores() -> None:
         ),
     )
     results = runner.run(AGENT_V1_TASKS)
-    assert [result.score.total for result in results] == [6, 6, 6, 6]
+    assert [result.score.total for result in results] == [6, 5, 6, 5]
     assert [result.stop_reason for result in results] == [
         "completed",
-        "completed",
+        "verification_failed",
         "completed",
         "verification_failed",
     ]

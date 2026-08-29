@@ -378,3 +378,23 @@ or faithfully preview a valid replacement is mutation mechanics.
 On Foundation E04, A27 found `src/clock.c` and reached mutation-ready but its raw
 patch proposal failed before preview. A28 removes unified-diff construction from
 the model-facing response without increasing model, context, or tool budgets.
+
+## verification-gate-v1
+
+`verification-gate-v1` is the fixed eight-case A29 production-orchestration suite.
+V01 verifies immediate `ALLOW`; V02 the existing `ASK` approval path; V03 `DENY`;
+V04 absent project verification; V05 a nonzero test outside repair; V06 failure,
+fresh diagnosis, one repair, and re-verification; V07 explicit trusted-caller skip;
+and V08 that a final model response cannot bypass the post-mutation gate.
+
+The suite uses `MockModel`, A27/A28 mutation mechanics, real temporary files,
+mutation previews and approvals, `ToolExecutor`, and configured subprocess argument
+arrays with `shell=False`. It records verification-ready entries, provider,
+permission, approval, execution, result, verification tools, and intervening reads.
+V08 also runs at the normal near-budget boundary to reserve one legitimate
+verification execution without increasing any configured tool limit.
+
+Real-world reports include the same gate metrics. A logically incorrect patch that
+Forge successfully tests is classified separately from failure to execute required
+verification. Foundation data and generated real-world JSON remain local and are
+not included in distributions.

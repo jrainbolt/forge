@@ -18,6 +18,7 @@ from forge.orchestration.coding_task import (
     MutationTransitionMetrics,
     StructuredMutationMetrics,
     VerificationDecision,
+    VerificationGateMetrics,
     VerificationRecord,
 )
 from forge.orchestration.protocol import (
@@ -89,6 +90,7 @@ __all__ = [
     "ToolCall",
     "ToolCallOutcome",
     "VerificationRecord",
+    "VerificationGateMetrics",
     "validate_structured_edit",
     "VerificationDecision",
     "parse_model_output",

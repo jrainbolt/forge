@@ -152,14 +152,10 @@ def test_premature_final_receives_one_correction_then_test_passes(
     response = session(workspace, model, test_code=test_code).execute_task(
         "Fix retry and run tests"
     )
-    assert response.verification_corrections == 1
+    assert response.verification_corrections == 0
     assert response.coding_task.status is CodingTaskStatus.COMPLETED_VERIFIED
     assert response.coding_task.test.status == "passed"
-    correction_request = model.requests[-2]
-    assert "configured verification is available" in str(
-        correction_request.messages[-1].content
-    )
-    assert "repository.apply_patch" not in str(correction_request.output.schema)
+    assert response.coding_task.verification_gate_metrics.executed == 1
 
 
 def test_premature_final_correction_then_test_failure_stops_task(
@@ -176,7 +172,7 @@ def test_premature_final_correction_then_test_failure_stops_task(
     response = session(
         workspace, model, test_code="import sys; sys.exit(9)"
     ).execute_task("Fix retry and test")
-    assert response.verification_corrections == 1
+    assert response.verification_corrections == 0
     assert response.coding_task.status is CodingTaskStatus.MUTATED_VERIFICATION_FAILED
     assert response.coding_task.test.exit_code == 9
     assert response.coding_task.mutation_count == 1
@@ -254,11 +250,11 @@ def test_test_failure_preserves_change_and_overrides_dishonest_claim(
     assert result.test.status == "failed"
     assert result.test.exit_code == 2
     assert result.mutation_count == 1
-    assert response.tool_activity[-1].status == "denied"
+    assert response.tool_activity[-1].status == "failure"
     assert "Tests: failed" in result.footer
 
 
-def test_build_failure_stops_test_and_preserves_mutation(workspace: Path) -> None:
+def test_configured_test_is_preferred_over_build(workspace: Path) -> None:
     marker = workspace / "test-ran"
     model = MockModel(
         coding_flow(
@@ -274,9 +270,9 @@ def test_build_failure_stops_test_and_preserves_mutation(workspace: Path) -> Non
         build_code="import sys; sys.exit(1)",
         test_code=f"from pathlib import Path; Path({str(marker)!r}).touch()",
     ).execute_task("Fix and verify")
-    assert response.coding_task.status is CodingTaskStatus.MUTATED_VERIFICATION_FAILED
-    assert response.tool_activity[-1].status == "denied"
-    assert not marker.exists()
+    assert response.coding_task.status is CodingTaskStatus.COMPLETED_VERIFIED
+    assert response.tool_activity[-1].tool_name == "project.test"
+    assert marker.exists()
 
 
 def test_no_verification_config_is_honestly_unverified(workspace: Path) -> None:

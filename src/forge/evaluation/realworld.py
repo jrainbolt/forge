@@ -167,6 +167,16 @@ class RealWorldMetrics:
     candidate_suppressions: int = 0
     mutations: int = 0
     verification_attempts: int = 0
+    verification_ready_reached: bool = False
+    verification_required: bool = False
+    verification_provider: str = "none"
+    verification_permission: str = "none"
+    verification_approval_requested: int = 0
+    verification_approved: int = 0
+    verification_executed: int = 0
+    verification_result: str = "not_run"
+    verification_tools: int = 0
+    post_mutation_reads_before_verification: int = 0
     repair_attempts: int = 0
     post_coverage_tools: int = 0
 
@@ -537,6 +547,7 @@ def score_task_result(
     )
     transition = getattr(coding, "transition_metrics", None)
     structured = getattr(coding, "structured_mutation_metrics", None)
+    verification_gate = getattr(coding, "verification_gate_metrics", None)
     oracle_pass = oracle in {EvaluationOutcome.PASS, EvaluationOutcome.NOT_RUN}
     if model_pass and oracle_pass:
         status = RealWorldStatus.PASS
@@ -625,6 +636,21 @@ def score_task_result(
         candidate_suppressions=getattr(retrieval, "candidates_suppressed", 0),
         mutations=mutations,
         verification_attempts=attempts,
+        verification_ready_reached=getattr(verification_gate, "ready_entries", 0) > 0,
+        verification_required=getattr(verification_gate, "required", False),
+        verification_provider=getattr(verification_gate, "provider", None) or "none",
+        verification_permission=getattr(verification_gate, "permission", None)
+        or "none",
+        verification_approval_requested=getattr(
+            verification_gate, "approval_requested", 0
+        ),
+        verification_approved=getattr(verification_gate, "approved", 0),
+        verification_executed=getattr(verification_gate, "executed", 0),
+        verification_result=getattr(verification_gate, "result", "not_run"),
+        verification_tools=getattr(verification_gate, "verification_tools", 0),
+        post_mutation_reads_before_verification=getattr(
+            verification_gate, "post_mutation_reads_before_verification", 0
+        ),
         repair_attempts=int(bool(getattr(agent, "repair_attempted", False))),
         post_coverage_tools=getattr(
             getattr(response, "finalization_metrics", None), "post_coverage_tools", 0

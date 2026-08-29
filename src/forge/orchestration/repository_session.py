@@ -292,6 +292,7 @@ class RepositoryChatSession:
         minimum_source_files: int | None = None,
         require_relevant_source: bool = True,
         require_mutation_relevance: bool | None = None,
+        skip_verification: bool = False,
         activity_callback: Callable[[ToolActivity], None] | None = None,
         approval_callback: (
             Callable[[ToolInvocation, MutationPreview | PreparedProjectCommand], bool]
@@ -361,6 +362,8 @@ class RepositoryChatSession:
             require_mutation_relevance, bool
         ):
             raise TypeError("require_mutation_relevance must be a Boolean or None")
+        if not isinstance(skip_verification, bool):
+            raise TypeError("skip_verification must be a Boolean")
         self._profile_name = profile_name
         self._model = model
         self._generation = generation or GenerationConfig(
@@ -445,6 +448,7 @@ class RepositoryChatSession:
             if require_mutation_relevance is None
             else require_mutation_relevance
         )
+        self._skip_verification = skip_verification
         self._activity_callback = activity_callback
         self._approval_callback = approval_callback
         self._repository_index = repository_index
@@ -808,6 +812,16 @@ class RepositoryChatSession:
             structured_edit_ready = (
                 coding_task is not None and coding_task.structured_edit_ready
             )
+            gate_complete = (
+                coding_task is not None
+                and coding_task.mutation_count > 0
+                and (
+                    coding_task.verification_decision
+                    in {VerificationDecision.COMPLETED, VerificationDecision.DECLINED}
+                    or coding_task.verification_gate_metrics.skipped
+                )
+                and not coding_task.repair_eligible
+            )
             mutation_candidate_ranges: dict[str, tuple[int, int]] = {}
             if structured_edit_ready:
                 routed_candidate_files = set(coding_task.mutation_candidate_paths)
@@ -828,7 +842,7 @@ class RepositoryChatSession:
                     )
             output_specification = (
                 FINAL_ONLY_OUTPUT
-                if task_phase is RepositoryTaskPhase.FINALIZING
+                if task_phase is RepositoryTaskPhase.FINALIZING or gate_complete
                 else build_repository_output(
                     self._registry,
                     allow_final=evidence_sufficient or structured_edit_ready,
@@ -1022,6 +1036,14 @@ class RepositoryChatSession:
                     )
                 )
                 continue
+            if gate_complete and parsed.outcome is ToolCallOutcome.TOOL_CALL:
+                transcript.extend(
+                    (
+                        Message(MessageRole.ASSISTANT, response.text),
+                        Message(MessageRole.USER, FINALIZATION_CORRECTION),
+                    )
+                )
+                continue
             if (
                 task_phase is RepositoryTaskPhase.FINALIZING
                 and parsed.outcome is ToolCallOutcome.TOOL_CALL
@@ -1043,6 +1065,25 @@ class RepositoryChatSession:
                 finalization_tail[:] = (
                     Message(MessageRole.ASSISTANT, response.text),
                     Message(MessageRole.USER, FINALIZATION_CORRECTION),
+                )
+                continue
+            if (
+                parsed.outcome is ToolCallOutcome.TOOL_CALL
+                and parsed.tool_call is not None
+                and parsed.tool_call.tool_name in {"project.build", "project.test"}
+                and coding_task is not None
+                and coding_task.repair_eligible
+            ):
+                transcript.extend(
+                    (
+                        Message(MessageRole.ASSISTANT, response.text),
+                        Message(
+                            MessageRole.USER,
+                            "Verification already ran for the current mutation and "
+                            "failed. Inspect fresh diagnostic source before proposing "
+                            "the bounded repair.",
+                        ),
+                    )
                 )
                 continue
             if parsed.outcome is ToolCallOutcome.STRUCTURED_EDIT:
@@ -1140,6 +1181,7 @@ class RepositoryChatSession:
                     and _has_configured_verification(self._registry)
                     and coding_task.verification_decision
                     is VerificationDecision.NOT_DECIDED
+                    and not coding_task.verification_gate_metrics.skipped
                 ):
                     if verification_corrections < coding_task.mutation_count:
                         verification_corrections += 1
@@ -1677,6 +1719,128 @@ class RepositoryChatSession:
                     coding_task.mutation_succeeded(
                         call.tool_name, result.output, self._mutation_generation
                     )
+                    verification_operation = _configured_verification_operation(
+                        self._registry
+                    )
+                    if self._skip_verification:
+                        coding_task.verification_skipped()
+                        LOGGER.debug("verification_skipped reason=caller")
+                    elif verification_operation is not None:
+                        coding_task.verification_ready(verification_operation)
+                        LOGGER.debug(
+                            "verification_ready_entered operation=%s",
+                            verification_operation,
+                        )
+                        LOGGER.debug(
+                            "verification_gate_selected operation=%s",
+                            verification_operation,
+                        )
+                        if len(activities) >= self._max_tool_executions:
+                            coding_task.note_verification_gate(
+                                permission="unavailable", result="tool_budget_exhausted"
+                            )
+                            coding_task.decline_verification()
+                        else:
+                            gate_invocation = ToolInvocation(
+                                f"forge-verification-gate-{coding_task.mutation_count}",
+                                f"project.{verification_operation}",
+                                {},
+                            )
+                            permission = self._executor.permission(
+                                gate_invocation, self._context
+                            )
+                            LOGGER.debug(
+                                "verification_policy_%s operation=%s",
+                                permission.value,
+                                verification_operation,
+                            )
+                            coding_task.record_tool(gate_invocation.tool_name)
+                            coding_task.verification_requested(verification_operation)
+                            gate_result = self._executor.execute(
+                                gate_invocation, self._context
+                            )
+                            approval_requested = (
+                                gate_result.status is ToolResultStatus.APPROVAL_REQUIRED
+                            )
+                            if approval_requested:
+                                LOGGER.debug("verification_approval_requested")
+                                gate_result = self._execute_project_proposal(
+                                    gate_invocation, gate_result
+                                )
+                            executed = gate_result.status in {
+                                ToolResultStatus.SUCCESS,
+                                ToolResultStatus.FAILURE,
+                            }
+                            approved = approval_requested and executed
+                            gate_label = (
+                                "passed"
+                                if gate_result.status is ToolResultStatus.SUCCESS
+                                else "failed"
+                                if executed
+                                else "blocked"
+                            )
+                            LOGGER.debug(
+                                "verification_%s operation=%s",
+                                "executed" if executed else "blocked",
+                                verification_operation,
+                            )
+                            if executed:
+                                LOGGER.debug(
+                                    "verification_%s operation=%s",
+                                    gate_label,
+                                    verification_operation,
+                                )
+                            coding_task.note_verification_gate(
+                                permission=permission.value,
+                                approval_requested=approval_requested,
+                                approved=approved,
+                                executed=executed,
+                                result=gate_label,
+                            )
+                            if gate_result.status is ToolResultStatus.DENIED:
+                                coding_task.decline_verification()
+                            else:
+                                coding_task.verification_finished(
+                                    verification_operation,
+                                    gate_result.status.value,
+                                    gate_result.output
+                                    if isinstance(gate_result.output, Mapping)
+                                    else None,
+                                )
+                            gate_evidence = _tool_evidence(
+                                self._registry,
+                                gate_invocation.tool_name,
+                                gate_invocation.arguments,
+                            )
+                            gate_activity = ToolActivity(
+                                gate_invocation.invocation_id,
+                                gate_invocation.tool_name,
+                                gate_result.status.value,
+                                gate_evidence.value,
+                                False,
+                                generation=self._mutation_generation,
+                                current_verification=executed,
+                            )
+                            activities.append(gate_activity)
+                            context_planner.register(
+                                assistant_text=json.dumps(
+                                    {
+                                        "type": "forge_verification_gate",
+                                        "operation": verification_operation,
+                                    },
+                                    sort_keys=True,
+                                ),
+                                rendered_result=render_tool_result(
+                                    gate_result, gate_evidence
+                                ),
+                                result=gate_result,
+                                evidence=gate_evidence,
+                                arguments={},
+                                generation=self._mutation_generation,
+                                assistant_role=MessageRole.SYSTEM,
+                            )
+                            if self._activity_callback is not None:
+                                self._activity_callback(gate_activity)
                 if self._repair_enabled:
                     # Superseded reads/searches are no longer valid repair context.
                     # Keep the current mutation result and subsequent diagnostics.
@@ -2306,6 +2470,14 @@ def _has_configured_verification(registry: ToolRegistry) -> bool:
         _project_configured(registry, name)
         for name in ("project.build", "project.test")
     )
+
+
+def _configured_verification_operation(registry: ToolRegistry) -> str | None:
+    if _project_configured(registry, "project.test"):
+        return "test"
+    if _project_configured(registry, "project.build"):
+        return "build"
+    return None
 
 
 def _semantic_ready(index: SemanticIndex | None) -> bool:

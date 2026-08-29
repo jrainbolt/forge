@@ -157,6 +157,13 @@ from forge.evaluation.types import (
     TaskScores,
     ToolRecord,
 )
+from forge.evaluation.verification_gate import (
+    VERIFICATION_GATE_SUITE_VERSION,
+    VERIFICATION_GATE_V1,
+    VerificationGateEvaluationResult,
+    VerificationGateTaskResult,
+    run_verification_gate_v1,
+)
 
 __all__ = [
     "AGENT_SUITE_VERSION",
@@ -252,6 +259,10 @@ __all__ = [
     "WriteEvaluationTask",
     "WriteTaskResult",
     "WriteTaskScore",
+    "VERIFICATION_GATE_SUITE_VERSION",
+    "VERIFICATION_GATE_V1",
+    "VerificationGateEvaluationResult",
+    "VerificationGateTaskResult",
     "fixture_workspace",
     "evaluate_retrieval",
     "load_suite",
@@ -286,4 +297,5 @@ __all__ = [
     "run_oracle",
     "summarize_results",
     "write_realworld_json",
+    "run_verification_gate_v1",
 ]

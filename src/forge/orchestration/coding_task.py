@@ -12,6 +12,7 @@ class CodingTaskPhase(Enum):
     MUTATION_READY = "mutation_ready"
     AWAITING_MUTATION_APPROVAL = "awaiting_mutation_approval"
     MUTATED = "mutated"
+    VERIFICATION_READY = "verification_ready"
     VERIFYING = "verifying"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -105,6 +106,21 @@ class StructuredMutationMetrics:
 
 
 @dataclass(frozen=True, slots=True)
+class VerificationGateMetrics:
+    ready_entries: int = 0
+    required: bool = False
+    provider: str | None = None
+    permission: str | None = None
+    approval_requested: int = 0
+    approved: int = 0
+    executed: int = 0
+    result: str = "not_run"
+    verification_tools: int = 0
+    post_mutation_reads_before_verification: int = 0
+    skipped: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class CodingTaskResult:
     answer: str
     status: CodingTaskStatus
@@ -127,6 +143,7 @@ class CodingTaskResult:
     test_attempts: tuple[VerificationRecord, ...] = ()
     transition_metrics: MutationTransitionMetrics = MutationTransitionMetrics()
     structured_mutation_metrics: StructuredMutationMetrics = StructuredMutationMetrics()
+    verification_gate_metrics: VerificationGateMetrics = VerificationGateMetrics()
 
     @property
     def footer(self) -> str:
@@ -183,6 +200,7 @@ class CodingTaskState:
         self.mutation_candidates: list[MutationCandidate] = []
         self.transition_metrics = MutationTransitionMetrics()
         self.structured_mutation_metrics = StructuredMutationMetrics()
+        self.verification_gate_metrics = VerificationGateMetrics()
         self._mutation_ready_correction_used = False
         self._structured_edit_correction_used = False
         self._structured_edit_awaiting_correction = False
@@ -499,6 +517,41 @@ class CodingTaskState:
             successful_mutations=self.transition_metrics.successful_mutations + 1,
         )
 
+    def verification_ready(self, operation: str) -> None:
+        self.phase = CodingTaskPhase.VERIFICATION_READY
+        metrics = self.verification_gate_metrics
+        self.verification_gate_metrics = _verification_gate_replace(
+            metrics,
+            ready_entries=metrics.ready_entries + 1,
+            required=True,
+            provider=operation,
+        )
+
+    def note_verification_gate(
+        self,
+        *,
+        permission: str,
+        approval_requested: bool = False,
+        approved: bool = False,
+        executed: bool = False,
+        result: str = "not_run",
+    ) -> None:
+        metrics = self.verification_gate_metrics
+        self.verification_gate_metrics = _verification_gate_replace(
+            metrics,
+            permission=permission,
+            approval_requested=metrics.approval_requested + int(approval_requested),
+            approved=metrics.approved + int(approved),
+            executed=metrics.executed + int(executed),
+            result=result,
+            verification_tools=metrics.verification_tools + int(executed),
+        )
+
+    def verification_skipped(self) -> None:
+        self.verification_gate_metrics = _verification_gate_replace(
+            self.verification_gate_metrics, skipped=True, result="skipped"
+        )
+
     def verification_requested(self, operation: str) -> bool:
         if not self.may_verify_operation(operation):
             self.fail_after_mutation()
@@ -648,6 +701,7 @@ class CodingTaskState:
             tuple(self.test_attempts),
             self.transition_metrics,
             self.structured_mutation_metrics,
+            self.verification_gate_metrics,
         )
 
     def _verification(self, operation: str) -> VerificationRecord:
@@ -699,6 +753,17 @@ def _structured_replace(
     }
     values.update(changes)
     return StructuredMutationMetrics(**values)
+
+
+def _verification_gate_replace(
+    metrics: VerificationGateMetrics, **changes: object
+) -> VerificationGateMetrics:
+    values = {
+        field: getattr(metrics, field)
+        for field in VerificationGateMetrics.__dataclass_fields__
+    }
+    values.update(changes)
+    return VerificationGateMetrics(**values)  # type: ignore[arg-type]
 
 
 def _attempt_label(

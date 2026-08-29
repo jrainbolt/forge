@@ -1668,3 +1668,24 @@ It preserves exact structural/text lookup precedence and requires targeted sourc
 reads before semantic candidates become evidence.
 
 No model should be downloaded and no inference code should be written until A0 establishes the repository structure, architecture documents, Python project configuration, CLI skeleton, tests, and engineering conventions.
+
+---
+
+# Milestone A29 — Post-Mutation Verification Gate v1
+
+A29 makes verification an orchestration transition rather than a model-authored
+tool decision. After each successful mutation, a configured test is preferred over
+a configured build and enters `VERIFICATION_READY`. Existing policy, approval,
+trusted execution, timeout, confinement, output-limit, and tool-budget boundaries
+remain authoritative.
+
+`ALLOW` executes immediately, `ASK` requires the normal prepared-command approval,
+and `DENY` records a truthful unverified outcome. No configured provider and an
+explicit trusted-caller skip also remain unverified. A qualifying failure may enter
+the existing bounded repair flow; successful repair is gated again. Verified
+terminal states require successful current-generation execution and cannot be
+created by model text.
+
+The deterministic `verification-gate-v1` evaluation covers ALLOW, ASK, DENY,
+missing configuration, failure, repair, explicit skip, and attempted final-response
+bypass through production orchestration.

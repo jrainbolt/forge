@@ -438,3 +438,36 @@ subject to normal preview, policy, and approval enforcement.
 When Forge is ready to change a file, the model can describe one bounded exact
 replacement. Forge validates it against current source before producing the exact
 approval diff.
+
+## Post-mutation verification gate
+
+After an approved mutation, Forge deterministically selects the configured test
+command, or the configured build command when no test exists, and enters a
+verification-ready state before asking the model for another decision. A caller may
+explicitly skip this gate; model text cannot.
+
+## Trusted execution
+
+Automatic verification uses the existing confined `project.test` and
+`project.build` tools, their exact configured argument arrays, timeouts, output
+limits, and subprocess isolation. It does not introduce a shell or arbitrary
+command surface.
+
+## Permissions
+
+`ALLOW` executes verification immediately. `ASK` presents the existing prepared
+project command to the approval callback. `DENY` executes nothing and records a
+truthful policy-blocked, unverified result.
+
+## Repair boundary
+
+A qualifying failed automatic verification can enter the existing one-repair path.
+The repair still requires fresh source evidence, a separately approved mutation,
+and a second gated verification, with at most two successful mutations total.
+
+## Status truth
+
+Model prose never creates a verified status. `COMPLETED_VERIFIED` and
+`COMPLETED_REPAIRED_VERIFIED` require a successful configured command for the
+current mutation generation; skipped, absent, rejected, denied, or failed
+verification remains explicitly unverified or failed.

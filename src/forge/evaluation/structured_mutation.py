@@ -160,10 +160,8 @@ def _run(task: str, workspace: Path) -> StructuredMutationTaskResult:
         scripted = (
             read,
             _call("primary", "repository.apply_patch", primary),
-            _call("test1", "project.test", {}),
             _call("repair-read", "repository.read_file", {"path": "main.c"}),
             _edit("value = 2", "value = 3"),
-            _call("test2", "project.test", {}),
             _final("repaired"),
         )
         expected_mutations = 2
