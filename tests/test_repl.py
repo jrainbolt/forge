@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import sys
 from collections.abc import Iterator
@@ -126,7 +125,6 @@ def _assist_session(workspace: Path, model: MockModel) -> RepositoryChatSession:
 
 
 def _assist_responses() -> tuple[str, ...]:
-    digest = hashlib.sha256(b"VALUE = 1\n").hexdigest()
     return (
         json.dumps(
             {
@@ -138,14 +136,10 @@ def _assist_responses() -> tuple[str, ...]:
         ),
         json.dumps(
             {
-                "type": "tool_call",
-                "id": "patch",
-                "tool": "repository.apply_patch",
-                "arguments": {
-                    "path": "value.py",
-                    "expected_sha256": digest,
-                    "edits": [{"old": "VALUE = 1", "new": "VALUE = 2"}],
-                },
+                "type": "structured_edit",
+                "path": "value.py",
+                "old_text": "VALUE = 1",
+                "new_text": "VALUE = 2",
             }
         ),
         json.dumps({"type": "final", "answer": "Mutation handling complete."}),

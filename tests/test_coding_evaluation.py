@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -22,18 +21,11 @@ def call(call_id: str, tool: str, arguments: dict[str, object]) -> str:
 
 
 def flow(path: str, old: str, new: str, suffix: str) -> tuple[str, ...]:
-    data = (FIXTURE / path).read_bytes()
     return (
         call(f"search-{suffix}", "repository.search_files", {"query": old.split()[0]}),
         call(f"read-{suffix}", "repository.read_file", {"path": path}),
-        call(
-            f"patch-{suffix}",
-            "repository.apply_patch",
-            {
-                "path": path,
-                "expected_sha256": hashlib.sha256(data).hexdigest(),
-                "edits": [{"old": old, "new": new}],
-            },
+        json.dumps(
+            {"type": "structured_edit", "path": path, "old_text": old, "new_text": new}
         ),
         json.dumps({"type": "final", "answer": f"Completed {suffix}."}),
     )

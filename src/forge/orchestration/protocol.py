@@ -49,6 +49,17 @@ FINAL_SCHEMA = {
     "required": ["type", "answer"],
     "additionalProperties": False,
 }
+STRUCTURED_EDIT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"const": "structured_edit"},
+        "path": {"type": "string"},
+        "old_text": {"type": "string"},
+        "new_text": {"type": "string"},
+    },
+    "required": ["type", "path", "old_text", "new_text"],
+    "additionalProperties": False,
+}
 REPOSITORY_RESPONSE_SCHEMA = {
     "oneOf": [
         TOOL_CALL_SCHEMA,
@@ -228,6 +239,7 @@ class ProtocolError(ValueError):
 class ToolCallOutcome(Enum):
     FINAL = "final"
     TOOL_CALL = "tool_call"
+    STRUCTURED_EDIT = "structured_edit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,14 +267,18 @@ class ParsedModelOutput:
     outcome: ToolCallOutcome
     text: str | None = None
     tool_call: ToolCall | None = None
+    structured_edit: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
         if self.outcome is ToolCallOutcome.FINAL:
             if self.text is None or self.tool_call is not None:
                 raise ValueError("final output must contain only answer text")
         elif self.outcome is ToolCallOutcome.TOOL_CALL:
-            if self.tool_call is None or self.text is not None:
+            if self.tool_call is None or self.text is not None or self.structured_edit:
                 raise ValueError("tool output must contain only one tool call")
+        elif self.outcome is ToolCallOutcome.STRUCTURED_EDIT:
+            if self.structured_edit is None or self.text is not None or self.tool_call:
+                raise ValueError("structured edit output must contain only one edit")
         else:
             raise TypeError("outcome must be a ToolCallOutcome")
 
@@ -301,7 +317,36 @@ def parse_model_output(text: str) -> ParsedModelOutput:
         if not isinstance(answer, str) or not answer.strip():
             raise ProtocolError("final answer must be non-empty text")
         return ParsedModelOutput(ToolCallOutcome.FINAL, text=answer)
-    raise ProtocolError("model response type must be tool_call or final")
+    if response_type == "structured_edit":
+        if set(payload) != {"type", "path", "old_text", "new_text"}:
+            raise ProtocolError(
+                "structured edit must contain exactly type, path, old_text, new_text"
+            )
+        edit = {key: payload[key] for key in ("path", "old_text", "new_text")}
+        if not all(isinstance(value, str) for value in edit.values()):
+            raise ProtocolError("structured edit fields must be text")
+        return ParsedModelOutput(
+            ToolCallOutcome.STRUCTURED_EDIT, structured_edit=MappingProxyType(edit)
+        )
+    raise ProtocolError(
+        "model response type must be tool_call, structured_edit, or final"
+    )
+
+
+def build_mutation_ready_output(
+    candidate_paths: tuple[str, ...],
+    *,
+    allow_targeted_reread: bool = False,
+    reread_schema: dict[str, object] | None = None,
+) -> OutputSpecification:
+    """Require a candidate-bound exact replacement in mutation-ready state."""
+    edit = json.loads(json.dumps(STRUCTURED_EDIT_SCHEMA))
+    edit["properties"]["path"]["enum"] = sorted(candidate_paths)
+    branches = [edit]
+    if allow_targeted_reread and reread_schema is not None:
+        branches.append(reread_schema)
+    branches.append(FINAL_SCHEMA)
+    return OutputSpecification(ResponseFormat.JSON, {"oneOf": branches})
 
 
 def render_tool_definitions(registry: ToolRegistry) -> str:

@@ -65,10 +65,18 @@ from forge.orchestration.coding_task import (
 )
 from forge.orchestration.protocol import (
     FINAL_ONLY_OUTPUT,
+    ParsedModelOutput,
+    ToolCall,
     ToolCallOutcome,
+    build_mutation_ready_output,
     build_repository_output,
     parse_model_output,
     render_tool_result,
+)
+from forge.orchestration.structured_edit import (
+    StructuredEditFailure,
+    StructuredEditProposal,
+    validate_structured_edit,
 )
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
 from forge.retrieval_bootstrap import (
@@ -127,8 +135,12 @@ EVIDENCE_STOP_WORDS = frozenset(
         "implementation",
         "method",
         "must",
+        "ordinary",
         "prevent",
         "provide",
+        "that",
+        "then",
+        "values",
         "what",
         "with",
         "where",
@@ -136,9 +148,14 @@ EVIDENCE_STOP_WORDS = frozenset(
     }
 )
 MUTATION_READY_GUIDANCE = (
-    "Current source evidence is sufficient for a mutation proposal. Propose the "
-    "bounded code change using the current source. Do not continue broad repository "
-    "discovery."
+    "Current source evidence is sufficient. Submit one structured_edit with the "
+    "candidate path, exact verbatim old_text, and intended new_text. Do not "
+    "continue broad repository discovery."
+)
+STRUCTURED_EDIT_CORRECTION = (
+    "The structured edit did not validate against the trusted current source. Use "
+    "the exact source excerpt already provided and submit one corrected "
+    "structured_edit. Do not search broadly and do not change paths."
 )
 MUTATION_REQUIRED_CORRECTION = (
     "This coding task requires a code change. Current source evidence is sufficient "
@@ -274,6 +291,7 @@ class RepositoryChatSession:
         max_no_progress: int = DEFAULT_MAX_NO_PROGRESS_CYCLES,
         minimum_source_files: int | None = None,
         require_relevant_source: bool = True,
+        require_mutation_relevance: bool | None = None,
         activity_callback: Callable[[ToolActivity], None] | None = None,
         approval_callback: (
             Callable[[ToolInvocation, MutationPreview | PreparedProjectCommand], bool]
@@ -339,6 +357,10 @@ class RepositoryChatSession:
             raise ValueError("minimum_source_files must be positive or None")
         if not isinstance(require_relevant_source, bool):
             raise TypeError("require_relevant_source must be a Boolean")
+        if require_mutation_relevance is not None and not isinstance(
+            require_mutation_relevance, bool
+        ):
+            raise TypeError("require_mutation_relevance must be a Boolean or None")
         self._profile_name = profile_name
         self._model = model
         self._generation = generation or GenerationConfig(
@@ -418,6 +440,11 @@ class RepositoryChatSession:
         self._max_no_progress = max_no_progress
         self._minimum_source_files = minimum_source_files
         self._require_relevant_source = require_relevant_source
+        self._require_mutation_relevance = (
+            require_relevant_source
+            if require_mutation_relevance is None
+            else require_mutation_relevance
+        )
         self._activity_callback = activity_callback
         self._approval_callback = approval_callback
         self._repository_index = repository_index
@@ -778,8 +805,11 @@ class RepositoryChatSession:
                 else candidate_files
             )
             mutation_ready = coding_task is not None and coding_task.mutation_ready
+            structured_edit_ready = (
+                coding_task is not None and coding_task.structured_edit_ready
+            )
             mutation_candidate_ranges: dict[str, tuple[int, int]] = {}
-            if mutation_ready:
+            if structured_edit_ready:
                 routed_candidate_files = set(coding_task.mutation_candidate_paths)
                 reread_candidates = [
                     candidate
@@ -801,7 +831,7 @@ class RepositoryChatSession:
                 if task_phase is RepositoryTaskPhase.FINALIZING
                 else build_repository_output(
                     self._registry,
-                    allow_final=evidence_sufficient or mutation_ready,
+                    allow_final=evidence_sufficient or structured_edit_ready,
                     candidate_files=routed_candidate_files,
                     candidate_directories=candidate_directories,
                     candidate_queries=candidate_queries,
@@ -811,7 +841,7 @@ class RepositoryChatSession:
                             for path in routed_candidate_files
                             if path in observed_hashes
                         }
-                        if mutation_ready
+                        if structured_edit_ready
                         else observed_hashes
                     ),
                     allow_mutations=(
@@ -825,7 +855,7 @@ class RepositoryChatSession:
                     allowed_tool_names=routed_tools,
                     candidate_ranges=(
                         mutation_candidate_ranges
-                        if mutation_ready
+                        if structured_edit_ready
                         else {
                             candidate.path: (
                                 candidate.start_line,
@@ -838,6 +868,21 @@ class RepositoryChatSession:
                     ),
                 )
             )
+            if structured_edit_ready:
+                reread_schema = next(
+                    (
+                        branch
+                        for branch in output_specification.schema.get("oneOf", [])
+                        if branch.get("properties", {}).get("tool", {}).get("const")
+                        == "repository.read_range"
+                    ),
+                    None,
+                )
+                output_specification = build_mutation_ready_output(
+                    coding_task.mutation_candidate_paths,
+                    allow_targeted_reread=reread_schema is not None,
+                    reread_schema=reread_schema,
+                )
             schema_cost = _estimated_schema_cost(output_specification.schema)
             system_cost = (
                 estimator.estimate(self._conversation.system_message)
@@ -909,7 +954,7 @@ class RepositoryChatSession:
             goal_messages = (goal_guidance,) if len(evidence_plan.goals) > 1 else ()
             mutation_messages = (
                 (Message(MessageRole.USER, MUTATION_READY_GUIDANCE),)
-                if mutation_ready
+                if structured_edit_ready
                 else ()
             )
             plan = self._conversation.plan_request(
@@ -1000,7 +1045,75 @@ class RepositoryChatSession:
                     Message(MessageRole.USER, FINALIZATION_CORRECTION),
                 )
                 continue
+            if parsed.outcome is ToolCallOutcome.STRUCTURED_EDIT:
+                if coding_task is None or not coding_task.structured_edit_ready:
+                    raise RepositoryOrchestrationError(
+                        "structured edit is only valid in mutation-ready state"
+                    )
+                assert parsed.structured_edit is not None
+                proposal = StructuredEditProposal(**parsed.structured_edit)
+                LOGGER.debug(
+                    "structured_edit_received path=%s generation=%d",
+                    proposal.path,
+                    self._mutation_generation,
+                )
+                validation = validate_structured_edit(
+                    proposal,
+                    tuple(coding_task.mutation_candidates),
+                    self._context.workspace,
+                    self._mutation_generation,
+                )
+                failure = validation.failure.value if validation.failure else None
+                correction_available = coding_task.note_structured_edit(failure)
+                if validation.failure is StructuredEditFailure.STALE_SOURCE:
+                    LOGGER.debug("structured_edit_rejected reason=stale_source")
+                    self._mutation_generation += 1
+                    coding_task.invalidate_mutation_ready(self._mutation_generation)
+                    coverage.invalidate_path(proposal.path)
+                    retrieval_strategy.invalidate_path(
+                        proposal.path, generation=self._mutation_generation
+                    )
+                    observed_hashes.pop(proposal.path, None)
+                    transcript.extend(
+                        (
+                            Message(MessageRole.ASSISTANT, response.text),
+                            Message(
+                                MessageRole.USER,
+                                "The source changed. Inspect fresh current source "
+                                "before proposing another mutation.",
+                            ),
+                        )
+                    )
+                    continue
+                if not validation.valid:
+                    LOGGER.debug("structured_edit_rejected reason=%s", failure)
+                    if correction_available:
+                        transcript.append(
+                            Message(MessageRole.USER, STRUCTURED_EDIT_CORRECTION)
+                        )
+                        continue
+                    coding_task.fail_after_mutation()
+                    raise RepositoryOrchestrationError(
+                        f"second structured edit rejected: {failure}"
+                    )
+                LOGGER.debug("structured_edit_validated path=%s", proposal.path)
+                assert validation.arguments is not None
+                parsed = ParsedModelOutput(
+                    ToolCallOutcome.TOOL_CALL,
+                    tool_call=ToolCall(
+                        f"structured-edit-{coding_task.structured_mutation_metrics.attempts}",
+                        "repository.apply_patch",
+                        validation.arguments,
+                    ),
+                )
             if parsed.outcome is ToolCallOutcome.FINAL:
+                if (
+                    coding_task is not None
+                    and coding_task.inspecting
+                    and coding_task.mutation_count == 0
+                    and coding_task.transition_metrics.entries > 0
+                ):
+                    coding_task.mutation_failed()
                 if (
                     coding_task is not None
                     and coding_task.mutation_ready
@@ -1138,6 +1251,25 @@ class RepositoryChatSession:
 
             call = parsed.tool_call
             assert call is not None
+            if (
+                coding_task is not None
+                and coding_task.mutation_ready
+                and call.tool_name == "repository.apply_patch"
+                and not call.invocation_id.startswith("structured-edit-")
+            ):
+                correction_available = coding_task.note_structured_edit(
+                    StructuredEditFailure.MATERIALIZATION_FAILED.value
+                )
+                LOGGER.debug("structured_edit_rejected reason=raw_patch")
+                if correction_available:
+                    transcript.append(
+                        Message(MessageRole.USER, STRUCTURED_EDIT_CORRECTION)
+                    )
+                    continue
+                coding_task.fail_after_mutation()
+                raise RepositoryOrchestrationError(
+                    "raw patch repeated after structured-edit correction"
+                )
             if (
                 coding_task is not None
                 and coding_task.mutation_ready
@@ -1412,10 +1544,21 @@ class RepositoryChatSession:
                 wrong_goal_reads += 1
             if (
                 coding_task is not None
-                and coding_task.mutation_count == 0
+                and (
+                    coding_task.mutation_count == 0
+                    or (
+                        coding_task.repair_enabled
+                        and coding_task.repair_eligible
+                        and coding_task.phase.value == "diagnosing"
+                    )
+                )
                 and result.status is ToolResultStatus.SUCCESS
                 and evidence is ToolEvidence.SOURCE_CONTENT
                 and activity.path is not None
+                and (
+                    not self._require_mutation_relevance
+                    or _is_mutation_relevant_source(result, evidence, user_text)
+                )
                 and isinstance(result.output, Mapping)
             ):
                 source_hash = result.output.get("sha256")
@@ -1646,7 +1789,12 @@ class RepositoryChatSession:
             )
         except ToolError as error:
             return _provenance_failure(result, str(error))
+        structured = invocation.invocation_id.startswith("structured-edit-")
+        if structured:
+            LOGGER.debug("mutation_preview_created path=%s", preview.path)
         approved = self._request_approval(invocation, preview)
+        if structured and self._active_coding_task is not None:
+            self._active_coding_task.note_materialized_preview(approved=approved)
         if not approved:
             return result
         return self._executor.execute(
@@ -2306,13 +2454,35 @@ def _is_relevant_source(
     content = output.get("content", output.get("text"))
     if not isinstance(content, str):
         return False
-    terms = {
-        term
-        for term in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", question.lower())
-        if len(term) >= 4 and term not in EVIDENCE_STOP_WORDS
-    }
-    haystack = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", content.lower()))
+    terms = _source_terms(question)
+    haystack = _source_terms(content, exclude_stops=False)
     return bool(terms & haystack)
+
+
+def _is_mutation_relevant_source(
+    result: ToolResult, evidence: ToolEvidence, question: str
+) -> bool:
+    if not _is_relevant_source(result, evidence, question):
+        return False
+    output = result.output
+    assert isinstance(output, Mapping)
+    content = output.get("content", output.get("text"))
+    assert isinstance(content, str)
+    terms = _source_terms(question)
+    haystack = _source_terms(content, exclude_stops=False)
+    required_matches = 3 if len(terms) >= 7 else 1
+    return len(terms & haystack) >= required_matches
+
+
+def _source_terms(text: str, *, exclude_stops: bool = True) -> set[str]:
+    terms: set[str] = set()
+    for identifier in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text.lower()):
+        for term in (identifier, *identifier.split("_")):
+            if len(term) >= 4 and (
+                not exclude_stops or term not in EVIDENCE_STOP_WORDS
+            ):
+                terms.add(term)
+    return terms
 
 
 def _required_source_files(question: str) -> int:

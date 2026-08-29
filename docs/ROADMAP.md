@@ -1089,6 +1089,19 @@ boundaries.
 
 ---
 
+# Milestone A28 — Structured Patch Proposal & Recovery v1
+
+**Status:** Implemented.
+
+Mutation-ready models now express one bounded exact replacement instead of fragile
+raw patch syntax. Forge validates candidate path, hash/generation, trusted range,
+exact uniqueness, encoding, and size before translating the proposal through the
+existing A9 preview, approval, and executor. One malformed-proposal correction is
+allowed; stale source reopens A27 discovery. The fixed `structured-mutation-v1`
+suite covers eight primary and repair scenarios.
+
+---
+
 # Future — VS Code Integration
 
 **Goal:** Use Forge directly inside the development environment.

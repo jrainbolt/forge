@@ -1,4 +1,3 @@
-import hashlib
 import json
 from pathlib import Path
 
@@ -27,6 +26,12 @@ def _final(answer: str) -> str:
     return json.dumps({"type": "final", "answer": answer})
 
 
+def _edit(path: str, old: str, new: str) -> str:
+    return json.dumps(
+        {"type": "structured_edit", "path": path, "old_text": old, "new_text": new}
+    )
+
+
 def test_mutation_transition_v1_runs_six_production_cases(tmp_path: Path) -> None:
     result = run_mutation_transition_v1(tmp_path / "suite")
     assert result.tasks_passed == result.tasks_total == 6
@@ -51,20 +56,11 @@ def test_mutation_ready_schema_contains_patch_not_broad_discovery(
 ) -> None:
     source = tmp_path / "main.py"
     source.write_text("VALUE = 1\n")
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()
     model = MockModel(
         (
             _call("search", "repository.search_files", {"query": "VALUE"}),
             _call("read", "repository.read_file", {"path": "main.py"}),
-            _call(
-                "patch",
-                "repository.apply_patch",
-                {
-                    "path": "main.py",
-                    "expected_sha256": digest,
-                    "edits": [{"old": "VALUE = 1", "new": "VALUE = 2"}],
-                },
-            ),
+            _edit("main.py", "VALUE = 1", "VALUE = 2"),
             _final("Changed."),
         )
     )
@@ -78,7 +74,8 @@ def test_mutation_ready_schema_contains_patch_not_broad_discovery(
         require_relevant_source=False,
     ).execute_task("Update the value")
     schema = str(model.requests[2].output.schema)
-    assert "repository.apply_patch" in schema
+    assert "structured_edit" in schema
+    assert "repository.apply_patch" not in schema
     for name in (
         "repository.search_files",
         "repository.semantic_search",

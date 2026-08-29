@@ -434,3 +434,7 @@ For coding tasks, once Forge has current source evidence for a safe write target
 it narrows the session toward proposing the code change instead of continuing broad
 repository discovery. The model still authors the patch and every write remains
 subject to normal preview, policy, and approval enforcement.
+
+When Forge is ready to change a file, the model can describe one bounded exact
+replacement. Forge validates it against current source before producing the exact
+approval diff.

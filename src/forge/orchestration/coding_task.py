@@ -92,6 +92,19 @@ class MutationTransitionMetrics:
 
 
 @dataclass(frozen=True, slots=True)
+class StructuredMutationMetrics:
+    attempts: int = 0
+    valid: int = 0
+    old_text_misses: int = 0
+    ambiguous_old_text: int = 0
+    stale_proposals: int = 0
+    corrections: int = 0
+    correction_successes: int = 0
+    materialized_previews: int = 0
+    approved_previews: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class CodingTaskResult:
     answer: str
     status: CodingTaskStatus
@@ -113,6 +126,7 @@ class CodingTaskResult:
     build_attempts: tuple[VerificationRecord, ...] = ()
     test_attempts: tuple[VerificationRecord, ...] = ()
     transition_metrics: MutationTransitionMetrics = MutationTransitionMetrics()
+    structured_mutation_metrics: StructuredMutationMetrics = StructuredMutationMetrics()
 
     @property
     def footer(self) -> str:
@@ -168,7 +182,10 @@ class CodingTaskState:
         self._terminal_status: CodingTaskStatus | None = None
         self.mutation_candidates: list[MutationCandidate] = []
         self.transition_metrics = MutationTransitionMetrics()
+        self.structured_mutation_metrics = StructuredMutationMetrics()
         self._mutation_ready_correction_used = False
+        self._structured_edit_correction_used = False
+        self._structured_edit_awaiting_correction = False
         self.transition_required = transition_required
 
     @property
@@ -197,6 +214,17 @@ class CodingTaskState:
         return self.phase is CodingTaskPhase.MUTATION_READY and not self.terminal
 
     @property
+    def structured_edit_ready(self) -> bool:
+        return self.mutation_ready or (
+            not self.terminal
+            and self.phase is CodingTaskPhase.DIAGNOSING
+            and self.repair_enabled
+            and self.repair_eligible
+            and not self.repair_attempted
+            and bool(self.mutation_candidates)
+        )
+
+    @property
     def inspecting(self) -> bool:
         return self.phase is CodingTaskPhase.INSPECTING and not self.terminal
 
@@ -215,9 +243,19 @@ class CodingTaskState:
         end_line: int | None = None,
         targeted_reread_available: bool = False,
     ) -> None:
-        if self.terminal or self.mutation_count or generation != self.generation:
+        repair_source = (
+            self.mutation_count == 1
+            and self.repair_enabled
+            and self.repair_eligible
+            and self.phase is CodingTaskPhase.DIAGNOSING
+        )
+        if (
+            self.terminal
+            or (self.mutation_count and not repair_source)
+            or generation != self.generation
+        ):
             return
-        if not self.transition_required:
+        if not self.transition_required and not repair_source:
             return
         candidate = MutationCandidate(
             path,
@@ -307,9 +345,45 @@ class CodingTaskState:
         if generation is not None:
             self.generation = generation
         self._mutation_ready_correction_used = False
+        self._structured_edit_awaiting_correction = False
         self.transition_metrics = _transition_replace(
             self.transition_metrics,
             invalidations=self.transition_metrics.invalidations + 1,
+        )
+
+    def note_structured_edit(self, failure: str | None) -> bool:
+        """Record validation and return whether processing/correction may continue."""
+        metrics = self.structured_mutation_metrics
+        changes: dict[str, int] = {"attempts": metrics.attempts + 1}
+        if failure is None:
+            changes["valid"] = metrics.valid + 1
+            if self._structured_edit_awaiting_correction:
+                changes["correction_successes"] = metrics.correction_successes + 1
+            self._structured_edit_awaiting_correction = False
+            self.structured_mutation_metrics = _structured_replace(metrics, **changes)
+            return True
+        metric = {
+            "old_text_not_found": "old_text_misses",
+            "old_text_ambiguous": "ambiguous_old_text",
+            "stale_source": "stale_proposals",
+        }.get(failure)
+        if metric is not None:
+            changes[metric] = getattr(metrics, metric) + 1
+        if failure == "stale_source" or self._structured_edit_correction_used:
+            self.structured_mutation_metrics = _structured_replace(metrics, **changes)
+            return False
+        self._structured_edit_correction_used = True
+        self._structured_edit_awaiting_correction = True
+        changes["corrections"] = metrics.corrections + 1
+        self.structured_mutation_metrics = _structured_replace(metrics, **changes)
+        return True
+
+    def note_materialized_preview(self, *, approved: bool) -> None:
+        metrics = self.structured_mutation_metrics
+        self.structured_mutation_metrics = _structured_replace(
+            metrics,
+            materialized_previews=metrics.materialized_previews + 1,
+            approved_previews=metrics.approved_previews + (1 if approved else 0),
         )
 
     def mutation_blocked_by_policy(self) -> None:
@@ -573,6 +647,7 @@ class CodingTaskState:
             tuple(self.build_attempts),
             tuple(self.test_attempts),
             self.transition_metrics,
+            self.structured_mutation_metrics,
         )
 
     def _verification(self, operation: str) -> VerificationRecord:
@@ -613,6 +688,17 @@ def _transition_replace(
     }
     values.update(changes)
     return MutationTransitionMetrics(**values)  # type: ignore[arg-type]
+
+
+def _structured_replace(
+    metrics: StructuredMutationMetrics, **changes: int
+) -> StructuredMutationMetrics:
+    values = {
+        field: getattr(metrics, field)
+        for field in StructuredMutationMetrics.__dataclass_fields__
+    }
+    values.update(changes)
+    return StructuredMutationMetrics(**values)
 
 
 def _attempt_label(

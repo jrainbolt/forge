@@ -16,6 +16,7 @@ from forge.orchestration.coding_task import (
     MutationCandidate,
     MutationRecord,
     MutationTransitionMetrics,
+    StructuredMutationMetrics,
     VerificationDecision,
     VerificationRecord,
 )
@@ -44,6 +45,12 @@ from forge.orchestration.repository_session import (
     RepositoryResponse,
     ToolActivity,
 )
+from forge.orchestration.structured_edit import (
+    StructuredEditFailure,
+    StructuredEditProposal,
+    StructuredEditValidation,
+    validate_structured_edit,
+)
 
 __all__ = [
     "AgentCancelled",
@@ -69,6 +76,10 @@ __all__ = [
     "MutationCandidate",
     "MutationRecord",
     "MutationTransitionMetrics",
+    "StructuredMutationMetrics",
+    "StructuredEditFailure",
+    "StructuredEditProposal",
+    "StructuredEditValidation",
     "ParsedModelOutput",
     "ProtocolError",
     "RepositoryChatSession",
@@ -78,6 +89,7 @@ __all__ = [
     "ToolCall",
     "ToolCallOutcome",
     "VerificationRecord",
+    "validate_structured_edit",
     "VerificationDecision",
     "parse_model_output",
     "render_tool_definitions",

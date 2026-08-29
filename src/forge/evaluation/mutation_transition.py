@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,12 +59,10 @@ def _final(answer: str) -> str:
     return json.dumps({"type": "final", "answer": answer})
 
 
-def _patch(path: Path, old: str, new: str) -> dict[str, object]:
-    return {
-        "path": path.name,
-        "expected_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-        "edits": [{"old": old, "new": new}],
-    }
+def _edit(path: Path, old: str, new: str) -> str:
+    return json.dumps(
+        {"type": "structured_edit", "path": path.name, "old_text": old, "new_text": new}
+    )
 
 
 def _run(task: str, workspace: Path) -> MutationTransitionTaskResult:
@@ -76,19 +73,19 @@ def _run(task: str, workspace: Path) -> MutationTransitionTaskResult:
     registry = create_assist_repository_registry(lexical_index=lexical)
     policy = create_assist_repository_policy()
     callback = None
-    patch = _patch(source, "return 10", "return 11")
+    edit = _edit(source, "return 10", "return 11")
     if task == "M02":
         scripted = (
             _call("read", "repository.read_range", _range("clock.c", 1, 1)),
             _call("wander", "repository.lexical_search", {"query": "clock"}),
-            _call("patch", "repository.apply_patch", patch),
+            edit,
             _final("Changed."),
         )
     elif task == "M03":
         scripted = (
             _call("read", "repository.read_range", _range("clock.c", 1, 1)),
             _final("I would change it."),
-            _call("patch", "repository.apply_patch", patch),
+            edit,
             _final("Changed."),
         )
     elif task == "M04":
@@ -100,11 +97,11 @@ def _run(task: str, workspace: Path) -> MutationTransitionTaskResult:
                 for line in range(1, 501)
             )
         )
-        patch = _patch(source, "return 10", "return 11")
+        edit = _edit(source, "return 10", "return 11")
         scripted = (
             _call("read", "repository.read_range", _range("clock.c", 210, 329)),
             _call("reread", "repository.read_range", _range("clock.c", 210, 329)),
-            _call("patch", "repository.apply_patch", patch),
+            edit,
             _final("Changed."),
         )
     elif task == "M05":
@@ -117,18 +114,11 @@ def _run(task: str, workspace: Path) -> MutationTransitionTaskResult:
                 changed = True
 
         callback = mutate
-        fresh_hash = hashlib.sha256(
-            b"int clock_limit(void) { return 12; }\n"
-        ).hexdigest()
-        fresh_patch = {
-            "path": "clock.c",
-            "expected_sha256": fresh_hash,
-            "edits": [{"old": "return 12", "new": "return 11"}],
-        }
+        fresh_edit = _edit(source, "return 12", "return 11")
         scripted = (
             _call("read", "repository.read_range", _range("clock.c", 1, 1)),
             _call("fresh", "repository.read_range", _range("clock.c", 1, 1)),
-            _call("patch", "repository.apply_patch", fresh_patch),
+            fresh_edit,
             _final("Changed."),
         )
     elif task == "M06":
@@ -149,7 +139,7 @@ def _run(task: str, workspace: Path) -> MutationTransitionTaskResult:
     else:
         scripted = (
             _call("read", "repository.read_range", _range("clock.c", 1, 1)),
-            _call("patch", "repository.apply_patch", patch),
+            edit,
             _final("Changed."),
         )
     model = MockModel(scripted)

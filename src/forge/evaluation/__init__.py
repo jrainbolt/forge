@@ -122,6 +122,13 @@ from forge.evaluation.routing import (
 )
 from forge.evaluation.runner import EvaluationRunner
 from forge.evaluation.scoring import score_task
+from forge.evaluation.structured_mutation import (
+    STRUCTURED_MUTATION_SUITE_VERSION,
+    STRUCTURED_MUTATION_V1,
+    StructuredMutationEvaluationResult,
+    StructuredMutationTaskResult,
+    run_structured_mutation_v1,
+)
 from forge.evaluation.tasks import (
     CODING_V1,
     CODING_V1_TASKS,
@@ -261,6 +268,11 @@ __all__ = [
     "run_discovery_v1",
     "run_finalization_v1",
     "run_mutation_transition_v1",
+    "STRUCTURED_MUTATION_SUITE_VERSION",
+    "STRUCTURED_MUTATION_V1",
+    "StructuredMutationEvaluationResult",
+    "StructuredMutationTaskResult",
+    "run_structured_mutation_v1",
     "run_bootstrap_v1",
     "run_production_decomposition_v1",
     "apply_task_setup",

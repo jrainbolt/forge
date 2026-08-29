@@ -154,6 +154,10 @@ class RealWorldMetrics:
     tools_before_mutation_proposal: int | None = None
     post_ready_discovery_attempts: int = 0
     targeted_rereads: int = 0
+    structured_mutation_attempts: int = 0
+    structured_mutation_valid: int = 0
+    structured_mutation_corrections: int = 0
+    preview_created: int = 0
     discovery_calls: int = 0
     source_reads: int = 0
     range_reads: int = 0
@@ -311,6 +315,7 @@ class RealWorldEvaluationRunner:
                 semantic_index=semantic_index,
                 lexical_index=lexical_index,
                 require_relevant_source=False,
+                require_mutation_relevance=True,
                 activity_callback=activity.append,
             )
             response = None
@@ -531,6 +536,7 @@ def score_task_result(
         grounded if task.max_mutations == 0 else expected_changes and not unexpected
     )
     transition = getattr(coding, "transition_metrics", None)
+    structured = getattr(coding, "structured_mutation_metrics", None)
     oracle_pass = oracle in {EvaluationOutcome.PASS, EvaluationOutcome.NOT_RUN}
     if model_pass and oracle_pass:
         status = RealWorldStatus.PASS
@@ -543,7 +549,11 @@ def score_task_result(
     elif failure is None and getattr(transition, "proposals", 0) > 0 and mutations == 0:
         failure = RealWorldFailure.MODEL_QUALITY
     elif failure is None and not oracle_pass:
-        failure = RealWorldFailure.VERIFICATION
+        failure = (
+            RealWorldFailure.VERIFICATION
+            if attempts
+            else RealWorldFailure.MODEL_QUALITY
+        )
     elif failure is None and not model_pass:
         failure = (
             RealWorldFailure.RETRIEVAL
@@ -589,6 +599,10 @@ def score_task_result(
             transition, "post_ready_discovery_attempts", 0
         ),
         targeted_rereads=getattr(transition, "targeted_rereads", 0),
+        structured_mutation_attempts=getattr(structured, "attempts", 0),
+        structured_mutation_valid=getattr(structured, "valid", 0),
+        structured_mutation_corrections=getattr(structured, "corrections", 0),
+        preview_created=getattr(structured, "materialized_previews", 0),
         discovery_calls=sum(
             a.tool_name
             in {

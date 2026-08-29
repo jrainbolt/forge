@@ -1023,6 +1023,41 @@ changed source invalidates readiness, advances the workspace generation, removes
 stale provenance, and returns to evidence acquisition. Successful mutation hands
 control back to the unchanged A11 verification and A13 repair state machines.
 
+## Structured mutation proposal
+
+In mutation-ready orchestration the model supplies one immutable,
+language-independent `path`/`old_text`/`new_text` replacement. The path must be a
+current A27 candidate, the source hash and generation must still match, and the
+old text must occur exactly once inside the source-backed candidate range. Each
+text is limited to 16 KiB and 200 lines, with a 24 KiB combined limit.
+
+## Deterministic materialization
+
+Forge reads the confined UTF-8 candidate without normalization, verifies the exact
+match, and translates the proposal into one existing `repository.apply_patch`
+edit. The unchanged A9 preview constructs the unified diff. LF/CRLF, tabs, Unicode,
+and all bytes outside the replacement remain untouched.
+
+## Structured mutation authority
+
+The model chooses the replacement code. Forge validates its representation and
+provenance, the user or policy approves the exact preview, and A9 `ToolExecutor`
+performs the mutation. Raw patch calls remain available to direct A9 callers but
+are absent from primary mutation-ready model schemas.
+
+## Structured mutation recovery
+
+One malformed, mismatched, ambiguous, out-of-range, or oversized proposal receives
+one correction using retained trusted source. A second invalid proposal terminates
+truthfully. Stale source instead invalidates A27 readiness and requires a fresh
+read. Repair uses the same validator after its required fresh-source read.
+
+## Structured mutation limitations
+
+Version 1 changes one exact occurrence in one file. It has no regex, AST editing,
+free-form diff scraping, insertion primitive, multi-hunk proposal, or multi-file
+transaction.
+
 ## Real-world evaluation authority
 
 The A25 evaluation harness is outside normal runtime authority. It creates a fresh

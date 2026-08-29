@@ -30,6 +30,17 @@ def final(answer: str) -> str:
     return json.dumps({"type": "final", "answer": answer})
 
 
+def structured_edit(*, replacement: str = "<") -> str:
+    return json.dumps(
+        {
+            "type": "structured_edit",
+            "path": RETRY_PATH,
+            "old_text": "task.attempts <= self.max_attempts",
+            "new_text": f"task.attempts {replacement} self.max_attempts",
+        }
+    )
+
+
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
     return Path(copytree(FIXTURE, tmp_path / "tinyqueue"))
@@ -84,7 +95,7 @@ def coding_flow(workspace: Path, *after_patch: str) -> tuple[str, ...]:
     return (
         call("search", "repository.search_files", {"query": "should_retry"}),
         call("read", "repository.read_file", {"path": RETRY_PATH}),
-        call("patch", "repository.apply_patch", patch_arguments(workspace)),
+        structured_edit(),
         *after_patch,
     )
 
@@ -189,7 +200,7 @@ class ExternalEditModel(MockModel):
 
     def generate(self, request):  # type: ignore[no-untyped-def]
         response = super().generate(request)
-        if len(self.requests) == 2:
+        if len(self.requests) == 3:
             self._target.write_text(self._target.read_text() + "\n# external\n")
         return response
 

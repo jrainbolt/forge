@@ -287,7 +287,6 @@ def test_tools_are_read_capability_and_policy_ceiling_applies() -> None:
 def test_symbol_then_range_is_source_evidence_and_authorizes_patch(
     workspace: Path,
 ) -> None:
-    digest = hashlib.sha256((workspace / "module.py").read_bytes()).hexdigest()
     model = MockModel(
         (
             call("find", "repository.find_symbol", {"symbol": "Example.run"}),
@@ -296,14 +295,13 @@ def test_symbol_then_range_is_source_evidence_and_authorizes_patch(
                 "repository.read_range",
                 {"path": "module.py", "start_line": 2, "end_line": 8},
             ),
-            call(
-                "patch",
-                "repository.apply_patch",
+            json.dumps(
                 {
+                    "type": "structured_edit",
                     "path": "module.py",
-                    "expected_sha256": digest,
-                    "edits": [{"old": "return nested()", "new": "return value"}],
-                },
+                    "old_text": "return nested()",
+                    "new_text": "return value",
+                }
             ),
             final("The targeted implementation was changed."),
         )
@@ -327,7 +325,6 @@ def test_symbol_then_range_is_source_evidence_and_authorizes_patch(
 
 def test_stale_range_hash_cannot_mutate(workspace: Path) -> None:
     original = (workspace / "module.py").read_bytes()
-    digest = hashlib.sha256(original).hexdigest()
 
     def alter_then_approve(*_args: object) -> bool:
         (workspace / "module.py").write_bytes(original + b"# external\n")
@@ -341,14 +338,13 @@ def test_stale_range_hash_cannot_mutate(workspace: Path) -> None:
                 "repository.read_range",
                 {"path": "module.py", "start_line": 2, "end_line": 8},
             ),
-            call(
-                "patch",
-                "repository.apply_patch",
+            json.dumps(
                 {
+                    "type": "structured_edit",
                     "path": "module.py",
-                    "expected_sha256": digest,
-                    "edits": [{"old": "return nested()", "new": "return value"}],
-                },
+                    "old_text": "return nested()",
+                    "new_text": "return value",
+                }
             ),
             final("The stale patch failed."),
         )

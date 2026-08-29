@@ -360,3 +360,21 @@ The unchanged Foundation E04 comparison separates retrieval success from coding
 action: A26 acquired source but exhausted context before mutation; A27 reports
 whether mutation readiness and an actual patch proposal were reached independently
 from patch correctness, verification, and the evaluator oracle.
+
+## structured-mutation-v1
+
+`structured-mutation-v1` is the fixed eight-case A28 production-orchestration
+suite. P01 covers exact replacement; P02 bounded mismatch recovery; P03 ambiguity;
+P04 stale-source invalidation; P05 range confinement; P06 proposal bounds; P07
+exact preview rejection; and P08 reuse during bounded repair. The cases use
+`MockModel`, real temporary files, A9 previews and approval, `ToolExecutor`, and
+the normal verification/repair handoff.
+
+The proposal ladder separately reports mutation-ready, structured response,
+validation, preview, approval, mutation, verification, and oracle outcomes. A
+valid but logically incorrect replacement is model quality; failure to validate
+or faithfully preview a valid replacement is mutation mechanics.
+
+On Foundation E04, A27 found `src/clock.c` and reached mutation-ready but its raw
+patch proposal failed before preview. A28 removes unified-diff construction from
+the model-facing response without increasing model, context, or tool budgets.

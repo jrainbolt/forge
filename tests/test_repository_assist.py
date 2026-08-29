@@ -73,6 +73,17 @@ def patch_arguments(path: str = "src/value.py") -> dict[str, object]:
     }
 
 
+def structured_edit(path: str = "src/value.py") -> str:
+    return json.dumps(
+        {
+            "type": "structured_edit",
+            "path": path,
+            "old_text": "VALUE = 1",
+            "new_text": "VALUE = 2",
+        }
+    )
+
+
 def test_assist_read_patch_preview_approval_and_evidence_invalidation(
     workspace: Path,
 ) -> None:
@@ -87,7 +98,7 @@ def test_assist_read_patch_preview_approval_and_evidence_invalidation(
     model = MockModel(
         (
             call("read", "repository.read_file", {"path": "src/value.py"}),
-            call("patch", "repository.apply_patch", patch_arguments()),
+            structured_edit(),
             final("The file mutation succeeded; code correctness was not tested."),
         )
     )
@@ -135,7 +146,7 @@ def test_rejection_after_preview_performs_zero_mutation(workspace: Path) -> None
     model = MockModel(
         (
             call("read", "repository.read_file", {"path": "src/value.py"}),
-            call("patch", "repository.apply_patch", patch_arguments()),
+            structured_edit(),
             final("The proposal was not approved and no mutation occurred."),
         )
     )
@@ -175,14 +186,14 @@ def test_reading_different_file_does_not_authorize_mutation(workspace: Path) -> 
     model = MockModel(
         (
             call("read", "repository.read_file", {"path": "src/other.py"}),
-            call("patch", "repository.apply_patch", patch_arguments()),
-            final("The mutation was rejected."),
+            structured_edit(),
+            structured_edit(),
         )
     )
-    response = assist_session(model, workspace, approve=lambda *_args: True).ask(
-        "Inspect OTHER and change VALUE"
-    )
-    assert response.tool_activity[-1].status == "failure"
+    with pytest.raises(RepositoryOrchestrationError, match="path_not_eligible"):
+        assist_session(model, workspace, approve=lambda *_args: True).ask(
+            "Inspect OTHER and change VALUE"
+        )
     assert (workspace / "src/value.py").read_bytes() == b"VALUE = 1\n"
 
 
@@ -198,7 +209,7 @@ def test_external_change_after_preview_causes_precondition_failure(
     model = MockModel(
         (
             call("read", "repository.read_file", {"path": "src/value.py"}),
-            call("patch", "repository.apply_patch", patch_arguments()),
+            structured_edit(),
             final("The stale mutation failed."),
         )
     )
@@ -254,7 +265,7 @@ def test_successful_mutation_remains_real_if_later_generation_fails(
     model = MockModel(
         (
             call("read", "repository.read_file", {"path": "src/value.py"}),
-            call("patch", "repository.apply_patch", patch_arguments()),
+            structured_edit(),
             "not json",
             "still not json",
         )
@@ -366,7 +377,7 @@ def test_mutation_invalidates_verification_generation_then_retest_refreshes(
         (
             call("test-before", "project.test", {}),
             call("read", "repository.read_file", {"path": "src/value.py"}),
-            call("patch", "repository.apply_patch", patch_arguments()),
+            structured_edit(),
             call("test-after", "project.test", {}),
             final("The current tests pass."),
         )
