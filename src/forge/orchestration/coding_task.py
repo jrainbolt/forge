@@ -18,6 +18,7 @@ class CodingTaskPhase(Enum):
     FAILED = "failed"
     REJECTED = "rejected"
     DIAGNOSING = "diagnosing"
+    REPAIR_READY = "repair_ready"
     AWAITING_REPAIR_APPROVAL = "awaiting_repair_approval"
     REPAIRED = "repaired"
     VERIFYING_REPAIR = "verifying_repair"
@@ -63,6 +64,30 @@ class MutationRecord:
     old_sha256: str | None
     new_sha256: str | None
     generation: int
+    start_line: int | None = None
+    end_line: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RepairEvidence:
+    verification_observation_id: str
+    source_observation_id: str
+    path: str
+    generation: int
+    mutation_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class RepairGroundingMetrics:
+    diagnosis_entries: int = 0
+    diagnostics_registered: int = 0
+    source_refreshes: int = 0
+    ready_entries: int = 0
+    proposals: int = 0
+    previews: int = 0
+    mutations: int = 0
+    reverification_executed: int = 0
+    reverification_result: str = "not_run"
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +169,8 @@ class CodingTaskResult:
     transition_metrics: MutationTransitionMetrics = MutationTransitionMetrics()
     structured_mutation_metrics: StructuredMutationMetrics = StructuredMutationMetrics()
     verification_gate_metrics: VerificationGateMetrics = VerificationGateMetrics()
+    repair_evidence: RepairEvidence | None = None
+    repair_grounding_metrics: RepairGroundingMetrics = RepairGroundingMetrics()
 
     @property
     def footer(self) -> str:
@@ -201,6 +228,10 @@ class CodingTaskState:
         self.transition_metrics = MutationTransitionMetrics()
         self.structured_mutation_metrics = StructuredMutationMetrics()
         self.verification_gate_metrics = VerificationGateMetrics()
+        self.repair_evidence: RepairEvidence | None = None
+        self.repair_grounding_metrics = RepairGroundingMetrics()
+        self._pending_mutation_range: tuple[int, int] | None = None
+        self._repair_diagnostic_id: str | None = None
         self._mutation_ready_correction_used = False
         self._structured_edit_correction_used = False
         self._structured_edit_awaiting_correction = False
@@ -223,7 +254,7 @@ class CodingTaskState:
                 and self.repair_eligible
                 and not self.repair_attempted
                 and self.mutation_count == 1
-                and self.phase is CodingTaskPhase.DIAGNOSING
+                and self.phase is CodingTaskPhase.REPAIR_READY
             )
         )
 
@@ -232,10 +263,14 @@ class CodingTaskState:
         return self.phase is CodingTaskPhase.MUTATION_READY and not self.terminal
 
     @property
+    def repair_ready(self) -> bool:
+        return self.phase is CodingTaskPhase.REPAIR_READY and not self.terminal
+
+    @property
     def structured_edit_ready(self) -> bool:
         return self.mutation_ready or (
             not self.terminal
-            and self.phase is CodingTaskPhase.DIAGNOSING
+            and self.phase is CodingTaskPhase.REPAIR_READY
             and self.repair_enabled
             and self.repair_eligible
             and not self.repair_attempted
@@ -403,6 +438,14 @@ class CodingTaskState:
             materialized_previews=metrics.materialized_previews + 1,
             approved_previews=metrics.approved_previews + (1 if approved else 0),
         )
+        if self.mutation_count == 1:
+            grounding = self.repair_grounding_metrics
+            self.repair_grounding_metrics = _repair_grounding_replace(
+                grounding, previews=grounding.previews + 1
+            )
+
+    def set_pending_mutation_range(self, start_line: int, end_line: int) -> None:
+        self._pending_mutation_range = (start_line, end_line)
 
     def mutation_blocked_by_policy(self) -> None:
         if self.mutation_count or self.terminal:
@@ -429,6 +472,10 @@ class CodingTaskState:
         if self.mutation_count == 1:
             self.repair_attempted = True
             self.phase = CodingTaskPhase.AWAITING_REPAIR_APPROVAL
+            grounding = self.repair_grounding_metrics
+            self.repair_grounding_metrics = _repair_grounding_replace(
+                grounding, proposals=grounding.proposals + 1
+            )
         else:
             self.phase = CodingTaskPhase.AWAITING_MUTATION_APPROVAL
             self.transition_metrics = _transition_replace(
@@ -499,8 +546,15 @@ class CodingTaskState:
                 self.old_sha256,
                 self.new_sha256,
                 generation,
+                self._pending_mutation_range[0]
+                if self._pending_mutation_range is not None
+                else None,
+                self._pending_mutation_range[1]
+                if self._pending_mutation_range is not None
+                else None,
             )
         )
+        self._pending_mutation_range = None
         self.generation = generation
         self.build = _stale(self.build)
         self.test = _stale(self.test)
@@ -516,6 +570,56 @@ class CodingTaskState:
             self.transition_metrics,
             successful_mutations=self.transition_metrics.successful_mutations + 1,
         )
+        if self.mutation_count == 2:
+            grounding = self.repair_grounding_metrics
+            self.repair_grounding_metrics = _repair_grounding_replace(
+                grounding, mutations=grounding.mutations + 1
+            )
+
+    def register_repair_diagnostic(self, observation_id: str) -> None:
+        if not self.repair_eligible or self.phase is not CodingTaskPhase.DIAGNOSING:
+            return
+        self._repair_diagnostic_id = observation_id
+        metrics = self.repair_grounding_metrics
+        self.repair_grounding_metrics = _repair_grounding_replace(
+            metrics,
+            diagnosis_entries=metrics.diagnosis_entries + 1,
+            diagnostics_registered=metrics.diagnostics_registered + 1,
+        )
+
+    def repair_source_refreshed(
+        self, *, observation_id: str, path: str, generation: int
+    ) -> bool:
+        candidate = next(
+            (
+                item
+                for item in self.mutation_candidates
+                if item.path == path and item.generation == generation
+            ),
+            None,
+        )
+        if (
+            candidate is None
+            or self._repair_diagnostic_id is None
+            or generation != self.generation
+            or self.phase is not CodingTaskPhase.DIAGNOSING
+        ):
+            return False
+        self.repair_evidence = RepairEvidence(
+            self._repair_diagnostic_id,
+            observation_id,
+            path,
+            generation,
+            self.mutation_count,
+        )
+        self.phase = CodingTaskPhase.REPAIR_READY
+        metrics = self.repair_grounding_metrics
+        self.repair_grounding_metrics = _repair_grounding_replace(
+            metrics,
+            source_refreshes=metrics.source_refreshes + 1,
+            ready_entries=metrics.ready_entries + 1,
+        )
+        return True
 
     def verification_ready(self, operation: str) -> None:
         self.phase = CodingTaskPhase.VERIFICATION_READY
@@ -641,6 +745,15 @@ class CodingTaskState:
                 if self.mutation_count == 1
                 else CodingTaskPhase.INSPECTING
             )
+        if self.mutation_count == 2:
+            metrics = self.repair_grounding_metrics
+            self.repair_grounding_metrics = _repair_grounding_replace(
+                metrics,
+                reverification_executed=(
+                    metrics.reverification_executed + int(record.attempted)
+                ),
+                reverification_result=label,
+            )
 
     def fail_after_mutation(self) -> None:
         if self._terminal_status is not None:
@@ -702,6 +815,8 @@ class CodingTaskState:
             self.transition_metrics,
             self.structured_mutation_metrics,
             self.verification_gate_metrics,
+            self.repair_evidence,
+            self.repair_grounding_metrics,
         )
 
     def _verification(self, operation: str) -> VerificationRecord:
@@ -764,6 +879,17 @@ def _verification_gate_replace(
     }
     values.update(changes)
     return VerificationGateMetrics(**values)  # type: ignore[arg-type]
+
+
+def _repair_grounding_replace(
+    metrics: RepairGroundingMetrics, **changes: object
+) -> RepairGroundingMetrics:
+    values = {
+        field: getattr(metrics, field)
+        for field in RepairGroundingMetrics.__dataclass_fields__
+    }
+    values.update(changes)
+    return RepairGroundingMetrics(**values)  # type: ignore[arg-type]
 
 
 def _attempt_label(

@@ -37,6 +37,8 @@ class StructuredEditFailure(Enum):
 class StructuredEditValidation:
     failure: StructuredEditFailure | None
     arguments: dict[str, object] | None = None
+    start_line: int | None = None
+    end_line: int | None = None
 
     @property
     def valid(self) -> bool:
@@ -111,6 +113,8 @@ def validate_structured_edit(
             "expected_sha256": candidate.sha256,
             "edits": [{"old": proposal.old_text, "new": proposal.new_text}],
         },
+        source.count("\n", 0, offset) + 1,
+        source.count("\n", 0, offset + len(proposal.old_text)) + 1,
     )
 
 

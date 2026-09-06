@@ -96,6 +96,13 @@ from forge.evaluation.repair import (
     RepairTaskScore,
     load_repair_suite,
 )
+from forge.evaluation.repair_grounding import (
+    REPAIR_GROUNDING_SUITE_VERSION,
+    REPAIR_GROUNDING_V1,
+    RepairGroundingEvaluationResult,
+    RepairGroundingTaskResult,
+    run_repair_grounding_v1,
+)
 from forge.evaluation.reporting import (
     render_terminal_report,
     run_to_dict,
@@ -252,6 +259,10 @@ __all__ = [
     "RepairEvaluationRunner",
     "RepairEvaluationTask",
     "RepairTaskScore",
+    "REPAIR_GROUNDING_SUITE_VERSION",
+    "REPAIR_GROUNDING_V1",
+    "RepairGroundingEvaluationResult",
+    "RepairGroundingTaskResult",
     "TaskCategory",
     "TaskResult",
     "TaskScores",
@@ -286,6 +297,7 @@ __all__ = [
     "run_structured_mutation_v1",
     "run_bootstrap_v1",
     "run_production_decomposition_v1",
+    "run_repair_grounding_v1",
     "apply_task_setup",
     "changed_paths",
     "copy_repository",

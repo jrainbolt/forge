@@ -177,6 +177,15 @@ class RealWorldMetrics:
     verification_result: str = "not_run"
     verification_tools: int = 0
     post_mutation_reads_before_verification: int = 0
+    repair_diagnosis_entered: bool = False
+    verification_diagnostic_registered: bool = False
+    repair_source_refreshed: bool = False
+    repair_ready_reached: bool = False
+    repair_proposal_emitted: bool = False
+    repair_preview_created: bool = False
+    repair_mutation_executed: bool = False
+    reverification_executed: bool = False
+    reverification_result: str = "not_run"
     repair_attempts: int = 0
     post_coverage_tools: int = 0
 
@@ -548,6 +557,7 @@ def score_task_result(
     transition = getattr(coding, "transition_metrics", None)
     structured = getattr(coding, "structured_mutation_metrics", None)
     verification_gate = getattr(coding, "verification_gate_metrics", None)
+    repair_grounding = getattr(coding, "repair_grounding_metrics", None)
     oracle_pass = oracle in {EvaluationOutcome.PASS, EvaluationOutcome.NOT_RUN}
     if model_pass and oracle_pass:
         status = RealWorldStatus.PASS
@@ -650,6 +660,21 @@ def score_task_result(
         verification_tools=getattr(verification_gate, "verification_tools", 0),
         post_mutation_reads_before_verification=getattr(
             verification_gate, "post_mutation_reads_before_verification", 0
+        ),
+        repair_diagnosis_entered=getattr(repair_grounding, "diagnosis_entries", 0) > 0,
+        verification_diagnostic_registered=getattr(
+            repair_grounding, "diagnostics_registered", 0
+        )
+        > 0,
+        repair_source_refreshed=getattr(repair_grounding, "source_refreshes", 0) > 0,
+        repair_ready_reached=getattr(repair_grounding, "ready_entries", 0) > 0,
+        repair_proposal_emitted=getattr(repair_grounding, "proposals", 0) > 0,
+        repair_preview_created=getattr(repair_grounding, "previews", 0) > 0,
+        repair_mutation_executed=getattr(repair_grounding, "mutations", 0) > 0,
+        reverification_executed=getattr(repair_grounding, "reverification_executed", 0)
+        > 0,
+        reverification_result=getattr(
+            repair_grounding, "reverification_result", "not_run"
         ),
         repair_attempts=int(bool(getattr(agent, "repair_attempted", False))),
         post_coverage_tools=getattr(

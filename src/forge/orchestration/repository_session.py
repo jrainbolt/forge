@@ -147,15 +147,37 @@ EVIDENCE_STOP_WORDS = frozenset(
         "which",
     }
 )
+REPAIR_READY_GUIDANCE = (
+    "The previous mutation failed verification. Use the trusted verification "
+    "diagnostics and current source below to propose one bounded corrective edit. "
+    "This is the final permitted repair mutation."
+)
+REPAIR_READY_BROAD_CORRECTION = (
+    "Repair evidence is ready. Broad discovery is unavailable; use the trusted "
+    "verification diagnostics and current changed-source excerpt to submit one "
+    "structured_edit for the existing repair candidate."
+)
 MUTATION_READY_GUIDANCE = (
     "Current source evidence is sufficient. Submit one structured_edit with the "
     "candidate path, exact verbatim old_text, and intended new_text. Do not "
     "continue broad repository discovery."
 )
+REPAIR_PRIMARY_GUIDANCE = (
+    "Current source evidence is sufficient for the primary mutation. Submit one "
+    "structured_edit addressing the initial requested defect. If the task describes "
+    "a conditional follow-up defect to repair only after verification exposes it, "
+    "do not preempt that follow-up before the primary verification."
+)
 STRUCTURED_EDIT_CORRECTION = (
     "The structured edit did not validate against the trusted current source. Use "
     "the exact source excerpt already provided and submit one corrected "
     "structured_edit. Do not search broadly and do not change paths."
+)
+STRUCTURED_EDIT_NO_CHANGE_CORRECTION = (
+    "The structured edit was a no-op or otherwise could not be materialized. "
+    "Submit one corrected structured_edit whose non-empty new_text is the intended "
+    "changed source and differs from the exact non-empty old_text. Do not search "
+    "broadly and do not change paths."
 )
 MUTATION_REQUIRED_CORRECTION = (
     "This coding task requires a code change. Current source evidence is sufficient "
@@ -577,7 +599,7 @@ class RepositoryChatSession:
         self._active_coding_task = CodingTaskState(
             self._mutation_generation,
             repair_enabled=self._repair_enabled,
-            transition_required=not self._agent_mode,
+            transition_required=not self._agent_mode or self._repair_enabled,
         )
         self._last_coding_task = None
         try:
@@ -967,7 +989,16 @@ class RepositoryChatSession:
             goal_guidance = Message(MessageRole.USER, _evidence_goal_guidance(coverage))
             goal_messages = (goal_guidance,) if len(evidence_plan.goals) > 1 else ()
             mutation_messages = (
-                (Message(MessageRole.USER, MUTATION_READY_GUIDANCE),)
+                (
+                    Message(
+                        MessageRole.USER,
+                        REPAIR_READY_GUIDANCE
+                        if coding_task is not None and coding_task.repair_ready
+                        else REPAIR_PRIMARY_GUIDANCE
+                        if coding_task is not None and coding_task.repair_enabled
+                        else MUTATION_READY_GUIDANCE,
+                    ),
+                )
                 if structured_edit_ready
                 else ()
             )
@@ -1130,7 +1161,13 @@ class RepositoryChatSession:
                     LOGGER.debug("structured_edit_rejected reason=%s", failure)
                     if correction_available:
                         transcript.append(
-                            Message(MessageRole.USER, STRUCTURED_EDIT_CORRECTION)
+                            Message(
+                                MessageRole.USER,
+                                STRUCTURED_EDIT_NO_CHANGE_CORRECTION
+                                if validation.failure
+                                is StructuredEditFailure.MATERIALIZATION_FAILED
+                                else STRUCTURED_EDIT_CORRECTION,
+                            )
                         )
                         continue
                     coding_task.fail_after_mutation()
@@ -1139,6 +1176,11 @@ class RepositoryChatSession:
                     )
                 LOGGER.debug("structured_edit_validated path=%s", proposal.path)
                 assert validation.arguments is not None
+                assert validation.start_line is not None
+                assert validation.end_line is not None
+                coding_task.set_pending_mutation_range(
+                    validation.start_line, validation.end_line
+                )
                 parsed = ParsedModelOutput(
                     ToolCallOutcome.TOOL_CALL,
                     tool_call=ToolCall(
@@ -1155,18 +1197,16 @@ class RepositoryChatSession:
                     and coding_task.transition_metrics.entries > 0
                 ):
                     coding_task.mutation_failed()
-                if (
-                    coding_task is not None
-                    and coding_task.mutation_ready
-                    and coding_task.mutation_count == 0
-                ):
+                if coding_task is not None and coding_task.structured_edit_ready:
                     if coding_task.note_premature_final():
                         transcript.extend(
                             (
                                 Message(MessageRole.ASSISTANT, response.text),
                                 Message(
                                     MessageRole.USER,
-                                    MUTATION_REQUIRED_CORRECTION,
+                                    REPAIR_READY_GUIDANCE
+                                    if coding_task.repair_ready
+                                    else MUTATION_REQUIRED_CORRECTION,
                                 ),
                             )
                         )
@@ -1295,7 +1335,8 @@ class RepositoryChatSession:
             assert call is not None
             if (
                 coding_task is not None
-                and coding_task.mutation_ready
+                and coding_task.structured_edit_ready
+                and not self._agent_mode
                 and call.tool_name == "repository.apply_patch"
                 and not call.invocation_id.startswith("structured-edit-")
             ):
@@ -1314,14 +1355,19 @@ class RepositoryChatSession:
                 )
             if (
                 coding_task is not None
-                and coding_task.mutation_ready
+                and coding_task.structured_edit_ready
                 and call.tool_name in MUTATION_READY_BROAD_TOOLS
             ):
                 if coding_task.note_post_ready_discovery():
                     transcript.extend(
                         (
                             Message(MessageRole.ASSISTANT, response.text),
-                            Message(MessageRole.USER, MUTATION_READY_GUIDANCE),
+                            Message(
+                                MessageRole.USER,
+                                REPAIR_READY_BROAD_CORRECTION
+                                if coding_task.repair_ready
+                                else MUTATION_READY_GUIDANCE,
+                            ),
                         )
                     )
                     continue
@@ -1331,7 +1377,7 @@ class RepositoryChatSession:
                 )
             if (
                 coding_task is not None
-                and coding_task.mutation_ready
+                and coding_task.structured_edit_ready
                 and call.tool_name == "repository.read_range"
             ):
                 path = call.arguments.get("path")
@@ -1601,6 +1647,11 @@ class RepositoryChatSession:
                     not self._require_mutation_relevance
                     or _is_mutation_relevant_source(result, evidence, user_text)
                 )
+                and (
+                    not coding_task.repair_eligible
+                    or not coding_task.mutations
+                    or activity.path == coding_task.mutations[-1].path
+                )
                 and isinstance(result.output, Mapping)
             ):
                 source_hash = result.output.get("sha256")
@@ -1623,6 +1674,12 @@ class RepositoryChatSession:
                             and actual_end < file_lines
                         ),
                     )
+                    if coding_task.repair_eligible:
+                        coding_task.repair_source_refreshed(
+                            observation_id=call.invocation_id,
+                            path=activity.path,
+                            generation=self._mutation_generation,
+                        )
                     write_available = any(
                         item.name == "repository.apply_patch"
                         for item in self._registry.metadata
@@ -1841,6 +1898,133 @@ class RepositoryChatSession:
                             )
                             if self._activity_callback is not None:
                                 self._activity_callback(gate_activity)
+                            if coding_task.repair_eligible:
+                                coding_task.register_repair_diagnostic(
+                                    gate_invocation.invocation_id
+                                )
+                                mutation = coding_task.mutations[-1]
+                                read_name = "repository.read_range"
+                                read_available = any(
+                                    item.name == read_name
+                                    for item in self._registry.metadata
+                                )
+                                if (
+                                    mutation.path is not None
+                                    and read_available
+                                    and len(activities) < self._max_tool_executions
+                                ):
+                                    start = max(1, (mutation.start_line or 1) - 20)
+                                    end = min(
+                                        start + 399,
+                                        (mutation.end_line or start + 379) + 20,
+                                    )
+                                    read_invocation = ToolInvocation(
+                                        f"forge-repair-source-{coding_task.mutation_count}",
+                                        read_name,
+                                        {
+                                            "path": mutation.path,
+                                            "start_line": start,
+                                            "end_line": end,
+                                        },
+                                    )
+                                    read_permission = self._executor.permission(
+                                        read_invocation, self._context
+                                    )
+                                    if read_permission is PermissionDecision.ALLOW:
+                                        coding_task.record_tool(read_name)
+                                        read_result = self._executor.execute(
+                                            read_invocation, self._context
+                                        )
+                                        read_evidence = _tool_evidence(
+                                            self._registry,
+                                            read_name,
+                                            read_invocation.arguments,
+                                        )
+                                        read_activity = ToolActivity(
+                                            read_invocation.invocation_id,
+                                            read_name,
+                                            read_result.status.value,
+                                            read_evidence.value,
+                                            True,
+                                            _activity_path(
+                                                read_result,
+                                                read_invocation.arguments,
+                                            ),
+                                            generation=self._mutation_generation,
+                                            returned_bytes=_output_integer(
+                                                read_result, "size_bytes"
+                                            ),
+                                            returned_lines=_returned_lines(read_result),
+                                        )
+                                        activities.append(read_activity)
+                                        context_planner.register(
+                                            assistant_text=json.dumps(
+                                                {
+                                                    "type": "forge_repair_source",
+                                                    "path": mutation.path,
+                                                },
+                                                sort_keys=True,
+                                            ),
+                                            rendered_result=render_tool_result(
+                                                read_result, read_evidence
+                                            ),
+                                            result=read_result,
+                                            evidence=read_evidence,
+                                            arguments=read_invocation.arguments,
+                                            generation=self._mutation_generation,
+                                            assistant_role=MessageRole.SYSTEM,
+                                        )
+                                        if (
+                                            read_result.status
+                                            is ToolResultStatus.SUCCESS
+                                            and isinstance(read_result.output, Mapping)
+                                        ):
+                                            source_hash = read_result.output.get(
+                                                "sha256"
+                                            )
+                                            if isinstance(source_hash, str):
+                                                actual_start = read_result.output.get(
+                                                    "actual_start_line"
+                                                )
+                                                actual_end = read_result.output.get(
+                                                    "actual_end_line"
+                                                )
+                                                coding_task.consider_source(
+                                                    mutation.path,
+                                                    source_hash,
+                                                    self._mutation_generation,
+                                                    read_invocation.invocation_id,
+                                                    start_line=(
+                                                        actual_start
+                                                        if isinstance(actual_start, int)
+                                                        else None
+                                                    ),
+                                                    end_line=(
+                                                        actual_end
+                                                        if isinstance(actual_end, int)
+                                                        else None
+                                                    ),
+                                                )
+                                                coding_task.repair_source_refreshed(
+                                                    observation_id=(
+                                                        read_invocation.invocation_id
+                                                    ),
+                                                    path=mutation.path,
+                                                    generation=(
+                                                        self._mutation_generation
+                                                    ),
+                                                )
+                                                observed_hashes[mutation.path] = (
+                                                    source_hash
+                                                )
+                                                LOGGER.debug(
+                                                    "repair_ready_entered path=%s "
+                                                    "generation=%d",
+                                                    mutation.path,
+                                                    self._mutation_generation,
+                                                )
+                                        if self._activity_callback is not None:
+                                            self._activity_callback(read_activity)
                 if self._repair_enabled:
                     # Superseded reads/searches are no longer valid repair context.
                     # Keep the current mutation result and subsequent diagnostics.

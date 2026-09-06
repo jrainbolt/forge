@@ -35,6 +35,7 @@ class ObservationType(Enum):
     WRITE_RESULT = "write_result"
     BUILD_RESULT = "build_result"
     TEST_RESULT = "test_result"
+    VERIFICATION_DIAGNOSTIC = "verification_diagnostic"
     OTHER = "other"
 
 
@@ -340,6 +341,12 @@ class ContextPlanner:
     ) -> None:
         rendered_result = self._enrich_windows(result, rendered_result)
         observation_type = _observation_type(result.tool_name)
+        if (
+            observation_type
+            in {ObservationType.BUILD_RESULT, ObservationType.TEST_RESULT}
+            and result.status is ToolResultStatus.FAILURE
+        ):
+            observation_type = ObservationType.VERIFICATION_DIAGNOSTIC
         paths = _result_paths(result, arguments)
         if result.status is ToolResultStatus.SUCCESS:
             self._known_paths.update(paths)
@@ -412,6 +419,11 @@ class ContextPlanner:
                 and item.record.generation < generation
             ):
                 self._drop(item, "stale source after mutation")
+            elif (
+                item.record.observation_type is ObservationType.VERIFICATION_DIAGNOSTIC
+                and item.record.generation < generation
+            ):
+                self._compact(item, "repair mutation supersedes failure diagnostics")
         self._read_generations = {
             item for item in self._read_generations if item[2] >= generation
         }
@@ -603,7 +615,11 @@ def _priority(kind: ObservationType, status: ToolResultStatus) -> int:
         ObservationType.WRITE_RESULT,
     }:
         return 100
-    if kind in {ObservationType.BUILD_RESULT, ObservationType.TEST_RESULT}:
+    if kind in {
+        ObservationType.BUILD_RESULT,
+        ObservationType.TEST_RESULT,
+        ObservationType.VERIFICATION_DIAGNOSTIC,
+    }:
         return 95 if status is not ToolResultStatus.SUCCESS else 85
     if kind in {ObservationType.SYMBOL_DISCOVERY, ObservationType.REFERENCE_DISCOVERY}:
         return 60

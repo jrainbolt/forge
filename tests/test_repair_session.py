@@ -13,6 +13,7 @@ from forge.orchestration import (
     AgentStopReason,
     CodingTaskStatus,
     RepositoryChatSession,
+    RepositoryOrchestrationError,
 )
 from forge.project_config import ProjectCommand, ProjectCommands
 from forge.tools import (
@@ -152,7 +153,7 @@ def repair_patch_arguments() -> dict[str, object]:
     return patch("src/value.py", "VALUE = 2\n", "VALUE = 2", "VALUE = 3")
 
 
-def test_no_fresh_read_and_wrong_file_provenance_deny_repair(
+def test_automatic_fresh_read_remains_authoritative_after_unrelated_read(
     workspace: Path,
 ) -> None:
     no_read = repair_session(
@@ -160,7 +161,8 @@ def test_no_fresh_read_and_wrong_file_provenance_deny_repair(
         MockModel(flow(repair_patch(), final("Denied."))),
         test_code="raise SystemExit(2)",
     ).run_agent_task("Repair without rereading")
-    assert no_read.agent_task.mutation_count == 1
+    assert no_read.agent_task.mutation_count == 2
+    assert no_read.coding_task.repair_grounding_metrics.source_refreshes == 1
     assert no_read.tool_activity[-1].status == "failure"
 
     workspace.joinpath("src/value.py").write_text("VALUE = 1\n")
@@ -179,8 +181,9 @@ def test_no_fresh_read_and_wrong_file_provenance_deny_repair(
         ),
         test_code="raise SystemExit(2)",
     ).run_agent_task("Repair wrong file")
-    assert wrong_file.agent_task.mutation_count == 1
-    assert wrong_file.tool_activity[-1].status == "failure"
+    assert wrong_file.agent_task.mutation_count == 2
+    assert wrong_file.coding_task.repair_evidence is not None
+    assert wrong_file.coding_task.repair_evidence.path == "src/value.py"
 
 
 def test_repair_rejection_and_reverification_rejection_are_terminal(
@@ -234,18 +237,21 @@ def test_process_start_failure_does_not_grant_repair(workspace: Path) -> None:
 def test_same_generation_test_repetition_and_third_attempt_are_blocked(
     workspace: Path,
 ) -> None:
-    repeated = repair_session(
+    repeated_session = repair_session(
         workspace,
         MockModel(
             flow(
                 call("test-again", "project.test", {}),
                 final("Blocked."),
+                final("Still blocked."),
             )
         ),
         test_code="raise SystemExit(2)",
-    ).run_agent_task("Repeat without repair")
-    assert repeated.agent_task.mutation_count == 1
-    assert repeated.tool_activity[-1].status == "failure"
+    )
+    with pytest.raises(RepositoryOrchestrationError):
+        repeated_session.run_agent_task("Repeat without repair")
+    assert repeated_session.last_coding_task is not None
+    assert repeated_session.last_coding_task.mutation_count == 1
 
     workspace.joinpath("src/value.py").write_text("VALUE = 1\n")
     responses = (
@@ -302,9 +308,10 @@ def test_failure_diagnostic_path_becomes_confined_read_candidate(
     response = repair_session(workspace, model, test_code=test_code).run_agent_task(
         "Fix VALUE and diagnose test failures"
     )
-    assert response.agent_task.status == "completed_repaired_verified"
-    assert any(
-        "src/other.py" in str(request.output.schema) for request in model.requests
+    assert response.agent_task.status == "repair_failed"
+    assert response.agent_task.mutation_count == 1
+    assert all(
+        "src/other.py" not in str(request.output.schema) for request in model.requests
     )
 
 

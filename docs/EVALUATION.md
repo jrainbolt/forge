@@ -398,3 +398,24 @@ Real-world reports include the same gate metrics. A logically incorrect patch th
 Forge successfully tests is classified separately from failure to execute required
 verification. Foundation data and generated real-world JSON remain local and are
 not included in distributions.
+
+## repair-grounding-v1
+
+`repair-grounding-v1` is the fixed eight-case A30 production-orchestration suite.
+R01 establishes trusted diagnostics and automatic fresh-source readiness; R02 rejects
+stale primary text; R03 inspects the prioritized repair request; R04 suppresses broad
+post-failure discovery; R05 completes a structured repair and passing reverification;
+R06 proves a second verification failure is terminal; R07 excludes process-launch
+failure from repair; and R08 treats diagnostic prompt injection as inert data.
+
+The cases use `MockModel`, real configured subprocesses, temporary workspaces, A28
+structured validation and previews, A29 automatic verification, and the production
+A13 repair limit. Metrics report diagnosis entry, diagnostic registration, fresh
+source, repair readiness, proposal, preview, mutation, reverification execution, and
+reverification result without persisting source or full diagnostics.
+
+The unchanged Foundation E07 task is the real A30 observation. Its ladder separates
+primary retrieval/reasoning and mutation mechanics from initial verification,
+diagnosis grounding, repair proposal mechanics, repair correctness, reverification,
+and the independent oracle. Real model quality remains observational rather than a CI
+gate.

@@ -471,3 +471,7 @@ Model prose never creates a verified status. `COMPLETED_VERIFIED` and
 `COMPLETED_REPAIRED_VERIFIED` require a successful configured command for the
 current mutation generation; skipped, absent, rejected, denied, or failed
 verification remains explicitly unverified or failed.
+
+In repair mode, a failing configured verification is paired with bounded trusted
+diagnostics and a fresh current-source excerpt so the local model gets one bounded
+opportunity to correct the change before Forge verifies it again.

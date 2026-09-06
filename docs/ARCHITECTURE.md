@@ -607,6 +607,47 @@ persists after rejection, cancellation, context failure, or failed retest.
 Repair adds no shell, Git mutation, package installation, command discovery, network,
 automatic approval, background work, subagents, or parallel repair candidates.
 
+## Verification failure diagnosis
+
+In explicit repair mode, a launched current-generation verification ending in the
+existing repair-eligible `nonzero_exit` or `timeout` outcome enters deterministic
+failure diagnosis. The bounded A10 result—including configured operation identity,
+exit code, timeout state, and truncated stdout/stderr—is retained as a trusted
+`VERIFICATION_DIAGNOSTIC` observation. Its text remains untrusted data and grants no
+tool, policy, or mutation authority.
+
+## Fresh repair source
+
+Forge performs at most one automatic, policy-allowed `repository.read_range` of the
+successfully changed path for each eligible failed generation. The range uses the
+A28 exact edit location with bounded surrounding context when available. The result
+must establish the current full-file hash and generation; pre-primary source is stale
+and cannot authorize repair.
+
+## Repair-ready transition
+
+`REPAIR_READY` requires both the bound verification diagnostic and the fresh current
+source observation. Together they form immutable `RepairEvidence` containing only
+observation identities, path, generation, and mutation index. The next model request
+prioritizes the original task, diagnostic, and current excerpt while exposing only
+the A28 structured edit and its narrowly authorized reread alternative. Broad
+discovery is corrected without execution.
+
+## Repair authority
+
+A13 remains the sole authority for entering repair: ordinary assist failures,
+process-launch errors, missing commands, permission failures, and rejected execution
+do not reach `REPAIR_READY`. The source and diagnostic establish provenance, not
+permission. Repair still receives a new exact preview and invocation-specific
+approval and remains bound to the changed primary path in A30 v1.
+
+## Repair reverification
+
+After the sole corrective mutation, A29 immediately runs the configured verification
+again without another model decision. Success produces the existing repaired-verified
+status; failure is terminal. A third mutation is impossible, and no rollback is
+performed.
+
 ## Autonomy and permission profiles
 
 A14 separates two immutable axes. `AutonomyMode` selects orchestration and defines the
