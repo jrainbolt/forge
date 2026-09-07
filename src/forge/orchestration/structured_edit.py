@@ -23,6 +23,8 @@ class StructuredEditProposal:
 
 
 class StructuredEditFailure(Enum):
+    NO_OP_EDIT = "no_op_edit"
+    MATERIALIZED_NO_DELTA = "materialized_no_delta"
     OLD_TEXT_NOT_FOUND = "old_text_not_found"
     OLD_TEXT_AMBIGUOUS = "old_text_ambiguous"
     PATH_NOT_ELIGIBLE = "path_not_eligible"
@@ -55,7 +57,9 @@ def validate_structured_edit(
     candidate = next((item for item in candidates if item.path == proposal.path), None)
     if candidate is None or candidate.generation != generation:
         return StructuredEditValidation(StructuredEditFailure.PATH_NOT_ELIGIBLE)
-    if not proposal.old_text or proposal.old_text == proposal.new_text:
+    if proposal.old_text == proposal.new_text:
+        return StructuredEditValidation(StructuredEditFailure.NO_OP_EDIT)
+    if not proposal.old_text:
         return StructuredEditValidation(StructuredEditFailure.MATERIALIZATION_FAILED)
     try:
         old_bytes = proposal.old_text.encode("utf-8")
@@ -100,6 +104,8 @@ def validate_structured_edit(
     updated = (
         source[:offset] + proposal.new_text + source[offset + len(proposal.old_text) :]
     )
+    if updated == source:
+        return StructuredEditValidation(StructuredEditFailure.MATERIALIZED_NO_DELTA)
     if (
         updated[:offset] != source[:offset]
         or updated[offset + len(proposal.new_text) :]

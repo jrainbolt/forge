@@ -43,6 +43,13 @@ from forge.evaluation.discovery import (
     DiscoveryTaskResult,
     run_discovery_v1,
 )
+from forge.evaluation.edit_intent import (
+    EDIT_INTENT_SUITE_VERSION,
+    EDIT_INTENT_V1,
+    EditIntentEvaluationResult,
+    EditIntentTaskResult,
+    run_edit_intent_v1,
+)
 from forge.evaluation.finalization import (
     FINALIZATION_SUITE_VERSION,
     FINALIZATION_V1,
@@ -253,6 +260,10 @@ __all__ = [
     "EvaluationRun",
     "EvaluationRunner",
     "EvaluationTask",
+    "EDIT_INTENT_SUITE_VERSION",
+    "EDIT_INTENT_V1",
+    "EditIntentEvaluationResult",
+    "EditIntentTaskResult",
     "FailureReason",
     "RequiredFact",
     "RepairEvaluationResult",
@@ -288,6 +299,7 @@ __all__ = [
     "write_json_report",
     "run_coverage_v1",
     "run_discovery_v1",
+    "run_edit_intent_v1",
     "run_finalization_v1",
     "run_mutation_transition_v1",
     "STRUCTURED_MUTATION_SUITE_VERSION",

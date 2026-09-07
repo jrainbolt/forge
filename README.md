@@ -475,3 +475,8 @@ verification remains explicitly unverified or failed.
 In repair mode, a failing configured verification is paired with bounded trusted
 diagnostics and a fresh current-source excerpt so the local model gets one bounded
 opportunity to correct the change before Forge verifies it again.
+
+When a coding task is ready for mutation, Forge keeps the requested behavior and
+current source together so the local model can propose an actual changed
+replacement; unchanged proposals are rejected once without creating a write
+preview.

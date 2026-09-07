@@ -120,6 +120,13 @@ class MutationTransitionMetrics:
 @dataclass(frozen=True, slots=True)
 class StructuredMutationMetrics:
     attempts: int = 0
+    mutation_intent_requests: int = 0
+    structured_edit_attempts: int = 0
+    no_op_edit_attempts: int = 0
+    no_op_corrections: int = 0
+    no_op_correction_successes: int = 0
+    non_noop_proposals: int = 0
+    materialized_deltas: int = 0
     valid: int = 0
     old_text_misses: int = 0
     ambiguous_old_text: int = 0
@@ -235,6 +242,7 @@ class CodingTaskState:
         self._mutation_ready_correction_used = False
         self._structured_edit_correction_used = False
         self._structured_edit_awaiting_correction = False
+        self._no_op_awaiting_correction = False
         self.transition_required = transition_required
 
     @property
@@ -349,6 +357,13 @@ class CodingTaskState:
             model_calls=self.transition_metrics.model_calls + 1,
         )
 
+    def note_mutation_intent_request(self) -> None:
+        metrics = self.structured_mutation_metrics
+        self.structured_mutation_metrics = _structured_replace(
+            metrics,
+            mutation_intent_requests=metrics.mutation_intent_requests + 1,
+        )
+
     def note_post_ready_discovery(self) -> bool:
         self.transition_metrics = _transition_replace(
             self.transition_metrics,
@@ -399,6 +414,7 @@ class CodingTaskState:
             self.generation = generation
         self._mutation_ready_correction_used = False
         self._structured_edit_awaiting_correction = False
+        self._no_op_awaiting_correction = False
         self.transition_metrics = _transition_replace(
             self.transition_metrics,
             invalidations=self.transition_metrics.invalidations + 1,
@@ -407,12 +423,26 @@ class CodingTaskState:
     def note_structured_edit(self, failure: str | None) -> bool:
         """Record validation and return whether processing/correction may continue."""
         metrics = self.structured_mutation_metrics
-        changes: dict[str, int] = {"attempts": metrics.attempts + 1}
+        changes: dict[str, int] = {
+            "attempts": metrics.attempts + 1,
+            "structured_edit_attempts": metrics.structured_edit_attempts + 1,
+        }
+        no_op = failure in {"no_op_edit", "materialized_no_delta"}
+        if no_op:
+            changes["no_op_edit_attempts"] = metrics.no_op_edit_attempts + 1
+        else:
+            changes["non_noop_proposals"] = metrics.non_noop_proposals + 1
         if failure is None:
             changes["valid"] = metrics.valid + 1
+            changes["materialized_deltas"] = metrics.materialized_deltas + 1
             if self._structured_edit_awaiting_correction:
                 changes["correction_successes"] = metrics.correction_successes + 1
+            if self._no_op_awaiting_correction:
+                changes["no_op_correction_successes"] = (
+                    metrics.no_op_correction_successes + 1
+                )
             self._structured_edit_awaiting_correction = False
+            self._no_op_awaiting_correction = False
             self.structured_mutation_metrics = _structured_replace(metrics, **changes)
             return True
         metric = {
@@ -428,6 +458,9 @@ class CodingTaskState:
         self._structured_edit_correction_used = True
         self._structured_edit_awaiting_correction = True
         changes["corrections"] = metrics.corrections + 1
+        if no_op:
+            self._no_op_awaiting_correction = True
+            changes["no_op_corrections"] = metrics.no_op_corrections + 1
         self.structured_mutation_metrics = _structured_replace(metrics, **changes)
         return True
 
@@ -612,6 +645,11 @@ class CodingTaskState:
             generation,
             self.mutation_count,
         )
+        # Primary and repair proposals each receive one bounded structured-edit
+        # recovery opportunity; a primary correction cannot consume the repair one.
+        self._structured_edit_correction_used = False
+        self._structured_edit_awaiting_correction = False
+        self._no_op_awaiting_correction = False
         self.phase = CodingTaskPhase.REPAIR_READY
         metrics = self.repair_grounding_metrics
         self.repair_grounding_metrics = _repair_grounding_replace(

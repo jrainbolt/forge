@@ -1694,7 +1694,7 @@ bypass through production orchestration.
 
 # Milestone A30 — Verification Failure Diagnosis & Repair Grounding v1
 
-**Status:** Implementation complete; real E07 acceptance blocked.
+**Status:** Implemented and accepted.
 
 Explicit repair tasks now bind an eligible A29 failure to bounded trusted diagnostic
 evidence, automatically reacquire one policy-allowed current-source range for the
@@ -1703,3 +1703,16 @@ opportunity with a new preview and approval; A29 then reverifies automatically. 
 remains the sole repair authority and two successful mutations remain the absolute
 limit. The fixed `repair-grounding-v1` suite protects the transition and security
 boundaries.
+
+---
+
+# Milestone A31 — Edit Intent Anchoring & No-Op Recovery v1
+
+**Status:** Implemented and accepted.
+
+Mutation-ready requests now retain the original coding task, trusted target, and
+exact current source in a compact snapshot. Identical replacements receive explicit
+`NO_OP_EDIT` classification and one bounded correction without preview, approval,
+tool execution, target switching, or renewed discovery. A post-materialization delta
+check provides defense in depth, and primary and repair edits share the mechanism.
+The fixed `edit-intent-v1` suite covers the production and security boundaries.

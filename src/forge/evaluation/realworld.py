@@ -157,6 +157,9 @@ class RealWorldMetrics:
     structured_mutation_attempts: int = 0
     structured_mutation_valid: int = 0
     structured_mutation_corrections: int = 0
+    no_op_proposals: int = 0
+    structured_edit_recovery_used: bool = False
+    actual_delta_proposed: bool = False
     preview_created: int = 0
     discovery_calls: int = 0
     source_reads: int = 0
@@ -623,6 +626,9 @@ def score_task_result(
         structured_mutation_attempts=getattr(structured, "attempts", 0),
         structured_mutation_valid=getattr(structured, "valid", 0),
         structured_mutation_corrections=getattr(structured, "corrections", 0),
+        no_op_proposals=getattr(structured, "no_op_edit_attempts", 0),
+        structured_edit_recovery_used=getattr(structured, "corrections", 0) > 0,
+        actual_delta_proposed=getattr(structured, "non_noop_proposals", 0) > 0,
         preview_created=getattr(structured, "materialized_previews", 0),
         discovery_calls=sum(
             a.tool_name

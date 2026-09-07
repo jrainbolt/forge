@@ -85,6 +85,21 @@ def test_deletion_duplicate_range_and_bounds_are_deterministic(tmp_path: Path) -
     assert oversized.failure is StructuredEditFailure.TOO_LARGE
 
 
+def test_identical_edit_has_first_class_no_op_result(tmp_path: Path) -> None:
+    path = tmp_path / "source.txt"
+    path.write_text("unchanged\n")
+
+    result = validate_structured_edit(
+        StructuredEditProposal("source.txt", "unchanged", "unchanged"),
+        (_candidate(path),),
+        tmp_path,
+        0,
+    )
+
+    assert result.failure is StructuredEditFailure.NO_OP_EDIT
+    assert result.arguments is None
+
+
 def test_mutation_ready_schema_is_candidate_bound_and_hides_raw_patch(
     tmp_path: Path,
 ) -> None:

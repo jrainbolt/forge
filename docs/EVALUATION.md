@@ -419,3 +419,34 @@ primary retrieval/reasoning and mutation mechanics from initial verification,
 diagnosis grounding, repair proposal mechanics, repair correctness, reverification,
 and the independent oracle. Real model quality remains observational rather than a CI
 gate.
+
+## edit-intent-v1
+
+`edit-intent-v1` is the fixed eight-case A31 production evaluation. I01 covers a
+normal changed proposal; I02 one no-op followed by a changed correction; I03 two
+no-ops and truthful termination; I04 the independent materialized-no-delta defense;
+I05 mutation snapshot intent/source fidelity; I06 retrieval-chatter exclusion; I07
+equivalent repair recovery and automatic reverification; and I08 inert repository
+instructions with an unchanged trusted target.
+
+The suite records mutation-intent requests, structured attempts, no-op attempts and
+corrections, correction successes, non-no-op proposals, materialized deltas,
+previews, and mutations without recording source content. `realworld-v1` additionally
+reports no-op proposal count, whether structured recovery was used, and whether an
+actual delta was proposed while preserving historical scoring.
+
+Foundation E07 previously reached `MUTATION_READY` but returned two identical
+replacements, blocking A30 before verification. The unchanged A31 comparison asks
+whether explicit task/source anchoring produces a non-no-op proposal. That measures
+mechanical intent expression separately from semantic patch correctness. If a model
+still returns two no-ops with correct retrieval, target, source, schema, and bounded
+correction, further work should compare model capability instead of stacking more
+prompt or state heuristics.
+
+The accepted A31 Foundation E07 seed-42 run produced a valid non-no-op primary
+proposal without correction, created an approved preview, mutated `src/clock.c`, and
+reached verification. Its failed verification then supplied the previously missing
+real A30 observation: trusted diagnosis, automatic fresh source, `REPAIR_READY`, a
+valid approved repair mutation, and automatic reverification. Reverification and the
+independent oracle failed, isolating the remaining problem as semantic patch quality
+rather than mutation mechanics or repair orchestration.

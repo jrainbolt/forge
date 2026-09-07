@@ -1099,6 +1099,28 @@ Version 1 changes one exact occurrence in one file. It has no regex, AST editing
 free-form diff scraping, insertion primitive, multi-hunk proposal, or multi-file
 transaction.
 
+## Mutation intent anchoring
+
+Before a primary or repair mutation proposal, Forge builds a compact model snapshot
+that keeps the original requested behavior beside the trusted mutation target and
+exact current source observation. Retrieval candidate lists, unrelated source,
+failed discovery attempts, documentation results, and routing corrections are not
+carried into this snapshot. Repository text remains inert evidence.
+
+## No-op edit and recovery
+
+Exact `old_text == new_text` is classified as `NO_OP_EDIT`. After materialization,
+Forge independently requires the resulting source to differ from current source.
+Neither failure creates a preview, requests approval, executes a tool, changes the
+target, or reopens discovery. One shared structured-edit correction reiterates the
+original task, current trusted source, and non-identity requirement; a second bad
+proposal fails truthfully. Primary and repair mutations use the same mechanism,
+with one recovery opportunity for each mutation attempt.
+
+Forge validates that a delta exists, but never infers, rewrites, or supplies the
+semantic change. A28 path, generation, hash, range, exact-match, preview, approval,
+and execution authority remains unchanged.
+
 ## Real-world evaluation authority
 
 The A25 evaluation harness is outside normal runtime authority. It creates a fresh

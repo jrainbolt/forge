@@ -209,6 +209,34 @@ class ContextPlanner:
             raise ValueError("finalization evidence goals must be unique")
         return tuple(messages), tokens
 
+    def mutation_ready_messages(
+        self, source_observation_id: str, diagnostic_observation_id: str | None = None
+    ) -> tuple[Message, ...]:
+        """Return only trusted evidence required for one mutation proposal."""
+        by_id = {item.record.observation_id: item for item in self._active}
+        selected: list[_ActiveObservation] = []
+        if diagnostic_observation_id is not None:
+            diagnostic = by_id.get(diagnostic_observation_id)
+            if (
+                diagnostic is None
+                or diagnostic.record.observation_type
+                is not ObservationType.VERIFICATION_DIAGNOSTIC
+            ):
+                raise ValueError("repair diagnostic is unavailable")
+            selected.append(diagnostic)
+        source = by_id.get(source_observation_id)
+        if source is None or source.record.observation_type not in {
+            ObservationType.SOURCE_FILE,
+            ObservationType.SOURCE_RANGE,
+        }:
+            raise ValueError("mutation source is unavailable")
+        selected.append(source)
+        return tuple(
+            message
+            for observation in selected
+            for message in (observation.assistant, observation.result)
+        )
+
     @property
     def metrics(self) -> ContextPlannerMetrics:
         return ContextPlannerMetrics(
