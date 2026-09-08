@@ -480,3 +480,7 @@ When a coding task is ready for mutation, Forge keeps the requested behavior and
 current source together so the local model can propose an actual changed
 replacement; unchanged proposals are rejected once without creating a write
 preview.
+
+Forge's real-world evaluation can compare interchangeable local model profiles on
+the same repository tasks while holding retrieval, permissions, mutation,
+verification, and repair behavior constant.

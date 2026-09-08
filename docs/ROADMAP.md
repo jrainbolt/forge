@@ -1716,3 +1716,16 @@ exact current source in a compact snapshot. Identical replacements receive expli
 tool execution, target switching, or renewed discovery. A post-materialization delta
 check provides defense in depth, and primary and repair edits share the mechanism.
 The fixed `edit-intent-v1` suite covers the production and security boundaries.
+
+---
+
+# Milestone A32 — Local Coding Model Capability Benchmark v1
+
+**Status:** Implemented and accepted.
+
+The `model-capability-v1` evaluator reuses unchanged Foundation `realworld-v1`
+tasks across catalog-configured local model profiles and fixed seeds. It records
+availability, safe configuration metadata, mechanical and semantic coding ladders,
+aggregate success rates, timing, and canonical-repository safety while holding all
+production orchestration, budgets, permissions, verification, and repair behavior
+constant.

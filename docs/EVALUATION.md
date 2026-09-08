@@ -450,3 +450,34 @@ real A30 observation: trusted diagnosis, automatic fresh source, `REPAIR_READY`,
 valid approved repair mutation, and automatic reverification. Reverification and the
 independent oracle failed, isolating the remaining problem as semantic patch quality
 rather than mutation mechanics or repair orchestration.
+
+## model-capability-v1
+
+`model-capability-v1` compares configured local generative profiles by running the
+existing `realworld-v1` task objects through the unchanged production
+`RepositoryChatSession`. The matrix varies only profile and fixed seed. Retrieval,
+context limits, generation settings, permissions, approval, tool and mutation
+budgets, verification, repair, disposable-copy isolation, and the independent oracle
+remain identical.
+
+Profiles come exclusively from `ModelCatalog`; missing artifacts, load failures, or
+failed smoke generations are recorded as `UNAVAILABLE` with a bounded stage,
+exception category, and message. No models are downloaded, and a load failure skips
+that profile's tasks without aborting other profiles. Models are loaded and closed
+sequentially.
+
+Per-run results retain source acquisition, grounding, mutation-ready, no-op,
+structured-delta, preview, mutation, verification, repair, oracle, tool, model-call,
+context, and elapsed metrics. Per-model aggregates report grounded read-only runs,
+valid-delta, preview, mutation, verification-pass, oracle-pass, and repair-success
+rates. This keeps mechanical patch production distinct from semantic correctness and
+uses no LLM judge.
+
+The accepted Foundation seed-42 matrix evaluated `qwen-small` and `qwen-large` on
+unchanged E01, E03, E04, and E07 definitions with lexical cold bootstrap and 8192
+context. Both profiles grounded E01/E03. `qwen-small` produced valid previews and
+mutations for both coding tasks but passed neither verification nor oracle;
+`qwen-large` produced no structured delta for either coding task and therefore never
+reached verification. The larger configured profile was slower overall. The result
+confirms model/profile capability is a major variable, but does not show that the
+available stronger profile resolves Forge's coding-quality limitation.
