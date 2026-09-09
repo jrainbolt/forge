@@ -1729,3 +1729,15 @@ availability, safe configuration metadata, mechanical and semantic coding ladder
 aggregate success rates, timing, and canonical-repository safety while holding all
 production orchestration, budgets, permissions, verification, and repair behavior
 constant.
+
+---
+
+# Milestone A33 — Coding Reasoning vs Protocol Compatibility v1
+
+**Status:** Implemented and accepted.
+
+The evaluation-only `protocol-compatibility-v1` suite separates concise conceptual
+reasoning, exact edit construction, strict production structured output, and full
+Forge E04 orchestration. It reuses A28 validation and executable disposable oracles,
+records per-layer failure and latency, and exposes transition loss without changing
+production prompts, protocols, retrieval, budgets, mutation, verification, or repair.

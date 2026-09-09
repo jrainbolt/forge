@@ -481,3 +481,30 @@ mutations for both coding tasks but passed neither verification nor oracle;
 reached verification. The larger configured profile was slower overall. The result
 confirms model/profile capability is a major variable, but does not show that the
 available stronger profile resolves Forge's coding-quality limitation.
+
+## protocol-compatibility-v1
+
+`protocol-compatibility-v1` separates model behavior into four layers using
+evaluation prompt version `protocol-diagnostic-v1`. L1 requests a concise conceptual
+answer with no schema or tools. L2 requests only evaluation-owned `old_text` and
+`new_text` JSON fields. L3 uses the actual production mutation-ready output builder
+and A28 validator without repository tools. L4 is unchanged `realworld-v1` E04
+production orchestration. L1–L3 prompts are diagnostic-only and are not used by
+Forge sessions.
+
+Three synthetic tasks cover a C boundary comparison, Python boolean inversion, and
+a C default constant. Disposable compiler/interpreter checks distinguish valid
+representation and material delta from semantic oracle success. Foundation L1–L3
+use the unchanged E04 task and an evaluator-established expected source inside
+disposable copies; L4 performs normal retrieval. Per-model aggregates report each
+layer independently and compute transition loss only across task IDs shared by the
+adjacent layers.
+
+At seed 42, qwen-small identified all four concepts and formed mechanically valid L2
+edits for all tasks, but its Foundation L2 edit failed the oracle. Foundation L3
+then failed exact-source matching, while L4 again produced a valid but semantically
+wrong delta. qwen-large identified all four concepts and produced correct L2/L3
+edits on most synthetic tasks, but on Foundation E04 it could not form L2 fields,
+emitted schema-invalid L3 output, and produced no L4 delta. The comparison localizes
+qwen-small primarily to semantic edit choice and qwen-large to realistic edit
+representation/protocol compatibility rather than basic conceptual reasoning.

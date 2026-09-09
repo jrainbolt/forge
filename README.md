@@ -484,3 +484,7 @@ preview.
 Forge's real-world evaluation can compare interchangeable local model profiles on
 the same repository tasks while holding retrieval, permissions, mutation,
 verification, and repair behavior constant.
+
+Forge can evaluate local models separately for coding reasoning, exact edit
+construction, structured-action compatibility, and full agent execution so model
+limitations are not confused with orchestration failures.
