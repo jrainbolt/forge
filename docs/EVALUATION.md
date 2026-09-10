@@ -508,3 +508,31 @@ edits on most synthetic tasks, but on Foundation E04 it could not form L2 fields
 emitted schema-invalid L3 output, and produced no L4 delta. The comparison localizes
 qwen-small primarily to semantic edit choice and qwen-large to realistic edit
 representation/protocol compatibility rather than basic conceptual reasoning.
+
+## edit-representation-v1
+
+`edit-representation-v1` holds model, task wording, complete current source, seed 42,
+temperature 0, 512-token output limit, and deterministic semantic oracle constant
+while varying only an evaluation-owned edit representation. R1 reuses A33's exact
+`old_text`/`new_text` evaluator. R2 presents stable line-number decoration and accepts
+a strict, bounded `start_line`, `end_line`, and `new_text` object. R3 partitions the
+same source into three to eight deterministic contiguous regions with opaque `S1`,
+`S2`, ... labels and accepts a strict `span_id` and `new_text` object. Short synthetic
+files may necessarily expose fewer than three non-empty spans.
+
+R2 and R3 validate one bounded contiguous target and replacement, preserve all
+unchanged prefix and suffix content, materialize only in disposable evaluator copies,
+and never enter the production mutation protocol. Results record response validity,
+target selectability, evaluator-known target-region accuracy, replacement validity,
+material delta, semantic oracle outcome, and generation-only latency separately.
+Per-model representation aggregates expose transparent R2-minus-R1 and R3-minus-R1
+oracle-rate gains; no composite score or model judge is used.
+
+At seed 42, both models selected the correct target region for every R2/R3 task.
+qwen-small's Foundation E04 edit failed the unchanged oracle under R1, R2, and R3,
+confirming that easier targeting did not fix its semantic replacement. qwen-large
+failed to express an E04 R1 exact edit, but its R2 line-range edit selected the right
+line and passed the unchanged oracle. Its R3 span edit selected the right span but
+failed semantically. This is direct evidence of exact-copy friction for qwen-large on
+E04 and supports investigating a separately designed safe range adapter later without
+weakening A28 or changing production behavior in A34.

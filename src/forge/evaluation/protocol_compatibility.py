@@ -85,6 +85,7 @@ class DiagnosticFixture:
     concept_groups: tuple[tuple[str, ...], ...]
     contradictory_groups: tuple[tuple[str, ...], ...]
     oracle: str
+    expected_line: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +143,7 @@ SYNTHETIC_FIXTURES = (
         (("boundary", "equal", "limit"), ("allow", "include", ">=")),
         (("exclude equality", "keep >"),),
         "boundary",
+        3,
     ),
     DiagnosticFixture(
         "P02",
@@ -152,6 +154,7 @@ SYNTHETIC_FIXTURES = (
         (("true",), ("enable",), ("false", "disable")),
         (("invert", "not flag"),),
         "boolean",
+        2,
     ),
     DiagnosticFixture(
         "P03",
@@ -162,6 +165,7 @@ SYNTHETIC_FIXTURES = (
         (("three", "3"), ("retry", "attempt")),
         (("one attempt", "return 1"),),
         "constant",
+        2,
     ),
 )
 
@@ -199,6 +203,31 @@ def run_protocol_diagnostics(
     if l4_result is not None:
         results.append(_l4(model_profile, l4_result))
     return tuple(results)
+
+
+def run_exact_edit_fixture(
+    model_profile: str, model: Model, fixture: DiagnosticFixture
+) -> ProtocolLayerResult:
+    """Run the existing A33 exact-text edit layer for one synthetic fixture."""
+    return _edit_layer(model_profile, model, fixture, DiagnosticLayer.L2_EDIT)
+
+
+def run_foundation_exact_edit(
+    model_profile: str,
+    model: Model,
+    fixture: DiagnosticFixture,
+    task: RealWorldTask,
+    repository: Path,
+) -> ProtocolLayerResult:
+    """Run the existing A33 exact-text edit layer for Foundation E04."""
+    return _foundation_edit(model_profile, model, fixture, task, repository, False)
+
+
+def run_synthetic_oracle(
+    fixture: DiagnosticFixture, workspace: Path
+) -> EvaluationOutcome:
+    """Run the existing A33 deterministic semantic oracle."""
+    return _synthetic_oracle(fixture, workspace)
 
 
 def build_protocol_compatibility_run(
@@ -530,6 +559,7 @@ def _run_foundation_layers(
             (("advance", "tick"), ("ordinary", "maximum", "max")),
             (("only maximum", "equal maximum"),),
             "foundation",
+            _line_containing(source, task.setup[0].replacement),
         )
         l1 = _l1(profile, model, fixture)
         l2 = _foundation_edit(profile, model, fixture, task, repository, False)
@@ -639,6 +669,13 @@ def _base_prompt(fixture: DiagnosticFixture) -> str:
         f"Coding task:\n{fixture.task}\n\nCurrent path:\n{fixture.path}"
         f"\n\nCurrent source:\n{fixture.source}"
     )
+
+
+def _line_containing(source: str, text: str) -> int:
+    offset = source.find(text)
+    if offset < 0:
+        raise ValueError("expected diagnostic source region was not found")
+    return source.count("\n", 0, offset) + 1
 
 
 def _validation_status(failure: str | None) -> RepresentationStatus:

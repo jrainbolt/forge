@@ -488,3 +488,7 @@ verification, and repair behavior constant.
 Forge can evaluate local models separately for coding reasoning, exact edit
 construction, structured-action compatibility, and full agent execution so model
 limitations are not confused with orchestration failures.
+
+Forge's evaluation harness can compare exact-text, line-range, and trusted-span
+edit representations without changing the production mutation protocol, helping
+separate model coding errors from edit-format friction.

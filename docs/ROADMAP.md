@@ -1741,3 +1741,15 @@ reasoning, exact edit construction, strict production structured output, and ful
 Forge E04 orchestration. It reuses A28 validation and executable disposable oracles,
 records per-layer failure and latency, and exposes transition loss without changing
 production prompts, protocols, retrieval, budgets, mutation, verification, or repair.
+
+---
+
+# Milestone A34 — Edit Representation Compatibility Benchmark v1
+
+**Status:** Implemented and accepted.
+
+The evaluation-only `edit-representation-v1` benchmark compares exact-text,
+line-range, and opaque trusted-span edits while holding task, complete source, model
+settings, and semantic oracle constant. It records target accuracy separately from
+material and semantic success, demonstrates Foundation E04 exact-copy friction for
+qwen-large, and leaves the production mutation protocol unchanged.
