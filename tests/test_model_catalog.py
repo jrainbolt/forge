@@ -18,6 +18,7 @@ from forge.models import (
     ModelProfile,
     ModelRequest,
     ModelSelectionError,
+    MutationRepresentationPolicy,
     default_backend_registry,
     load_model_catalog,
 )
@@ -41,6 +42,7 @@ def _valid_config(tmp_path: Path) -> Path:
 [models.small]
 backend = "llama.cpp"
 model_id = "small-model"
+mutation_representation = "line_range"
 [models.small.backend_config]
 model_path = "{first}"
 context_size = 2048
@@ -65,6 +67,11 @@ def test_loads_multiple_typed_profiles_without_constructing_models(
     profile = catalog.profile("small")
     assert profile.model_id == "small-model"
     assert profile.backend_id == "llama.cpp"
+    assert profile.mutation_representation is MutationRepresentationPolicy.LINE_RANGE
+    assert (
+        catalog.profile("large").mutation_representation
+        is MutationRepresentationPolicy.EXACT_TEXT
+    )
     assert profile.backend_config == LlamaCppConfig(
         model_path=tmp_path / "first.gguf",
         model_id="small-model",

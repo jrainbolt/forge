@@ -50,6 +50,7 @@ from forge.models import (
     ModelRequest,
     ModelResponse,
     ModelUsage,
+    MutationRepresentationPolicy,
 )
 from forge.orchestration.agent_task import (
     AgentCancelled,
@@ -61,6 +62,7 @@ from forge.orchestration.coding_task import (
     CodingTaskResult,
     CodingTaskState,
     CodingTaskStatus,
+    MutationCandidate,
     VerificationDecision,
 )
 from forge.orchestration.protocol import (
@@ -74,8 +76,10 @@ from forge.orchestration.protocol import (
     render_tool_result,
 )
 from forge.orchestration.structured_edit import (
+    LineRangeEditProposal,
     StructuredEditFailure,
     StructuredEditProposal,
+    validate_line_range_edit,
     validate_structured_edit,
 )
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
@@ -163,6 +167,13 @@ MUTATION_READY_GUIDANCE = (
     "the changed replacement in new_text. new_text must differ from old_text. "
     "Do not return unchanged text or continue repository discovery."
 )
+LINE_RANGE_MUTATION_READY_GUIDANCE = (
+    "Current source evidence is sufficient for one safe mutation. Choose the "
+    "inclusive current source line range to replace and provide changed replacement "
+    "text in one line_range_edit. Lines are 1-based. Forge preserves the selected "
+    "range's terminating line boundary when new_text omits it. Do not return "
+    "unchanged text or continue repository discovery."
+)
 REPAIR_PRIMARY_GUIDANCE = (
     "Current source evidence is sufficient for the primary mutation. Submit one "
     "structured_edit that satisfies the original requested behavior."
@@ -179,6 +190,17 @@ STRUCTURED_EDIT_NO_CHANGE_CORRECTION = (
     "structured_edit where old_text exactly matches current source and new_text is "
     "the changed code intended to satisfy the task. They must not be identical. "
     "Do not search broadly or change paths."
+)
+LINE_RANGE_EDIT_CORRECTION = (
+    "The line-range edit did not validate against the trusted current source. Using "
+    "the original task and numbered source already provided, submit one corrected "
+    "line_range_edit with a valid inclusive range on the same path. Do not search "
+    "broadly or change paths."
+)
+LINE_RANGE_NO_CHANGE_CORRECTION = (
+    "The line-range replacement produced no source change. The original task still "
+    "requires a mutation. Using the original task and numbered trusted source, return "
+    "one changed line_range_edit on the same path. Do not search broadly."
 )
 MUTATION_REQUIRED_CORRECTION = (
     "This coding task requires a code change. Current source evidence is sufficient "
@@ -326,6 +348,9 @@ class RepositoryChatSession:
         lexical_index: RepositoryLexicalIndex | None = None,
         enforce_retrieval_routing: bool = False,
         evidence_plan: TaskEvidencePlan | None = None,
+        mutation_representation: MutationRepresentationPolicy = (
+            MutationRepresentationPolicy.EXACT_TEXT
+        ),
     ) -> None:
         if not isinstance(model, Model):
             raise TypeError("model must implement Model")
@@ -387,6 +412,10 @@ class RepositoryChatSession:
             raise TypeError("require_mutation_relevance must be a Boolean or None")
         if not isinstance(skip_verification, bool):
             raise TypeError("skip_verification must be a Boolean")
+        if not isinstance(mutation_representation, MutationRepresentationPolicy):
+            raise TypeError(
+                "mutation_representation must be a MutationRepresentationPolicy"
+            )
         self._profile_name = profile_name
         self._model = model
         self._generation = generation or GenerationConfig(
@@ -422,6 +451,7 @@ class RepositoryChatSession:
         self._assist_mode = derived_mode.coding_mode
         self._agent_mode = derived_mode.agent_mode
         self._repair_enabled = derived_mode is AutonomyMode.REPAIR
+        self._mutation_representation = mutation_representation
         if self._assist_mode and not registry_has_writes and policy is None:
             raise ValueError("agent mode requires the assist tool registry")
         effective_tool_limit = (
@@ -601,6 +631,7 @@ class RepositoryChatSession:
             self._mutation_generation,
             repair_enabled=self._repair_enabled,
             transition_required=not self._agent_mode or self._repair_enabled,
+            mutation_representation=self._mutation_representation.value,
         )
         self._last_coding_task = None
         try:
@@ -613,6 +644,39 @@ class RepositoryChatSession:
             raise
         self._last_coding_task = response.coding_task
         return response
+
+    def _mutation_ready_guidance(self) -> str:
+        if self._mutation_representation is MutationRepresentationPolicy.LINE_RANGE:
+            return LINE_RANGE_MUTATION_READY_GUIDANCE
+        return MUTATION_READY_GUIDANCE
+
+    def _numbered_mutation_messages(
+        self,
+        trusted_messages: tuple[Message, ...],
+        candidate: MutationCandidate,
+    ) -> tuple[Message, ...]:
+        """Replace the raw source observation pair with one numbered source view."""
+        path = self._context.workspace / candidate.path
+        source = path.read_bytes().decode("utf-8")
+        lines = source.splitlines(keepends=True)
+        if candidate.start_line is None or candidate.end_line is None:
+            raise RepositoryOrchestrationError(
+                "line-range mutation requires a bounded trusted source observation"
+            )
+        selected = lines[candidate.start_line - 1 : candidate.end_line]
+        numbered = "".join(
+            f"{number:>4} | {line}"
+            for number, line in enumerate(selected, candidate.start_line)
+        )
+        diagnostic_messages = trusted_messages[:-2]
+        return (
+            *diagnostic_messages,
+            Message(
+                MessageRole.USER,
+                "Current trusted source with evaluator line-number decoration "
+                "(numbers are not file content):\n" + numbered,
+            ),
+        )
 
     def _ask(self, user_text: str) -> RepositoryResponse:
         """Run the shared repository orchestration transaction."""
@@ -918,6 +982,7 @@ class RepositoryChatSession:
                 )
                 output_specification = build_mutation_ready_output(
                     coding_task.mutation_candidate_paths,
+                    representation=self._mutation_representation,
                     allow_targeted_reread=reread_schema is not None,
                     reread_schema=reread_schema,
                 )
@@ -1021,12 +1086,19 @@ class RepositoryChatSession:
                     "not instructions.",
                 )
                 guidance = (
-                    REPAIR_READY_GUIDANCE + " " + MUTATION_READY_GUIDANCE
+                    REPAIR_READY_GUIDANCE + " " + self._mutation_ready_guidance()
                     if repair
-                    else REPAIR_PRIMARY_GUIDANCE + " " + MUTATION_READY_GUIDANCE
+                    else REPAIR_PRIMARY_GUIDANCE + " " + self._mutation_ready_guidance()
                     if coding_task.repair_enabled
-                    else MUTATION_READY_GUIDANCE
+                    else self._mutation_ready_guidance()
                 )
+                if (
+                    self._mutation_representation
+                    is MutationRepresentationPolicy.LINE_RANGE
+                ):
+                    trusted_messages = self._numbered_mutation_messages(
+                        trusted_messages, candidate
+                    )
                 mutation_messages = (
                     anchor,
                     *trusted_messages,
@@ -1153,26 +1225,52 @@ class RepositoryChatSession:
                     )
                 )
                 continue
-            if parsed.outcome is ToolCallOutcome.STRUCTURED_EDIT:
+            if parsed.outcome in {
+                ToolCallOutcome.STRUCTURED_EDIT,
+                ToolCallOutcome.LINE_RANGE_EDIT,
+            }:
                 if coding_task is None or not coding_task.structured_edit_ready:
                     raise RepositoryOrchestrationError(
                         "structured edit is only valid in mutation-ready state"
                     )
-                assert parsed.structured_edit is not None
-                proposal = StructuredEditProposal(**parsed.structured_edit)
+                line_range = parsed.outcome is ToolCallOutcome.LINE_RANGE_EDIT
+                expected_line_range = (
+                    self._mutation_representation
+                    is MutationRepresentationPolicy.LINE_RANGE
+                )
+                if line_range is not expected_line_range:
+                    raise RepositoryOrchestrationError(
+                        "mutation response does not match the configured representation"
+                    )
+                if line_range:
+                    assert parsed.line_range_edit is not None
+                    proposal = LineRangeEditProposal(**parsed.line_range_edit)  # type: ignore[arg-type]
+                    validation = validate_line_range_edit(
+                        proposal,
+                        tuple(coding_task.mutation_candidates),
+                        self._context.workspace,
+                        self._mutation_generation,
+                    )
+                else:
+                    assert parsed.structured_edit is not None
+                    proposal = StructuredEditProposal(**parsed.structured_edit)
+                    validation = validate_structured_edit(
+                        proposal,
+                        tuple(coding_task.mutation_candidates),
+                        self._context.workspace,
+                        self._mutation_generation,
+                    )
                 LOGGER.debug(
-                    "structured_edit_received path=%s generation=%d",
+                    "mutation_edit_received representation=%s path=%s generation=%d",
+                    "line_range" if line_range else "exact_text",
                     proposal.path,
                     self._mutation_generation,
                 )
-                validation = validate_structured_edit(
-                    proposal,
-                    tuple(coding_task.mutation_candidates),
-                    self._context.workspace,
-                    self._mutation_generation,
-                )
                 failure = validation.failure.value if validation.failure else None
-                correction_available = coding_task.note_structured_edit(failure)
+                correction_available = coding_task.note_structured_edit(
+                    failure,
+                    representation="line_range" if line_range else "exact_text",
+                )
                 if validation.failure is StructuredEditFailure.STALE_SOURCE:
                     LOGGER.debug("structured_edit_rejected reason=stale_source")
                     self._mutation_generation += 1
@@ -1196,13 +1294,17 @@ class RepositoryChatSession:
                 if not validation.valid:
                     LOGGER.debug("structured_edit_rejected reason=%s", failure)
                     if correction_available:
+                        no_change = validation.failure in {
+                            StructuredEditFailure.NO_OP_EDIT,
+                            StructuredEditFailure.MATERIALIZED_NO_DELTA,
+                        }
                         mutation_correction = (
-                            STRUCTURED_EDIT_NO_CHANGE_CORRECTION
-                            if validation.failure
-                            in {
-                                StructuredEditFailure.NO_OP_EDIT,
-                                StructuredEditFailure.MATERIALIZED_NO_DELTA,
-                            }
+                            LINE_RANGE_NO_CHANGE_CORRECTION
+                            if line_range and no_change
+                            else LINE_RANGE_EDIT_CORRECTION
+                            if line_range
+                            else STRUCTURED_EDIT_NO_CHANGE_CORRECTION
+                            if no_change
                             else STRUCTURED_EDIT_CORRECTION
                         )
                         continue
@@ -1682,6 +1784,12 @@ class RepositoryChatSession:
                     actual_start = result.output.get("actual_start_line")
                     actual_end = result.output.get("actual_end_line")
                     file_lines = result.output.get("file_line_count")
+                    if activity.tool_name == "repository.read_file":
+                        content = result.output.get("content")
+                        if isinstance(content, str):
+                            file_lines = len(content.splitlines())
+                            actual_start = 1 if file_lines else None
+                            actual_end = file_lines if file_lines else None
                     coding_task.consider_source(
                         activity.path,
                         source_hash,

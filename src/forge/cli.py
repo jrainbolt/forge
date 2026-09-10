@@ -31,6 +31,7 @@ from forge.models import (
     ModelConfigurationError,
     ModelError,
     ModelSelectionError,
+    MutationRepresentationPolicy,
     default_backend_registry,
     load_model_catalog,
 )
@@ -260,6 +261,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 repository_index = RepositoryIndex(args.workspace)
                 lexical_index = RepositoryLexicalIndex(args.workspace)
+                profile = (
+                    catalog.profile(args.model) if hasattr(catalog, "profile") else None
+                )
                 session = RepositoryChatSession(
                     args.model,
                     model,
@@ -280,6 +284,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     repository_index=repository_index,
                     semantic_index=semantic_index,
                     lexical_index=lexical_index,
+                    mutation_representation=getattr(
+                        profile,
+                        "mutation_representation",
+                        MutationRepresentationPolicy.EXACT_TEXT,
+                    ),
                 )
             with model, session:
                 result = run_repl(session)

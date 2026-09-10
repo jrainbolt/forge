@@ -22,6 +22,16 @@ class StructuredEditProposal:
     new_text: str
 
 
+@dataclass(frozen=True, slots=True)
+class LineRangeEditProposal:
+    """One model-selected 1-based inclusive current-source line range."""
+
+    path: str
+    start_line: int
+    end_line: int
+    new_text: str
+
+
 class StructuredEditFailure(Enum):
     NO_OP_EDIT = "no_op_edit"
     MATERIALIZED_NO_DELTA = "materialized_no_delta"
@@ -122,6 +132,71 @@ def validate_structured_edit(
         source.count("\n", 0, offset) + 1,
         source.count("\n", 0, offset + len(proposal.old_text)) + 1,
     )
+
+
+def validate_line_range_edit(
+    proposal: LineRangeEditProposal,
+    candidates: tuple[MutationCandidate, ...],
+    workspace: Path,
+    generation: int,
+) -> StructuredEditValidation:
+    """Bind a line range to trusted bytes, then reuse exact-edit validation."""
+    candidate = next((item for item in candidates if item.path == proposal.path), None)
+    if candidate is None or candidate.generation != generation:
+        return StructuredEditValidation(StructuredEditFailure.PATH_NOT_ELIGIBLE)
+    try:
+        path = resolve_workspace_write_path(workspace, proposal.path)
+        source_bytes = path.read_bytes()
+        source = source_bytes.decode("utf-8")
+    except WorkspacePathError:
+        return StructuredEditValidation(StructuredEditFailure.PATH_NOT_ELIGIBLE)
+    except (OSError, UnicodeDecodeError):
+        return StructuredEditValidation(StructuredEditFailure.INVALID_ENCODING)
+    if hashlib.sha256(source_bytes).hexdigest() != candidate.sha256:
+        return StructuredEditValidation(StructuredEditFailure.STALE_SOURCE)
+    start = proposal.start_line
+    end = proposal.end_line
+    if (
+        isinstance(start, bool)
+        or isinstance(end, bool)
+        or not isinstance(start, int)
+        or not isinstance(end, int)
+        or start < 1
+        or end < start
+        or end - start + 1 > MAX_EDIT_LINES
+    ):
+        return StructuredEditValidation(StructuredEditFailure.OUT_OF_RANGE)
+    if candidate.start_line is None or candidate.end_line is None:
+        return StructuredEditValidation(StructuredEditFailure.OUT_OF_RANGE)
+    if start < candidate.start_line or end > candidate.end_line:
+        return StructuredEditValidation(StructuredEditFailure.OUT_OF_RANGE)
+    lines = source.splitlines(keepends=True)
+    if end > len(lines):
+        return StructuredEditValidation(StructuredEditFailure.OUT_OF_RANGE)
+    old_text = "".join(lines[start - 1 : end])
+    new_text = _complete_replacement_lines(old_text, proposal.new_text)
+    validation = validate_structured_edit(
+        StructuredEditProposal(proposal.path, old_text, new_text),
+        candidates,
+        workspace,
+        generation,
+    )
+    if validation.valid:
+        return StructuredEditValidation(
+            None, validation.arguments, proposal.start_line, proposal.end_line
+        )
+    return validation
+
+
+def _complete_replacement_lines(old_text: str, new_text: str) -> str:
+    """Preserve a selected range's terminal line boundary when replacing content."""
+    if not new_text or new_text.endswith(("\n", "\r")):
+        return new_text
+    if old_text.endswith("\r\n"):
+        return new_text + "\r\n"
+    if old_text.endswith("\n"):
+        return new_text + "\n"
+    return new_text
 
 
 def _match_offsets(source: str, old: str) -> list[int]:

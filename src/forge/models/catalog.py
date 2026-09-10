@@ -5,6 +5,7 @@ from __future__ import annotations
 import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 
@@ -28,6 +29,13 @@ class ModelSelectionError(LookupError):
     """A requested model profile or backend is unavailable."""
 
 
+class MutationRepresentationPolicy(Enum):
+    """Trusted model-interaction compatibility for mutation proposals."""
+
+    EXACT_TEXT = "exact_text"
+    LINE_RANGE = "line_range"
+
+
 @dataclass(frozen=True, slots=True)
 class BackendDefinition:
     """The parsing and construction functions owned by one backend."""
@@ -44,6 +52,9 @@ class ModelProfile:
     backend_id: str
     model_id: str
     backend_config: object
+    mutation_representation: MutationRepresentationPolicy = (
+        MutationRepresentationPolicy.EXACT_TEXT
+    )
 
 
 class BackendRegistry:
@@ -181,7 +192,12 @@ def load_model_catalog(path: Path, registry: BackendRegistry) -> ModelCatalog:
 def _parse_profile(
     name: str, raw: Mapping[str, object], registry: BackendRegistry
 ) -> ModelProfile:
-    unknown = set(raw) - {"backend", "model_id", "backend_config"}
+    unknown = set(raw) - {
+        "backend",
+        "model_id",
+        "backend_config",
+        "mutation_representation",
+    }
     if unknown:
         raise ModelConfigurationError(
             f"profile {name!r} has unknown keys: {_format_keys(unknown)}"
@@ -201,7 +217,18 @@ def _parse_profile(
         raise ModelConfigurationError(
             f"invalid backend configuration for profile {name!r}: {error}"
         ) from error
-    return ModelProfile(name, backend_id, model_id, backend_config)
+    raw_representation = raw.get("mutation_representation", "exact_text")
+    if not isinstance(raw_representation, str):
+        raise ModelConfigurationError(
+            f"profile {name!r} mutation_representation must be text"
+        )
+    try:
+        representation = MutationRepresentationPolicy(raw_representation)
+    except ValueError as error:
+        raise ModelConfigurationError(
+            f"profile {name!r} mutation_representation must be exact_text or line_range"
+        ) from error
+    return ModelProfile(name, backend_id, model_id, backend_config, representation)
 
 
 def _parse_llama_cpp_config(

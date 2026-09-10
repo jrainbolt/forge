@@ -1130,3 +1130,21 @@ snapshots, and independently hashes and verifies the disposable result. Evaluato
 oracle subprocesses use fixed argument arrays with `shell=False`; they are not tools
 exposed to the model. This adds no shell, write, Git, network, repair, or approval
 authority to ordinary Forge sessions.
+
+## Mutation representations
+
+Mutation-ready orchestration explicitly selects either the default exact-text
+proposal or the optional line-range proposal. The selection comes from trusted
+caller or model-profile configuration; it is never inferred from a model name and
+does not grant additional capabilities.
+
+Both representations converge before `MutationPreview`. For a line-range proposal,
+Forge resolves the 1-based inclusive range against current trusted UTF-8 source,
+derives exact old text internally, and then enters the same A28 validator and A9
+preview, approval, permission, compare-before-write, and execution path.
+
+Line numbers are authority only within the current mutation candidate's path,
+SHA-256, workspace generation, and observed line bounds. Stale, Boolean, reversed,
+oversized, missing, or out-of-observation ranges are rejected. Range selection does
+not widen write authority, permit fuzzy matching, or enable multi-range or multi-file
+mutation.

@@ -16,7 +16,11 @@ from forge.evaluation import (
     render_realworld_report,
     write_realworld_json,
 )
-from forge.models import default_backend_registry, load_model_catalog
+from forge.models import (
+    MutationRepresentationPolicy,
+    default_backend_registry,
+    load_model_catalog,
+)
 
 
 def main() -> int:
@@ -24,6 +28,11 @@ def main() -> int:
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--model", default="qwen-small")
+    parser.add_argument(
+        "--mutation-representation",
+        choices=tuple(policy.value for policy in MutationRepresentationPolicy),
+        help="Explicitly override the selected profile's mutation representation.",
+    )
     parser.add_argument("--embedding-config", type=Path)
     parser.add_argument("--embedding-profile")
     parser.add_argument(
@@ -81,11 +90,17 @@ def main() -> int:
             seeds = tuple(int(value) for value in args.seeds.split(","))
             tasks = tuple(replace(task, seeds=seeds) for task in tasks)
         with model, embedding if embedding is not None else nullcontext():
+            mutation_representation = (
+                MutationRepresentationPolicy(args.mutation_representation)
+                if args.mutation_representation is not None
+                else catalog.profile(args.model).mutation_representation
+            )
             run = RealWorldEvaluationRunner(
                 args.model,
                 model,
                 args.repository,
                 embedding_model=embedding,
+                mutation_representation=mutation_representation,
             ).run(tasks, snapshot)
         write_realworld_json(run, args.output)
         print(render_realworld_report(run))

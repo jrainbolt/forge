@@ -492,3 +492,7 @@ limitations are not confused with orchestration failures.
 Forge's evaluation harness can compare exact-text, line-range, and trusted-span
 edit representations without changing the production mutation protocol, helping
 separate model coding errors from edit-format friction.
+
+Forge can optionally accept a bounded line-range replacement from compatible local
+models. Forge resolves that range against current trusted source and still produces
+the same exact approval diff before writing.

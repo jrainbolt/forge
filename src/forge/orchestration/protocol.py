@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 
-from forge.models import OutputSpecification, ResponseFormat
+from forge.models import (
+    MutationRepresentationPolicy,
+    OutputSpecification,
+    ResponseFormat,
+)
 from forge.tools import ToolEvidence, ToolRegistry, ToolResult
 from forge.tools.types import ArgumentType, StructuredValue, validate_tool_name
 
@@ -58,6 +62,18 @@ STRUCTURED_EDIT_SCHEMA = {
         "new_text": {"type": "string"},
     },
     "required": ["type", "path", "old_text", "new_text"],
+    "additionalProperties": False,
+}
+LINE_RANGE_EDIT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"const": "line_range_edit"},
+        "path": {"type": "string"},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1},
+        "new_text": {"type": "string"},
+    },
+    "required": ["type", "path", "start_line", "end_line", "new_text"],
     "additionalProperties": False,
 }
 REPOSITORY_RESPONSE_SCHEMA = {
@@ -240,6 +256,7 @@ class ToolCallOutcome(Enum):
     FINAL = "final"
     TOOL_CALL = "tool_call"
     STRUCTURED_EDIT = "structured_edit"
+    LINE_RANGE_EDIT = "line_range_edit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,17 +285,36 @@ class ParsedModelOutput:
     text: str | None = None
     tool_call: ToolCall | None = None
     structured_edit: Mapping[str, str] | None = None
+    line_range_edit: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if self.outcome is ToolCallOutcome.FINAL:
             if self.text is None or self.tool_call is not None:
                 raise ValueError("final output must contain only answer text")
         elif self.outcome is ToolCallOutcome.TOOL_CALL:
-            if self.tool_call is None or self.text is not None or self.structured_edit:
+            if (
+                self.tool_call is None
+                or self.text is not None
+                or self.structured_edit
+                or self.line_range_edit
+            ):
                 raise ValueError("tool output must contain only one tool call")
         elif self.outcome is ToolCallOutcome.STRUCTURED_EDIT:
-            if self.structured_edit is None or self.text is not None or self.tool_call:
+            if (
+                self.structured_edit is None
+                or self.text is not None
+                or self.tool_call
+                or self.line_range_edit
+            ):
                 raise ValueError("structured edit output must contain only one edit")
+        elif self.outcome is ToolCallOutcome.LINE_RANGE_EDIT:
+            if (
+                self.line_range_edit is None
+                or self.text is not None
+                or self.tool_call
+                or self.structured_edit
+            ):
+                raise ValueError("line-range output must contain only one edit")
         else:
             raise TypeError("outcome must be a ToolCallOutcome")
 
@@ -328,19 +364,58 @@ def parse_model_output(text: str) -> ParsedModelOutput:
         return ParsedModelOutput(
             ToolCallOutcome.STRUCTURED_EDIT, structured_edit=MappingProxyType(edit)
         )
+    if response_type == "line_range_edit":
+        expected = {"type", "path", "start_line", "end_line", "new_text"}
+        if set(payload) != expected:
+            raise ProtocolError(
+                "line-range edit must contain exactly type, path, start_line, "
+                "end_line, new_text"
+            )
+        path = payload["path"]
+        start = payload["start_line"]
+        end = payload["end_line"]
+        new_text = payload["new_text"]
+        if not isinstance(path, str) or not isinstance(new_text, str):
+            raise ProtocolError("line-range path and new_text must be text")
+        if (
+            isinstance(start, bool)
+            or isinstance(end, bool)
+            or not isinstance(start, int)
+            or not isinstance(end, int)
+        ):
+            raise ProtocolError("line-range bounds must be integers")
+        edit = {
+            "path": path,
+            "start_line": start,
+            "end_line": end,
+            "new_text": new_text,
+        }
+        return ParsedModelOutput(
+            ToolCallOutcome.LINE_RANGE_EDIT,
+            line_range_edit=MappingProxyType(edit),
+        )
     raise ProtocolError(
-        "model response type must be tool_call, structured_edit, or final"
+        "model response type must be tool_call, structured_edit, line_range_edit, "
+        "or final"
     )
 
 
 def build_mutation_ready_output(
     candidate_paths: tuple[str, ...],
     *,
+    representation: MutationRepresentationPolicy = (
+        MutationRepresentationPolicy.EXACT_TEXT
+    ),
     allow_targeted_reread: bool = False,
     reread_schema: dict[str, object] | None = None,
 ) -> OutputSpecification:
-    """Require a candidate-bound exact replacement in mutation-ready state."""
-    edit = json.loads(json.dumps(STRUCTURED_EDIT_SCHEMA))
+    """Require one candidate-bound configured mutation representation."""
+    source_schema = (
+        LINE_RANGE_EDIT_SCHEMA
+        if representation is MutationRepresentationPolicy.LINE_RANGE
+        else STRUCTURED_EDIT_SCHEMA
+    )
+    edit = json.loads(json.dumps(source_schema))
     edit["properties"]["path"]["enum"] = sorted(candidate_paths)
     branches = [edit]
     if allow_targeted_reread and reread_schema is not None:

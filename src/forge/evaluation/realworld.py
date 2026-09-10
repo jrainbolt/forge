@@ -16,7 +16,13 @@ from pathlib import Path
 from forge.embeddings import EmbeddingModel
 from forge.interaction import AutonomyMode, resolve_interaction_policy
 from forge.lexical_index import RepositoryLexicalIndex
-from forge.models import GenerationConfig, Model, ModelError, ModelUsage
+from forge.models import (
+    GenerationConfig,
+    Model,
+    ModelError,
+    ModelUsage,
+    MutationRepresentationPolicy,
+)
 from forge.orchestration import RepositoryChatSession, RepositoryOrchestrationError
 from forge.project_config import ProjectCommand, ProjectCommands
 from forge.repository_index import RepositoryIndex
@@ -158,6 +164,13 @@ class RealWorldMetrics:
     structured_mutation_valid: int = 0
     structured_mutation_corrections: int = 0
     no_op_proposals: int = 0
+    mutation_representation: str = "exact_text"
+    line_range_attempts: int = 0
+    line_range_valid: int = 0
+    line_range_target_valid: int = 0
+    line_range_materialized: int = 0
+    line_range_corrections: int = 0
+    line_range_preview_created: int = 0
     structured_edit_recovery_used: bool = False
     actual_delta_proposed: bool = False
     preview_created: int = 0
@@ -259,11 +272,15 @@ class RealWorldEvaluationRunner:
         repository: Path,
         *,
         embedding_model: EmbeddingModel | None = None,
+        mutation_representation: MutationRepresentationPolicy = (
+            MutationRepresentationPolicy.EXACT_TEXT
+        ),
     ) -> None:
         self._profile = model_profile
         self._model = model
         self._repository = repository.resolve(strict=True)
         self._embedding_model = embedding_model
+        self._mutation_representation = mutation_representation
 
     def run(
         self, tasks: Iterable[RealWorldTask], repository: RepositorySnapshot
@@ -339,6 +356,7 @@ class RealWorldEvaluationRunner:
                 require_relevant_source=False,
                 require_mutation_relevance=True,
                 activity_callback=activity.append,
+                mutation_representation=self._mutation_representation,
             )
             response = None
             coding_result = None
@@ -627,6 +645,15 @@ def score_task_result(
         structured_mutation_valid=getattr(structured, "valid", 0),
         structured_mutation_corrections=getattr(structured, "corrections", 0),
         no_op_proposals=getattr(structured, "no_op_edit_attempts", 0),
+        mutation_representation=getattr(
+            structured, "mutation_representation", "exact_text"
+        ),
+        line_range_attempts=getattr(structured, "line_range_attempts", 0),
+        line_range_valid=getattr(structured, "line_range_valid", 0),
+        line_range_target_valid=getattr(structured, "line_range_target_valid", 0),
+        line_range_materialized=getattr(structured, "line_range_materialized", 0),
+        line_range_corrections=getattr(structured, "line_range_corrections", 0),
+        line_range_preview_created=getattr(structured, "line_range_preview_created", 0),
         structured_edit_recovery_used=getattr(structured, "corrections", 0) > 0,
         actual_delta_proposed=getattr(structured, "non_noop_proposals", 0) > 0,
         preview_created=getattr(structured, "materialized_previews", 0),

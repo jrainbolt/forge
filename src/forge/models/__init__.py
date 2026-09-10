@@ -7,6 +7,7 @@ from forge.models.catalog import (
     ModelConfigurationError,
     ModelProfile,
     ModelSelectionError,
+    MutationRepresentationPolicy,
     default_backend_registry,
     load_model_catalog,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "ModelProfile",
     "ModelSelectionError",
     "ModelUsage",
+    "MutationRepresentationPolicy",
     "OutputSpecification",
     "ResponseFormat",
     "default_backend_registry",

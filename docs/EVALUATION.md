@@ -536,3 +536,18 @@ line and passed the unchanged oracle. Its R3 span edit selected the right span b
 failed semantically. This is direct evidence of exact-copy friction for qwen-large on
 E04 and supports investigating a separately designed safe range adapter later without
 weakening A28 or changing production behavior in A34.
+
+## line-range-mutation-v1
+
+`line-range-mutation-v1` is the fixed eight-case A35 production-orchestration
+evaluation. It covers one-line and multi-line replacement, invalid and unauthorized
+range correction, stale source, no-op rejection, approval binding, and repair plus
+automatic reverification. It records representation-specific attempts, validity,
+target validity, materialization, corrections, previews, and mutations without
+retaining source contents. `structured-mutation-v1` remains the exact-text regression
+suite.
+
+A34 showed that qwen-large could solve unchanged Foundation E04 when the evaluator
+used line ranges despite failing the exact-text representation. A35 therefore adds
+an explicitly selected production adapter: Forge derives exact old text from trusted
+current source and converges into the unchanged A28/A9 authority path.

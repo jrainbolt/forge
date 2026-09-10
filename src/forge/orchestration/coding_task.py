@@ -119,6 +119,7 @@ class MutationTransitionMetrics:
 
 @dataclass(frozen=True, slots=True)
 class StructuredMutationMetrics:
+    mutation_representation: str = "exact_text"
     attempts: int = 0
     mutation_intent_requests: int = 0
     structured_edit_attempts: int = 0
@@ -135,6 +136,12 @@ class StructuredMutationMetrics:
     correction_successes: int = 0
     materialized_previews: int = 0
     approved_previews: int = 0
+    line_range_attempts: int = 0
+    line_range_valid: int = 0
+    line_range_target_valid: int = 0
+    line_range_materialized: int = 0
+    line_range_corrections: int = 0
+    line_range_preview_created: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,7 +218,10 @@ class CodingTaskState:
         *,
         repair_enabled: bool = False,
         transition_required: bool = True,
+        mutation_representation: str = "exact_text",
     ) -> None:
+        if mutation_representation not in {"exact_text", "line_range"}:
+            raise ValueError("unsupported mutation representation")
         self.phase = CodingTaskPhase.INSPECTING
         self.mutation_count = 0
         self.mutation_tool: str | None = None
@@ -233,7 +243,9 @@ class CodingTaskState:
         self._terminal_status: CodingTaskStatus | None = None
         self.mutation_candidates: list[MutationCandidate] = []
         self.transition_metrics = MutationTransitionMetrics()
-        self.structured_mutation_metrics = StructuredMutationMetrics()
+        self.structured_mutation_metrics = StructuredMutationMetrics(
+            mutation_representation=mutation_representation
+        )
         self.verification_gate_metrics = VerificationGateMetrics()
         self.repair_evidence: RepairEvidence | None = None
         self.repair_grounding_metrics = RepairGroundingMetrics()
@@ -420,13 +432,27 @@ class CodingTaskState:
             invalidations=self.transition_metrics.invalidations + 1,
         )
 
-    def note_structured_edit(self, failure: str | None) -> bool:
+    def note_structured_edit(
+        self, failure: str | None, *, representation: str = "exact_text"
+    ) -> bool:
         """Record validation and return whether processing/correction may continue."""
         metrics = self.structured_mutation_metrics
         changes: dict[str, int] = {
             "attempts": metrics.attempts + 1,
             "structured_edit_attempts": metrics.structured_edit_attempts + 1,
         }
+        if representation == "line_range":
+            changes["line_range_attempts"] = metrics.line_range_attempts + 1
+            target_valid = failure not in {
+                "path_not_eligible",
+                "stale_source",
+                "out_of_range",
+            }
+            if target_valid:
+                changes["line_range_target_valid"] = metrics.line_range_target_valid + 1
+            if failure is None:
+                changes["line_range_valid"] = metrics.line_range_valid + 1
+                changes["line_range_materialized"] = metrics.line_range_materialized + 1
         no_op = failure in {"no_op_edit", "materialized_no_delta"}
         if no_op:
             changes["no_op_edit_attempts"] = metrics.no_op_edit_attempts + 1
@@ -458,6 +484,8 @@ class CodingTaskState:
         self._structured_edit_correction_used = True
         self._structured_edit_awaiting_correction = True
         changes["corrections"] = metrics.corrections + 1
+        if representation == "line_range":
+            changes["line_range_corrections"] = metrics.line_range_corrections + 1
         if no_op:
             self._no_op_awaiting_correction = True
             changes["no_op_corrections"] = metrics.no_op_corrections + 1
@@ -466,10 +494,17 @@ class CodingTaskState:
 
     def note_materialized_preview(self, *, approved: bool) -> None:
         metrics = self.structured_mutation_metrics
+        changes: dict[str, int] = {
+            "materialized_previews": metrics.materialized_previews + 1,
+            "approved_previews": metrics.approved_previews + (1 if approved else 0),
+        }
+        if metrics.mutation_representation == "line_range":
+            changes["line_range_preview_created"] = (
+                metrics.line_range_preview_created + 1
+            )
         self.structured_mutation_metrics = _structured_replace(
             metrics,
-            materialized_previews=metrics.materialized_previews + 1,
-            approved_previews=metrics.approved_previews + (1 if approved else 0),
+            **changes,
         )
         if self.mutation_count == 1:
             grounding = self.repair_grounding_metrics
@@ -898,7 +933,7 @@ def _transition_replace(
 
 
 def _structured_replace(
-    metrics: StructuredMutationMetrics, **changes: int
+    metrics: StructuredMutationMetrics, **changes: object
 ) -> StructuredMutationMetrics:
     values = {
         field: getattr(metrics, field)

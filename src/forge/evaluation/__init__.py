@@ -82,6 +82,13 @@ from forge.evaluation.finalization import (
     FinalizationTaskResult,
     run_finalization_v1,
 )
+from forge.evaluation.line_range_mutation import (
+    LINE_RANGE_MUTATION_SUITE_VERSION,
+    LINE_RANGE_MUTATION_V1,
+    LineRangeMutationEvaluationResult,
+    LineRangeMutationTaskResult,
+    run_line_range_mutation_v1,
+)
 from forge.evaluation.model_capability import (
     MODEL_CAPABILITY_SCHEMA_VERSION,
     MODEL_CAPABILITY_SUITE_VERSION,
@@ -265,6 +272,10 @@ __all__ = [
     "FINALIZATION_V1",
     "FinalizationEvaluationResult",
     "FinalizationTaskResult",
+    "LINE_RANGE_MUTATION_SUITE_VERSION",
+    "LINE_RANGE_MUTATION_V1",
+    "LineRangeMutationEvaluationResult",
+    "LineRangeMutationTaskResult",
     "ProductionDecompositionResult",
     "CODING_WRITE_V1",
     "CONTEXT_SUITE_VERSION",
@@ -413,6 +424,7 @@ __all__ = [
     "run_edit_representation_diagnostics",
     "write_edit_representation_json",
     "run_finalization_v1",
+    "run_line_range_mutation_v1",
     "run_mutation_transition_v1",
     "STRUCTURED_MUTATION_SUITE_VERSION",
     "STRUCTURED_MUTATION_V1",

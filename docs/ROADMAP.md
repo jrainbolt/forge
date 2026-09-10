@@ -1753,3 +1753,17 @@ line-range, and opaque trusted-span edits while holding task, complete source, m
 settings, and semantic oracle constant. It records target accuracy separately from
 material and semantic success, demonstrates Foundation E04 exact-copy friction for
 qwen-large, and leaves the production mutation protocol unchanged.
+
+---
+
+# Milestone A35 — Safe Line-Range Mutation Adapter v1
+
+**Status:** Implemented; acceptance verification in progress.
+
+Production mutation-ready orchestration can explicitly select a bounded line-range
+proposal. Forge binds the 1-based inclusive range to current trusted source, hash,
+generation, and observed bounds, derives exact old text internally, and converges
+into the unchanged A28/A9 preview, approval, permission, compare-before-write, and
+execution path. Exact-text remains the generic default, and the deterministic
+`line-range-mutation-v1` suite protects mutation, no-op, stale-source, approval,
+repair, and reverification boundaries.

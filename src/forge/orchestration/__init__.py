@@ -49,9 +49,11 @@ from forge.orchestration.repository_session import (
     ToolActivity,
 )
 from forge.orchestration.structured_edit import (
+    LineRangeEditProposal,
     StructuredEditFailure,
     StructuredEditProposal,
     StructuredEditValidation,
+    validate_line_range_edit,
     validate_structured_edit,
 )
 
@@ -77,6 +79,7 @@ __all__ = [
     "CodingTaskState",
     "CodingTaskStatus",
     "MutationCandidate",
+    "LineRangeEditProposal",
     "MutationRecord",
     "MutationTransitionMetrics",
     "RepairEvidence",
@@ -96,6 +99,7 @@ __all__ = [
     "VerificationRecord",
     "VerificationGateMetrics",
     "validate_structured_edit",
+    "validate_line_range_edit",
     "VerificationDecision",
     "parse_model_output",
     "render_tool_definitions",
