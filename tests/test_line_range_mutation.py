@@ -4,17 +4,25 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from forge.evaluation import run_line_range_mutation_v1, run_structured_mutation_v1
-from forge.models import MutationRepresentationPolicy
+from forge.models import MockModel, MutationRepresentationPolicy
 from forge.orchestration import (
     LineRangeEditProposal,
     MutationCandidate,
+    RepositoryChatSession,
+    RepositoryOrchestrationError,
     StructuredEditFailure,
     ToolCallOutcome,
     parse_model_output,
     validate_line_range_edit,
 )
 from forge.orchestration.protocol import build_mutation_ready_output
+from forge.tools import (
+    create_assist_repository_policy,
+    create_assist_repository_registry,
+)
 
 
 def _candidate(
@@ -149,3 +157,95 @@ def test_line_range_protocol_is_strict_candidate_bound_and_explicit() -> None:
     )
     assert parsed.outcome is ToolCallOutcome.LINE_RANGE_EDIT
     assert parsed.line_range_edit is not None
+
+
+def test_mutation_ready_final_gets_line_range_specific_correction(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.c"
+    source.write_text("VALUE = 1\n")
+    model = MockModel(
+        (
+            json.dumps(
+                {
+                    "type": "tool_call",
+                    "id": "read",
+                    "tool": "repository.read_file",
+                    "arguments": {"path": "main.c"},
+                }
+            ),
+            json.dumps({"type": "final", "answer": "The change is needed."}),
+            json.dumps(
+                {
+                    "type": "line_range_edit",
+                    "path": "main.c",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "new_text": "VALUE = 2",
+                }
+            ),
+            json.dumps({"type": "final", "answer": "Changed."}),
+        )
+    )
+    session = RepositoryChatSession(
+        "fixture",
+        model,
+        tmp_path,
+        registry=create_assist_repository_registry(),
+        policy=create_assist_repository_policy(),
+        approval_callback=lambda *_args: True,
+        require_relevant_source=False,
+        mutation_representation=MutationRepresentationPolicy.LINE_RANGE,
+    )
+    response = session.execute_task("Change VALUE to 2")
+
+    assert source.read_text() == "VALUE = 2\n"
+    assert response.coding_task is not None
+    assert response.coding_task.transition_metrics.premature_finals == 1
+    assert response.coding_task.structured_mutation_metrics.line_range_attempts == 1
+    assert len(model.requests) == 4
+    ready = model.requests[1]
+    correction = model.requests[2]
+    assert "line_range_edit" in str(ready.output.schema)
+    assert "structured_edit" not in str(ready.output.schema)
+    assert "  1 | VALUE = 1" in str(ready.messages)
+    assert "matching the requested response schema" in ready.messages[0].content
+    assert "Final example" not in ready.messages[0].content
+    assert "line_range_edit" in correction.messages[-1].content
+    assert "inclusive 1-based" in correction.messages[-1].content
+    assert "repository.apply_patch" not in correction.messages[-1].content
+
+
+def test_two_line_range_finals_stop_without_preview(tmp_path: Path) -> None:
+    source = tmp_path / "main.c"
+    source.write_text("VALUE = 1\n")
+    model = MockModel(
+        (
+            json.dumps(
+                {
+                    "type": "tool_call",
+                    "id": "read",
+                    "tool": "repository.read_file",
+                    "arguments": {"path": "main.c"},
+                }
+            ),
+            json.dumps({"type": "final", "answer": "Need a change."}),
+            json.dumps({"type": "final", "answer": "Still no change."}),
+        )
+    )
+    session = RepositoryChatSession(
+        "fixture",
+        model,
+        tmp_path,
+        registry=create_assist_repository_registry(),
+        policy=create_assist_repository_policy(),
+        approval_callback=lambda *_args: True,
+        require_relevant_source=False,
+        mutation_representation=MutationRepresentationPolicy.LINE_RANGE,
+    )
+    with pytest.raises(RepositoryOrchestrationError, match="no mutation proposed"):
+        session.execute_task("Change VALUE to 2")
+    assert session.last_coding_task is not None
+    assert session.last_coding_task.transition_metrics.premature_finals == 2
+    assert session.last_coding_task.structured_mutation_metrics.line_range_attempts == 0
+    assert source.read_text() == "VALUE = 1\n"

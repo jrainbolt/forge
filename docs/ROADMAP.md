@@ -1758,7 +1758,7 @@ qwen-large, and leaves the production mutation protocol unchanged.
 
 # Milestone A35 — Safe Line-Range Mutation Adapter v1
 
-**Status:** Implemented; acceptance verification in progress.
+**Status:** Implemented and accepted; immediate verification caveat documented.
 
 Production mutation-ready orchestration can explicitly select a bounded line-range
 proposal. Forge binds the 1-based inclusive range to current trusted source, hash,
@@ -1767,3 +1767,9 @@ into the unchanged A28/A9 preview, approval, permission, compare-before-write, a
 execution path. Exact-text remains the generic default, and the deterministic
 `line-range-mutation-v1` suite protects mutation, no-op, stale-source, approval,
 repair, and reverification boundaries.
+
+The unchanged qwen-large Foundation E04 seed-42 production acceptance generated a
+valid line-range proposal and exact approved preview, executed one mutation, and
+passed the independent rebuild-and-test oracle. The immediate configured test failed,
+which Forge reported as `mutated_verification_failed`; the adapter acceptance does
+not treat this as a verified Forge terminal status.

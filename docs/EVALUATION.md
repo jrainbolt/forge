@@ -551,3 +551,20 @@ A34 showed that qwen-large could solve unchanged Foundation E04 when the evaluat
 used line ranges despite failing the exact-text representation. A35 therefore adds
 an explicitly selected production adapter: Forge derives exact old text from trusted
 current source and converges into the unchanged A28/A9 authority path.
+
+The A35 production-expression isolation found that the original mutation-ready
+request retained a read-only system prompt encouraging final answers and raw patch
+calls, despite a line-range schema. A direct production-schema E04 diagnostic
+produced a valid oracle-passing edit; the original production-style snapshot
+returned `final`; a mutation-specific system snapshot again produced a valid
+oracle-passing edit. Forge now uses representation-neutral mutation-ready system
+framing and a line-range-specific correction for premature finals, without changing
+the schema, validator, mutation authority, or retry count.
+
+The one subsequent unchanged qwen-large E04 seed-42 production run selected lines
+16–19, passed line-range validation, created an exact approved preview, and made
+one mutation. The independent rebuild-and-test oracle passed and canonical
+Foundation remained unchanged. The configured immediate `project.test` failed,
+so Forge truthfully recorded `mutated_verification_failed` rather than claiming
+verified completion. This meets A35's minimum and strong adapter gates, while
+leaving the immediate verification outcome explicit.

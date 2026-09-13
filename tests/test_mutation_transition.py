@@ -76,6 +76,8 @@ def test_mutation_ready_schema_contains_patch_not_broad_discovery(
     schema = str(model.requests[2].output.schema)
     assert "structured_edit" in schema
     assert "repository.apply_patch" not in schema
+    assert "performing one coding mutation" in model.requests[2].messages[0].content
+    assert "Final example" not in model.requests[2].messages[0].content
     for name in (
         "repository.search_files",
         "repository.semantic_search",
