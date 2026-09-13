@@ -113,16 +113,7 @@ def execute_prepared_project_command(
     prepared: PreparedProjectCommand,
 ) -> StructuredValue:
     """Execute one previously prepared snapshot without reparsing configuration."""
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "CI": "1",
-            "GIT_PAGER": "cat",
-            "PAGER": "cat",
-            "GIT_TERMINAL_PROMPT": "0",
-            "PYTHONUNBUFFERED": "1",
-        }
-    )
+    environment = project_environment()
     started = time.monotonic()
     try:
         process = subprocess.Popen(
@@ -185,6 +176,21 @@ def execute_prepared_project_command(
     if process.returncode != 0:
         raise ToolError("configured project command exited nonzero", output=output)
     return output
+
+
+def project_environment() -> dict[str, str]:
+    """Return the exact noninteractive environment supplied to A10 processes."""
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "CI": "1",
+            "GIT_PAGER": "cat",
+            "PAGER": "cat",
+            "GIT_TERMINAL_PROMPT": "0",
+            "PYTHONUNBUFFERED": "1",
+        }
+    )
+    return environment
 
 
 def _drain(stream: object, capture: _TailCapture) -> None:

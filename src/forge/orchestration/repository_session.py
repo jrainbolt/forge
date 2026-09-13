@@ -82,6 +82,10 @@ from forge.orchestration.structured_edit import (
     validate_line_range_edit,
     validate_structured_edit,
 )
+from forge.orchestration.verification_attribution import (
+    attribute_failure,
+    baseline_evidence,
+)
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
 from forge.retrieval_bootstrap import (
     LEXICAL_TOOL,
@@ -355,6 +359,7 @@ class RepositoryChatSession:
         require_relevant_source: bool = True,
         require_mutation_relevance: bool | None = None,
         skip_verification: bool = False,
+        verification_baseline: bool = False,
         activity_callback: Callable[[ToolActivity], None] | None = None,
         approval_callback: (
             Callable[[ToolInvocation, MutationPreview | PreparedProjectCommand], bool]
@@ -429,6 +434,8 @@ class RepositoryChatSession:
             raise TypeError("require_mutation_relevance must be a Boolean or None")
         if not isinstance(skip_verification, bool):
             raise TypeError("skip_verification must be a Boolean")
+        if not isinstance(verification_baseline, bool):
+            raise TypeError("verification_baseline must be a Boolean")
         if not isinstance(mutation_representation, MutationRepresentationPolicy):
             raise TypeError(
                 "mutation_representation must be a MutationRepresentationPolicy"
@@ -519,6 +526,7 @@ class RepositoryChatSession:
             else require_mutation_relevance
         )
         self._skip_verification = skip_verification
+        self._verification_baseline = verification_baseline
         self._activity_callback = activity_callback
         self._approval_callback = approval_callback
         self._repository_index = repository_index
@@ -741,6 +749,47 @@ class RepositoryChatSession:
             user_text
         )
         estimator = ConservativeTokenEstimator()
+        if (
+            coding_task is not None
+            and self._verification_baseline
+            and not self._skip_verification
+        ):
+            operation = _configured_verification_operation(self._registry)
+            if operation is not None and len(activities) < self._max_tool_executions:
+                invocation = ToolInvocation(
+                    "forge-verification-baseline", f"project.{operation}", {}
+                )
+                tool = self._registry.get(invocation.tool_name)
+                assert isinstance(tool, ProjectCommandTool)
+                prepared = tool.prepare(self._context)
+                baseline_result = self._executor.execute(invocation, self._context)
+                if baseline_result.status is ToolResultStatus.APPROVAL_REQUIRED:
+                    baseline_result = self._execute_project_proposal(
+                        invocation, baseline_result
+                    )
+                coding_task.record_tool(invocation.tool_name)
+                if agent_task is not None:
+                    agent_task.tool_requested()
+                coding_task.verification_baseline = baseline_evidence(
+                    prepared,
+                    baseline_result.status.value,
+                    baseline_result.output
+                    if isinstance(baseline_result.output, Mapping)
+                    else None,
+                    self._mutation_generation,
+                )
+                baseline_activity = ToolActivity(
+                    invocation.invocation_id,
+                    invocation.tool_name,
+                    baseline_result.status.value,
+                    "baseline_verification",
+                    False,
+                    generation=self._mutation_generation,
+                    current_verification=False,
+                )
+                activities.append(baseline_activity)
+                if self._activity_callback is not None:
+                    self._activity_callback(baseline_activity)
         for _step in range(self._max_steps):
             if agent_task is not None:
                 if agent_task.model_calls >= self._max_model_calls:
@@ -2021,6 +2070,17 @@ class RepositoryChatSession:
                                     gate_result.output
                                     if isinstance(gate_result.output, Mapping)
                                     else None,
+                                    attribution=attribute_failure(
+                                        coding_task.verification_baseline,
+                                        self._prepared_project_command(
+                                            verification_operation
+                                        ),
+                                        gate_result.status.value,
+                                        gate_result.output
+                                        if isinstance(gate_result.output, Mapping)
+                                        else None,
+                                        self._mutation_generation - 1,
+                                    ),
                                 )
                             gate_evidence = _tool_evidence(
                                 self._registry,
@@ -2221,6 +2281,17 @@ class RepositoryChatSession:
                     call.tool_name.removeprefix("project."),
                     result.status.value,
                     result.output if isinstance(result.output, Mapping) else None,
+                    attribution=attribute_failure(
+                        coding_task.verification_baseline,
+                        self._prepared_project_command(
+                            call.tool_name.removeprefix("project.")
+                        ),
+                        result.status.value,
+                        result.output if isinstance(result.output, Mapping) else None,
+                        self._mutation_generation - 1,
+                    )
+                    if coding_task.mutation_count
+                    else None,
                 )
             self._last_activity = tuple(activities)
             _update_candidates(
@@ -2326,6 +2397,16 @@ class RepositoryChatSession:
             self._context,
             approval=InvocationApproval.for_invocation(invocation),
         )
+
+    def _prepared_project_command(
+        self, operation: str
+    ) -> PreparedProjectCommand | None:
+        tool = self._registry.get(f"project.{operation}")
+        assert isinstance(tool, ProjectCommandTool)
+        try:
+            return tool.prepare(self._context)
+        except ToolError:
+            return None
 
     def _request_approval(
         self,
@@ -2899,7 +2980,10 @@ def _agent_completion_reason(
 ) -> AgentStopReason:
     if coding.status is CodingTaskStatus.REJECTED:
         return AgentStopReason.USER_REJECTED
-    if coding.status is CodingTaskStatus.MUTATED_VERIFICATION_FAILED:
+    if coding.status in {
+        CodingTaskStatus.MUTATED_VERIFICATION_FAILED,
+        CodingTaskStatus.MUTATED_VERIFICATION_BLOCKED_BY_BASELINE_FAILURE,
+    }:
         return AgentStopReason.VERIFICATION_FAILED
     if coding.status is CodingTaskStatus.REPAIR_REJECTED:
         return AgentStopReason.REPAIR_REJECTED

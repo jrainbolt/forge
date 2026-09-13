@@ -1148,3 +1148,34 @@ SHA-256, workspace generation, and observed line bounds. Stale, Boolean, reverse
 oversized, missing, or out-of-observation ranges are rejected. Range selection does
 not widen write authority, permit fuzzy matching, or enable multi-range or multi-file
 mutation.
+
+## Verification attribution
+
+A36 optionally runs one pre-mutation verification through the same trusted A10
+`project.test` (or configured `project.build`) tool, policy, approval, workspace,
+timeout, and tool budget as ordinary verification. It is off by default. The
+immutable baseline evidence binds the selected operation, argv, workspace, timeout,
+effective process environment, and Forge pre-mutation generation. Repository text
+and model output cannot supply baseline evidence. A baseline run is a real tool
+request, not a free evaluator observation.
+
+After A29 executes post-mutation verification, a passing result needs no
+attribution. A failure with a comparable passing baseline is
+`MUTATION_ASSOCIATED`; identical bounded failure fingerprints are
+`PREEXISTING_OR_UNRELATED`; differing or incomplete fingerprints are
+`UNATTRIBUTED`. Unavailable baselines and changed command identity never establish
+equivalence. Fingerprints use explicit failure lines plus structured A10 outcome,
+exit, and timeout fields; normalization removes only ANSI escapes and the disposable
+workspace prefix. Truncated or marker-free output cannot prove a matching failure.
+
+## Attribution truth and repair boundary
+
+A matching pre-existing failure blocks A13 repair eligibility from that failure.
+Mutation #1 remains applied, but its terminal status is
+`MUTATED_VERIFICATION_BLOCKED_BY_BASELINE_FAILURE`, never
+`COMPLETED_VERIFIED`. Mutation-associated and unattributed failures retain the
+existing bounded repair rules; A36 grants no new repair authority. The independent
+realworld oracle can evaluate this decision but cannot change production status.
+Forge's internal generation cannot detect every concurrent external filesystem edit;
+baseline comparison assumes the selected workspace remains under the same task's
+control until mutation.

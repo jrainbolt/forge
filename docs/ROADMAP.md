@@ -1773,3 +1773,23 @@ valid line-range proposal and exact approved preview, executed one mutation, and
 passed the independent rebuild-and-test oracle. The immediate configured test failed,
 which Forge reported as `mutated_verification_failed`; the adapter acceptance does
 not treat this as a verified Forge terminal status.
+
+---
+
+# Milestone A36 — Verification Failure Attribution & Baseline Comparison v1
+
+**Status:** Implemented and accepted.
+
+An explicit, off-by-default pre-mutation verification uses the existing trusted
+A10 command, permission, approval, and tool-budget path. A36 binds its bounded
+result to the workspace, command identity, environment, and mutation generation,
+then compares a failed A29 post-mutation result using deterministic failure
+fingerprints. A matching pre-existing failure blocks A13/A30 repair authority but
+never produces verified status; passing baselines identify mutation-associated
+failures, while missing, changed, or incomplete evidence remains unattributed.
+
+The fixed `verification-attribution-v1` suite passes all eight subprocess cases.
+Disposable Foundation E04 baseline and exact A35-mutated copies both fail the
+configured test because 58 executables are absent before a build; fingerprints
+match, while the independent rebuild-and-test oracle passes. No default baseline
+cost, model log interpretation, or oracle authority was added.

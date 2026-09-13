@@ -6,6 +6,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 
+from forge.orchestration.verification_attribution import (
+    AttributionResult,
+    VerificationAttribution,
+    VerificationBaselineEvidence,
+)
+
 
 class CodingTaskPhase(Enum):
     INSPECTING = "inspecting"
@@ -31,6 +37,9 @@ class CodingTaskStatus(Enum):
     REJECTED = "rejected"
     FAILED_BEFORE_MUTATION = "failed_before_mutation"
     MUTATED_VERIFICATION_FAILED = "mutated_verification_failed"
+    MUTATED_VERIFICATION_BLOCKED_BY_BASELINE_FAILURE = (
+        "mutated_verification_blocked_by_baseline_failure"
+    )
     MUTATED_TASK_FAILED = "mutated_task_failed"
     COMPLETED_REPAIRED_VERIFIED = "completed_repaired_verified"
     REPAIR_REJECTED = "repair_rejected"
@@ -185,6 +194,9 @@ class CodingTaskResult:
     verification_gate_metrics: VerificationGateMetrics = VerificationGateMetrics()
     repair_evidence: RepairEvidence | None = None
     repair_grounding_metrics: RepairGroundingMetrics = RepairGroundingMetrics()
+    verification_baseline: VerificationBaselineEvidence | None = None
+    verification_attribution: VerificationAttribution = VerificationAttribution()
+    attribution_attempts: tuple[VerificationAttribution, ...] = ()
 
     @property
     def footer(self) -> str:
@@ -249,6 +261,9 @@ class CodingTaskState:
         self.verification_gate_metrics = VerificationGateMetrics()
         self.repair_evidence: RepairEvidence | None = None
         self.repair_grounding_metrics = RepairGroundingMetrics()
+        self.verification_baseline: VerificationBaselineEvidence | None = None
+        self.verification_attribution = VerificationAttribution()
+        self.attribution_attempts: list[VerificationAttribution] = []
         self._pending_mutation_range: tuple[int, int] | None = None
         self._repair_diagnostic_id: str | None = None
         self._mutation_ready_correction_used = False
@@ -750,7 +765,12 @@ class CodingTaskState:
         operation: str,
         status: str,
         output: Mapping[str, object] | None,
+        *,
+        attribution: VerificationAttribution | None = None,
     ) -> None:
+        if attribution is not None:
+            self.verification_attribution = attribution
+            self.attribution_attempts.append(attribution)
         outcome = output.get("outcome") if output is not None else None
         if status == "success":
             label = "passed"
@@ -788,7 +808,16 @@ class CodingTaskState:
         if label == "failed":
             self.verification_decision = VerificationDecision.COMPLETED
             eligible = outcome in {"nonzero_exit", "timeout"}
-            if self.repair_enabled and self.mutation_count == 1 and eligible:
+            preexisting = (
+                self.verification_attribution.result
+                is AttributionResult.PREEXISTING_OR_UNRELATED
+            )
+            if (
+                self.repair_enabled
+                and self.mutation_count == 1
+                and eligible
+                and not preexisting
+            ):
                 self.repair_eligible = True
                 self.repair_eligibility_outcome = outcome
                 self.phase = CodingTaskPhase.DIAGNOSING
@@ -797,6 +826,10 @@ class CodingTaskState:
                 self._terminal_status = (
                     CodingTaskStatus.REPAIR_VERIFICATION_FAILED
                     if self.mutation_count == 2 and self.repair_enabled
+                    else (
+                        CodingTaskStatus.MUTATED_VERIFICATION_BLOCKED_BY_BASELINE_FAILURE
+                    )
+                    if self.mutation_count and preexisting
                     else CodingTaskStatus.MUTATED_VERIFICATION_FAILED
                     if self.mutation_count
                     else CodingTaskStatus.FAILED_BEFORE_MUTATION
@@ -890,6 +923,9 @@ class CodingTaskState:
             self.verification_gate_metrics,
             self.repair_evidence,
             self.repair_grounding_metrics,
+            self.verification_baseline,
+            self.verification_attribution,
+            tuple(self.attribution_attempts),
         )
 
     def _verification(self, operation: str) -> VerificationRecord:

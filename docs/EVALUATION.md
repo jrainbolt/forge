@@ -568,3 +568,28 @@ Foundation remained unchanged. The configured immediate `project.test` failed,
 so Forge truthfully recorded `mutated_verification_failed` rather than claiming
 verified completion. This meets A35's minimum and strong adapter gates, while
 leaving the immediate verification outcome explicit.
+
+## verification-attribution-v1
+
+`verification-attribution-v1` runs eight deterministic cases through temporary
+workspaces and real configured subprocesses. A01 covers baseline pass followed by
+failure; A02 a matching pre-existing failure; A03 different failure markers; A04
+passing verification; A05 unavailable baseline; A06 changed trusted command; A07
+repair suppression for a matching baseline failure; and A08 preservation of the
+existing repair path for a mutation-associated failure. Separate fingerprint tests
+cover workspace roots, ANSI, distinct failures, timeout, process launch, and
+incomplete output. No model interprets logs.
+
+The explicit `--verification-baseline` option runs one extra permission-controlled
+verification before a realworld coding task; ordinary tasks do not do this by
+default. Reports separate baseline execution, baseline/post duration, attribution,
+fingerprint equality, extra tool executions, and extra elapsed time. The independent
+oracle remains evaluator-only and never overrides Forge verification.
+
+The A35 Foundation E04 mismatch was reproduced using two disposable copies of the
+same canonical repository. After setup and CMake configuration but before building,
+the configured `ctest --test-dir build --output-on-failure` exits 8 because all 58
+test executables are missing. The clean baseline and exact A35-corrected copy have
+the same bounded failure fingerprint. A separate evaluator rebuild-and-test oracle
+passes after the correction. Attribution is therefore `PREEXISTING_OR_UNRELATED`,
+while configured verification remains failed and never constitutes verified success.

@@ -472,6 +472,11 @@ Model prose never creates a verified status. `COMPLETED_VERIFIED` and
 current mutation generation; skipped, absent, rejected, denied, or failed
 verification remains explicitly unverified or failed.
 
+When explicitly enabled, Forge can compare a failed post-mutation verification with
+a trusted, comparable pre-mutation baseline. A matching pre-existing failure blocks
+repair from that failure but never makes the mutation verified. Ordinary coding tasks
+do not run the extra baseline command by default.
+
 In repair mode, a failing configured verification is paired with bounded trusted
 diagnostics and a fresh current-source excerpt so the local model gets one bounded
 opportunity to correct the change before Forge verifies it again.

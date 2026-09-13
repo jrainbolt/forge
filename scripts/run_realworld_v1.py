@@ -36,6 +36,11 @@ def main() -> int:
     parser.add_argument("--embedding-config", type=Path)
     parser.add_argument("--embedding-profile")
     parser.add_argument(
+        "--verification-baseline",
+        action="store_true",
+        help="Run one permission-controlled pre-mutation verification per task.",
+    )
+    parser.add_argument(
         "--skip-semantic-index",
         action="store_true",
         help="measure the lexical fallback after separately observing cold-index cost",
@@ -101,6 +106,7 @@ def main() -> int:
                 args.repository,
                 embedding_model=embedding,
                 mutation_representation=mutation_representation,
+                verification_baseline=args.verification_baseline,
             ).run(tasks, snapshot)
         write_realworld_json(run, args.output)
         print(render_realworld_report(run))

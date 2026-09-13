@@ -243,6 +243,13 @@ from forge.evaluation.types import (
     TaskScores,
     ToolRecord,
 )
+from forge.evaluation.verification_attribution import (
+    VERIFICATION_ATTRIBUTION_SUITE_VERSION,
+    VERIFICATION_ATTRIBUTION_V1,
+    AttributionEvaluationResult,
+    AttributionTaskResult,
+    run_verification_attribution_v1,
+)
 from forge.evaluation.verification_gate import (
     VERIFICATION_GATE_SUITE_VERSION,
     VERIFICATION_GATE_V1,
@@ -396,6 +403,10 @@ __all__ = [
     "WriteTaskScore",
     "VERIFICATION_GATE_SUITE_VERSION",
     "VERIFICATION_GATE_V1",
+    "VERIFICATION_ATTRIBUTION_SUITE_VERSION",
+    "VERIFICATION_ATTRIBUTION_V1",
+    "AttributionEvaluationResult",
+    "AttributionTaskResult",
     "VerificationGateEvaluationResult",
     "VerificationGateTaskResult",
     "fixture_workspace",
@@ -458,4 +469,5 @@ __all__ = [
     "write_realworld_json",
     "write_protocol_compatibility_json",
     "run_verification_gate_v1",
+    "run_verification_attribution_v1",
 ]

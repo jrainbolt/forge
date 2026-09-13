@@ -191,6 +191,13 @@ class RealWorldMetrics:
     verification_approved: int = 0
     verification_executed: int = 0
     verification_result: str = "not_run"
+    baseline_verification_executed: bool = False
+    baseline_duration_seconds: float = 0.0
+    post_mutation_duration_seconds: float = 0.0
+    attribution_result: str = "no_baseline"
+    fingerprint_equal: bool | None = None
+    extra_tool_executions: int = 0
+    extra_elapsed_seconds: float = 0.0
     verification_tools: int = 0
     post_mutation_reads_before_verification: int = 0
     repair_diagnosis_entered: bool = False
@@ -275,12 +282,14 @@ class RealWorldEvaluationRunner:
         mutation_representation: MutationRepresentationPolicy = (
             MutationRepresentationPolicy.EXACT_TEXT
         ),
+        verification_baseline: bool = False,
     ) -> None:
         self._profile = model_profile
         self._model = model
         self._repository = repository.resolve(strict=True)
         self._embedding_model = embedding_model
         self._mutation_representation = mutation_representation
+        self._verification_baseline = verification_baseline
 
     def run(
         self, tasks: Iterable[RealWorldTask], repository: RepositorySnapshot
@@ -357,6 +366,7 @@ class RealWorldEvaluationRunner:
                 require_mutation_relevance=True,
                 activity_callback=activity.append,
                 mutation_representation=self._mutation_representation,
+                verification_baseline=self._verification_baseline,
             )
             response = None
             coding_result = None
@@ -604,6 +614,7 @@ def score_task_result(
         )
     context = getattr(response, "context_metrics", None)
     retrieval = getattr(response, "retrieval_metrics", None)
+    primary_attribution = next(iter(getattr(coding, "attribution_attempts", ())), None)
     metrics = RealWorldMetrics(
         model_calls=(
             getattr(agent, "model_calls", getattr(response, "orchestration_steps", 0))
@@ -690,6 +701,30 @@ def score_task_result(
         verification_approved=getattr(verification_gate, "approved", 0),
         verification_executed=getattr(verification_gate, "executed", 0),
         verification_result=getattr(verification_gate, "result", "not_run"),
+        baseline_verification_executed=getattr(
+            getattr(coding, "verification_baseline", None), "executed", False
+        ),
+        baseline_duration_seconds=getattr(
+            getattr(coding, "verification_baseline", None), "duration_seconds", 0.0
+        ),
+        post_mutation_duration_seconds=getattr(
+            primary_attribution,
+            "post_duration_seconds",
+            0.0,
+        ),
+        attribution_result=getattr(
+            getattr(primary_attribution, "result", None),
+            "value",
+            "no_baseline",
+        ),
+        fingerprint_equal=getattr(primary_attribution, "fingerprint_equal", None),
+        extra_tool_executions=sum(
+            getattr(activity, "evidence", "") == "baseline_verification"
+            for activity in activities
+        ),
+        extra_elapsed_seconds=getattr(
+            getattr(coding, "verification_baseline", None), "duration_seconds", 0.0
+        ),
         verification_tools=getattr(verification_gate, "verification_tools", 0),
         post_mutation_reads_before_verification=getattr(
             verification_gate, "post_mutation_reads_before_verification", 0
