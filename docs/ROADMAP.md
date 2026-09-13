@@ -1793,3 +1793,23 @@ Disposable Foundation E04 baseline and exact A35-mutated copies both fail the
 configured test because 58 executables are absent before a build; fingerprints
 match, while the independent rebuild-and-test oracle passes. No default baseline
 cost, model log interpretation, or oracle authority was added.
+
+---
+
+# Milestone A37 — Trusted Verification Plan & Prerequisite Sequencing v1
+
+**Status:** Implemented and accepted.
+
+Trusted local or evaluator-owned configuration may select a fixed ordered plan
+of existing A10 build/test operations. Each step runs serially through its own
+permission, exact approval, timeout, workspace, and tool-budget boundary; the
+first non-pass stops the plan. Without a plan, A29's single-operation selection
+is unchanged. Current-generation verified status requires every configured step
+to pass, and a repair mutation reruns the complete plan. Optional A36 baseline
+attribution compares only equivalent plan/step identities and passing
+prerequisites.
+
+The eight-case `verification-plan-v1` suite passes. In a disposable Foundation
+E04 copy, the accepted A35 line-range mutation passed Forge's production
+build→test plan and the independent oracle, yielding `completed_verified` while
+canonical Foundation remained unchanged. No A38 work was started.

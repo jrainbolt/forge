@@ -446,6 +446,12 @@ command, or the configured build command when no test exists, and enters a
 verification-ready state before asking the model for another decision. A caller may
 explicitly skip this gate; model text cannot.
 
+Trusted project configuration can explicitly define an ordered verification plan,
+such as build then test. Every step retains separate permission and exact approval,
+bounded execution, and a real tool-budget charge. Steps stop at the first failure;
+Forge reports verified only when every required step passes. Without a plan, the
+single-command behavior above is unchanged.
+
 ## Trusted execution
 
 Automatic verification uses the existing confined `project.test` and
@@ -468,8 +474,8 @@ and a second gated verification, with at most two successful mutations total.
 ## Status truth
 
 Model prose never creates a verified status. `COMPLETED_VERIFIED` and
-`COMPLETED_REPAIRED_VERIFIED` require a successful configured command for the
-current mutation generation; skipped, absent, rejected, denied, or failed
+`COMPLETED_REPAIRED_VERIFIED` require every configured plan step (or the legacy
+single command) to pass in the current mutation generation; skipped, absent, rejected, denied, or failed
 verification remains explicitly unverified or failed.
 
 When explicitly enabled, Forge can compare a failed post-mutation verification with

@@ -257,6 +257,11 @@ from forge.evaluation.verification_gate import (
     VerificationGateTaskResult,
     run_verification_gate_v1,
 )
+from forge.evaluation.verification_plan import (
+    VERIFICATION_PLAN_V1,
+    VerificationPlanTaskResult,
+    run_verification_plan_v1,
+)
 
 __all__ = [
     "AGENT_SUITE_VERSION",
@@ -470,4 +475,7 @@ __all__ = [
     "write_protocol_compatibility_json",
     "run_verification_gate_v1",
     "run_verification_attribution_v1",
+    "VERIFICATION_PLAN_V1",
+    "VerificationPlanTaskResult",
+    "run_verification_plan_v1",
 ]

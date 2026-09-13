@@ -83,9 +83,13 @@ from forge.orchestration.structured_edit import (
     validate_structured_edit,
 )
 from forge.orchestration.verification_attribution import (
+    VerificationAttribution,
+    VerificationPlanBaseline,
     attribute_failure,
+    attribute_plan_failure,
     baseline_evidence,
 )
+from forge.project_config import VerificationPlan
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
 from forge.retrieval_bootstrap import (
     LEXICAL_TOOL,
@@ -360,6 +364,7 @@ class RepositoryChatSession:
         require_mutation_relevance: bool | None = None,
         skip_verification: bool = False,
         verification_baseline: bool = False,
+        verification_plan: VerificationPlan | None = None,
         activity_callback: Callable[[ToolActivity], None] | None = None,
         approval_callback: (
             Callable[[ToolInvocation, MutationPreview | PreparedProjectCommand], bool]
@@ -436,6 +441,10 @@ class RepositoryChatSession:
             raise TypeError("skip_verification must be a Boolean")
         if not isinstance(verification_baseline, bool):
             raise TypeError("verification_baseline must be a Boolean")
+        if verification_plan is not None and not isinstance(
+            verification_plan, VerificationPlan
+        ):
+            raise TypeError("verification_plan must be a VerificationPlan or None")
         if not isinstance(mutation_representation, MutationRepresentationPolicy):
             raise TypeError(
                 "mutation_representation must be a MutationRepresentationPolicy"
@@ -473,6 +482,10 @@ class RepositoryChatSession:
         )
         self._mode = derived_mode
         self._assist_mode = derived_mode.coding_mode
+        if self._assist_mode and verification_plan is not None:
+            for step in verification_plan.steps:
+                if not _project_configured(self._registry, step):
+                    raise ValueError(f"verification plan step {step} is not configured")
         self._agent_mode = derived_mode.agent_mode
         self._repair_enabled = derived_mode is AutonomyMode.REPAIR
         self._mutation_representation = mutation_representation
@@ -527,6 +540,7 @@ class RepositoryChatSession:
         )
         self._skip_verification = skip_verification
         self._verification_baseline = verification_baseline
+        self._verification_plan = verification_plan
         self._activity_callback = activity_callback
         self._approval_callback = approval_callback
         self._repository_index = repository_index
@@ -755,9 +769,24 @@ class RepositoryChatSession:
             and not self._skip_verification
         ):
             operation = _configured_verification_operation(self._registry)
-            if operation is not None and len(activities) < self._max_tool_executions:
+            baseline_steps = (
+                tuple(
+                    step.removeprefix("project.")
+                    for step in self._verification_plan.steps
+                )
+                if self._verification_plan is not None
+                else (operation,)
+                if operation is not None
+                else ()
+            )
+            plan_baseline_steps = []
+            for operation in baseline_steps:
+                if len(activities) >= self._max_tool_executions:
+                    break
                 invocation = ToolInvocation(
-                    "forge-verification-baseline", f"project.{operation}", {}
+                    f"forge-verification-baseline-{len(plan_baseline_steps)}",
+                    f"project.{operation}",
+                    {},
                 )
                 tool = self._registry.get(invocation.tool_name)
                 assert isinstance(tool, ProjectCommandTool)
@@ -770,7 +799,7 @@ class RepositoryChatSession:
                 coding_task.record_tool(invocation.tool_name)
                 if agent_task is not None:
                     agent_task.tool_requested()
-                coding_task.verification_baseline = baseline_evidence(
+                evidence = baseline_evidence(
                     prepared,
                     baseline_result.status.value,
                     baseline_result.output
@@ -778,6 +807,9 @@ class RepositoryChatSession:
                     else None,
                     self._mutation_generation,
                 )
+                plan_baseline_steps.append(evidence)
+                if self._verification_plan is None:
+                    coding_task.verification_baseline = evidence
                 baseline_activity = ToolActivity(
                     invocation.invocation_id,
                     invocation.tool_name,
@@ -790,6 +822,14 @@ class RepositoryChatSession:
                 activities.append(baseline_activity)
                 if self._activity_callback is not None:
                     self._activity_callback(baseline_activity)
+                if evidence.result != "passed":
+                    break
+            if self._verification_plan is not None:
+                coding_task.verification_plan_baseline = VerificationPlanBaseline(
+                    self._verification_plan.plan_id,
+                    self._verification_plan.steps,
+                    tuple(plan_baseline_steps),
+                )
         for _step in range(self._max_steps):
             if agent_task is not None:
                 if agent_task.model_calls >= self._max_model_calls:
@@ -849,9 +889,15 @@ class RepositoryChatSession:
                 lexical_available=lexical_available,
                 permission=self._executor.permission(bootstrap_probe, self._context),
             )
-            if (
-                bootstrap_request is not None
-                and len(activities) < self._max_tool_executions
+            if bootstrap_request is not None and len(
+                activities
+            ) < self._max_tool_executions - (
+                len(self._verification_plan.steps) + 1
+                if coding_task is not None
+                and coding_task.mutation_count == 0
+                and self._verification_plan is not None
+                and not self._skip_verification
+                else 0
             ):
                 result = self._executor.execute(
                     bootstrap_request.invocation, self._context
@@ -1650,6 +1696,19 @@ class RepositoryChatSession:
                 raise RepositoryOrchestrationError(
                     "repeated identical tool-call limit exceeded"
                 )
+            if (
+                coding_task is not None
+                and coding_task.mutation_count == 0
+                and self._verification_plan is not None
+                and not self._skip_verification
+                and call.tool_name
+                not in {"repository.apply_patch", "repository.write_file"}
+                and len(activities) + 1 + len(self._verification_plan.steps) + 1
+                > self._max_tool_executions
+            ):
+                raise RepositoryOrchestrationError(
+                    "verification plan reservation prevents further discovery"
+                )
             if len(activities) >= self._max_tool_executions:
                 if agent_task is not None:
                     self._agent_stop_hint = AgentStopReason.TOOL_LIMIT
@@ -1983,13 +2042,25 @@ class RepositoryChatSession:
                     coding_task.mutation_succeeded(
                         call.tool_name, result.output, self._mutation_generation
                     )
-                    verification_operation = _configured_verification_operation(
-                        self._registry
+                    verification_operation = (
+                        self._verification_plan.steps[0].removeprefix("project.")
+                        if self._verification_plan is not None
+                        else _configured_verification_operation(self._registry)
                     )
                     if self._skip_verification:
                         coding_task.verification_skipped()
                         LOGGER.debug("verification_skipped reason=caller")
                     elif verification_operation is not None:
+                        if self._verification_plan is not None:
+                            coding_task.plan_started(
+                                self._verification_plan.plan_id,
+                                len(self._verification_plan.steps),
+                            )
+                            LOGGER.debug(
+                                "verification_plan_started id=%s steps=%d",
+                                self._verification_plan.plan_id,
+                                len(self._verification_plan.steps),
+                            )
                         coding_task.verification_ready(verification_operation)
                         LOGGER.debug(
                             "verification_ready_entered operation=%s",
@@ -1999,11 +2070,23 @@ class RepositoryChatSession:
                             "verification_gate_selected operation=%s",
                             verification_operation,
                         )
-                        if len(activities) >= self._max_tool_executions:
+                        if (
+                            len(activities)
+                            + (
+                                len(self._verification_plan.steps)
+                                if self._verification_plan is not None
+                                else 1
+                            )
+                            > self._max_tool_executions
+                        ):
                             coding_task.note_verification_gate(
                                 permission="unavailable", result="tool_budget_exhausted"
                             )
                             coding_task.decline_verification()
+                            if self._verification_plan is not None:
+                                coding_task.plan_finished(
+                                    "budget_blocked", self._verification_plan.steps[0]
+                                )
                         else:
                             gate_invocation = ToolInvocation(
                                 f"forge-verification-gate-{coding_task.mutation_count}",
@@ -2020,6 +2103,11 @@ class RepositoryChatSession:
                             )
                             coding_task.record_tool(gate_invocation.tool_name)
                             coding_task.verification_requested(verification_operation)
+                            if self._verification_plan is not None:
+                                LOGGER.debug(
+                                    "verification_step_started operation=%s",
+                                    verification_operation,
+                                )
                             gate_result = self._executor.execute(
                                 gate_invocation, self._context
                             )
@@ -2070,16 +2158,11 @@ class RepositoryChatSession:
                                     gate_result.output
                                     if isinstance(gate_result.output, Mapping)
                                     else None,
-                                    attribution=attribute_failure(
-                                        coding_task.verification_baseline,
-                                        self._prepared_project_command(
-                                            verification_operation
-                                        ),
-                                        gate_result.status.value,
-                                        gate_result.output
-                                        if isinstance(gate_result.output, Mapping)
-                                        else None,
-                                        self._mutation_generation - 1,
+                                    attribution=self._verification_attribution(
+                                        coding_task,
+                                        verification_operation,
+                                        gate_result,
+                                        0,
                                     ),
                                 )
                             gate_evidence = _tool_evidence(
@@ -2106,9 +2189,18 @@ class RepositoryChatSession:
                                     sort_keys=True,
                                 ),
                                 rendered_result=render_tool_result(
-                                    gate_result, gate_evidence
+                                    _compact_verification_result(gate_result)
+                                    if self._verification_plan is not None
+                                    and gate_result.status is ToolResultStatus.SUCCESS
+                                    else gate_result,
+                                    gate_evidence,
                                 ),
-                                result=gate_result,
+                                result=(
+                                    _compact_verification_result(gate_result)
+                                    if self._verification_plan is not None
+                                    and gate_result.status is ToolResultStatus.SUCCESS
+                                    else gate_result
+                                ),
                                 evidence=gate_evidence,
                                 arguments={},
                                 generation=self._mutation_generation,
@@ -2116,6 +2208,160 @@ class RepositoryChatSession:
                             )
                             if self._activity_callback is not None:
                                 self._activity_callback(gate_activity)
+                            if self._verification_plan is not None:
+                                plan = self._verification_plan
+                                coding_task.plan_step_finished(verification_operation)
+                                LOGGER.debug(
+                                    "verification_step_%s operation=%s",
+                                    "passed"
+                                    if gate_result.status is ToolResultStatus.SUCCESS
+                                    else "failed",
+                                    verification_operation,
+                                )
+                                for step_index, step_name in enumerate(
+                                    self._verification_plan.steps[1:], start=1
+                                ):
+                                    if (
+                                        gate_result.status
+                                        is not ToolResultStatus.SUCCESS
+                                    ):
+                                        break
+                                    verification_operation = step_name.removeprefix(
+                                        "project."
+                                    )
+                                    coding_task.verification_ready(
+                                        verification_operation
+                                    )
+                                    gate_invocation = ToolInvocation(
+                                        f"forge-verification-gate-{coding_task.mutation_count}-{step_index}",
+                                        step_name,
+                                        {},
+                                    )
+                                    permission = self._executor.permission(
+                                        gate_invocation, self._context
+                                    )
+                                    coding_task.record_tool(step_name)
+                                    coding_task.verification_requested(
+                                        verification_operation
+                                    )
+                                    LOGGER.debug(
+                                        "verification_step_started operation=%s",
+                                        verification_operation,
+                                    )
+                                    gate_result = self._executor.execute(
+                                        gate_invocation, self._context
+                                    )
+                                    approval_requested = (
+                                        gate_result.status
+                                        is ToolResultStatus.APPROVAL_REQUIRED
+                                    )
+                                    if approval_requested:
+                                        gate_result = self._execute_project_proposal(
+                                            gate_invocation, gate_result
+                                        )
+                                    executed = gate_result.status in {
+                                        ToolResultStatus.SUCCESS,
+                                        ToolResultStatus.FAILURE,
+                                    }
+                                    coding_task.note_verification_gate(
+                                        permission=permission.value,
+                                        approval_requested=approval_requested,
+                                        approved=approval_requested and executed,
+                                        executed=executed,
+                                        result=(
+                                            "passed"
+                                            if gate_result.status
+                                            is ToolResultStatus.SUCCESS
+                                            else "failed"
+                                            if executed
+                                            else "blocked"
+                                        ),
+                                    )
+                                    if gate_result.status is ToolResultStatus.DENIED:
+                                        coding_task.decline_verification()
+                                    else:
+                                        coding_task.verification_finished(
+                                            verification_operation,
+                                            gate_result.status.value,
+                                            gate_result.output
+                                            if isinstance(gate_result.output, Mapping)
+                                            else None,
+                                            attribution=self._verification_attribution(
+                                                coding_task,
+                                                verification_operation,
+                                                gate_result,
+                                                step_index,
+                                            ),
+                                        )
+                                    coding_task.plan_step_finished(
+                                        verification_operation
+                                    )
+                                    LOGGER.debug(
+                                        "verification_step_%s operation=%s",
+                                        "passed"
+                                        if gate_result.status
+                                        is ToolResultStatus.SUCCESS
+                                        else "failed",
+                                        verification_operation,
+                                    )
+                                    gate_evidence = _tool_evidence(
+                                        self._registry, step_name, {}
+                                    )
+                                    gate_activity = ToolActivity(
+                                        gate_invocation.invocation_id,
+                                        step_name,
+                                        gate_result.status.value,
+                                        gate_evidence.value,
+                                        False,
+                                        generation=self._mutation_generation,
+                                        current_verification=executed,
+                                    )
+                                    activities.append(gate_activity)
+                                    context_result = (
+                                        _compact_verification_result(gate_result)
+                                        if gate_result.status
+                                        is ToolResultStatus.SUCCESS
+                                        else gate_result
+                                    )
+                                    context_planner.register(
+                                        assistant_text=json.dumps(
+                                            {
+                                                "type": "forge_verification_gate",
+                                                "plan_id": plan.plan_id,
+                                                "operation": verification_operation,
+                                            },
+                                            sort_keys=True,
+                                        ),
+                                        rendered_result=render_tool_result(
+                                            context_result, gate_evidence
+                                        ),
+                                        result=context_result,
+                                        evidence=gate_evidence,
+                                        arguments={},
+                                        generation=self._mutation_generation,
+                                        assistant_role=MessageRole.SYSTEM,
+                                    )
+                                    if self._activity_callback is not None:
+                                        self._activity_callback(gate_activity)
+                                coding_task.plan_finished(
+                                    "pass"
+                                    if gate_result.status is ToolResultStatus.SUCCESS
+                                    else "step_failed"
+                                    if gate_result.status is ToolResultStatus.FAILURE
+                                    else "policy_blocked"
+                                    if gate_result.status is ToolResultStatus.DENIED
+                                    else "approval_rejected",
+                                    None
+                                    if gate_result.status is ToolResultStatus.SUCCESS
+                                    else gate_invocation.tool_name,
+                                )
+                                LOGGER.debug(
+                                    "verification_plan_%s id=%s",
+                                    "passed"
+                                    if gate_result.status is ToolResultStatus.SUCCESS
+                                    else "blocked",
+                                    plan.plan_id,
+                                )
                             if coding_task.repair_eligible:
                                 coding_task.register_repair_diagnostic(
                                     gate_invocation.invocation_id
@@ -2407,6 +2653,34 @@ class RepositoryChatSession:
             return tool.prepare(self._context)
         except ToolError:
             return None
+
+    def _verification_attribution(
+        self,
+        coding_task: CodingTaskState,
+        operation: str,
+        result: ToolResult,
+        passed_prior: int,
+    ) -> VerificationAttribution:
+        output = result.output if isinstance(result.output, Mapping) else None
+        prepared = self._prepared_project_command(operation)
+        if self._verification_plan is not None:
+            return attribute_plan_failure(
+                coding_task.verification_plan_baseline,
+                self._verification_plan.plan_id,
+                self._verification_plan.steps,
+                passed_prior,
+                prepared,
+                result.status.value,
+                output,
+                self._mutation_generation - 1,
+            )
+        return attribute_failure(
+            coding_task.verification_baseline,
+            prepared,
+            result.status.value,
+            output,
+            self._mutation_generation - 1,
+        )
 
     def _request_approval(
         self,
@@ -2865,6 +3139,17 @@ def _state_policy_failure(result: ToolResult, message: str) -> ToolResult:
         ),
         error_kind=ToolErrorKind.VALIDATION,
         error_message=message,
+    )
+
+
+def _compact_verification_result(result: ToolResult) -> ToolResult:
+    """Keep passing prerequisite logs out of the model's repair context."""
+    return ToolResult(
+        result.invocation_id,
+        result.tool_name,
+        result.status,
+        result.metadata,
+        output={"outcome": "success"},
     )
 
 

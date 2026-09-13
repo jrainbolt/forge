@@ -7,11 +7,15 @@ from forge.evaluation.realworld import (
     SetupReplacement,
 )
 from forge.interaction import AutonomyMode
+from forge.project_config import VerificationPlan
 
 _CONFIGURE = (("cmake", "-S", ".", "-B", "build", "-DBUILD_TESTING=ON"),)
 _BUILD = ("cmake", "--build", "build")
 _TEST = ("ctest", "--test-dir", "build", "--output-on-failure")
 _ORACLE = (_BUILD, _TEST)
+_VERIFICATION_PLAN = VerificationPlan(
+    "foundation-build-test", ("project.build", "project.test")
+)
 _CAN_ADVANCE = "return clock != NULL && clock->tick != UINT64_MAX;"
 _BROKEN_ADVANCE = "return clock != NULL && clock->tick == UINT64_MAX;"
 
@@ -61,6 +65,7 @@ def foundation_realworld_tasks() -> tuple[RealWorldTask, ...]:
             build_command=_BUILD,
             test_command=_TEST,
             oracle_commands=_ORACLE,
+            verification_plan=_VERIFICATION_PLAN,
             max_mutations=1,
         ),
         RealWorldTask(
@@ -76,6 +81,7 @@ def foundation_realworld_tasks() -> tuple[RealWorldTask, ...]:
             build_command=_BUILD,
             test_command=_TEST,
             oracle_commands=_ORACLE,
+            verification_plan=_VERIFICATION_PLAN,
             max_mutations=1,
         ),
         RealWorldTask(
@@ -98,6 +104,7 @@ def foundation_realworld_tasks() -> tuple[RealWorldTask, ...]:
             build_command=_BUILD,
             test_command=_TEST,
             oracle_commands=_ORACLE,
+            verification_plan=_VERIFICATION_PLAN,
             max_mutations=1,
         ),
         RealWorldTask(
@@ -121,6 +128,7 @@ def foundation_realworld_tasks() -> tuple[RealWorldTask, ...]:
             build_command=_BUILD,
             test_command=_TEST,
             oracle_commands=_ORACLE,
+            verification_plan=_VERIFICATION_PLAN,
             max_mutations=2,
         ),
         RealWorldTask(

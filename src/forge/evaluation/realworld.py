@@ -24,7 +24,7 @@ from forge.models import (
     MutationRepresentationPolicy,
 )
 from forge.orchestration import RepositoryChatSession, RepositoryOrchestrationError
-from forge.project_config import ProjectCommand, ProjectCommands
+from forge.project_config import ProjectCommand, ProjectCommands, VerificationPlan
 from forge.repository_index import RepositoryIndex
 from forge.semantic_index import SemanticIndex
 from forge.tools import (
@@ -99,6 +99,7 @@ class RealWorldTask:
     setup_commands: tuple[tuple[str, ...], ...] = ()
     build_command: tuple[str, ...] | None = None
     test_command: tuple[str, ...] | None = None
+    verification_plan: VerificationPlan | None = None
     oracle_commands: tuple[tuple[str, ...], ...] = ()
     seeds: tuple[int, ...] = (42,)
     max_mutations: int = 0
@@ -191,6 +192,17 @@ class RealWorldMetrics:
     verification_approved: int = 0
     verification_executed: int = 0
     verification_result: str = "not_run"
+    verification_plan_id: str | None = None
+    verification_plan_required_steps: int = 0
+    verification_plan_steps_started: int = 0
+    verification_plan_steps_passed: int = 0
+    verification_plan_failed_step: str | None = None
+    verification_plan_result: str = "not_run"
+    verification_plan_tools: int = 0
+    verification_plan_duration: float = 0.0
+    verification_plan_model_calls: int = 0
+    verification_build_duration: float = 0.0
+    verification_test_duration: float = 0.0
     baseline_verification_executed: bool = False
     baseline_duration_seconds: float = 0.0
     post_mutation_duration_seconds: float = 0.0
@@ -367,6 +379,7 @@ class RealWorldEvaluationRunner:
                 activity_callback=activity.append,
                 mutation_representation=self._mutation_representation,
                 verification_baseline=self._verification_baseline,
+                verification_plan=commands.verification_plan,
             )
             response = None
             coding_result = None
@@ -615,6 +628,17 @@ def score_task_result(
     context = getattr(response, "context_metrics", None)
     retrieval = getattr(response, "retrieval_metrics", None)
     primary_attribution = next(iter(getattr(coding, "attribution_attempts", ())), None)
+    plan_runs = getattr(coding, "verification_plan_runs", ())
+    current_plan = plan_runs[-1] if plan_runs else None
+    plan_baseline = getattr(coding, "verification_plan_baseline", None)
+    plan_baseline_steps = getattr(plan_baseline, "steps", ())
+    baseline_duration = (
+        sum(step.duration_seconds for step in plan_baseline_steps)
+        if plan_baseline is not None
+        else getattr(
+            getattr(coding, "verification_baseline", None), "duration_seconds", 0.0
+        )
+    )
     metrics = RealWorldMetrics(
         model_calls=(
             getattr(agent, "model_calls", getattr(response, "orchestration_steps", 0))
@@ -701,12 +725,29 @@ def score_task_result(
         verification_approved=getattr(verification_gate, "approved", 0),
         verification_executed=getattr(verification_gate, "executed", 0),
         verification_result=getattr(verification_gate, "result", "not_run"),
-        baseline_verification_executed=getattr(
-            getattr(coding, "verification_baseline", None), "executed", False
+        verification_plan_id=getattr(current_plan, "plan_id", None),
+        verification_plan_required_steps=getattr(current_plan, "required_steps", 0),
+        verification_plan_steps_started=len(getattr(current_plan, "steps", ())),
+        verification_plan_steps_passed=getattr(current_plan, "completed_steps", 0),
+        verification_plan_failed_step=getattr(current_plan, "failed_step", None),
+        verification_plan_result=getattr(current_plan, "outcome", "not_run"),
+        verification_plan_tools=len(getattr(current_plan, "steps", ())),
+        verification_plan_duration=getattr(current_plan, "duration_seconds", 0.0),
+        verification_plan_model_calls=0,
+        verification_build_duration=getattr(
+            getattr(coding, "build", None), "duration_seconds", 0.0
         ),
-        baseline_duration_seconds=getattr(
-            getattr(coding, "verification_baseline", None), "duration_seconds", 0.0
+        verification_test_duration=getattr(
+            getattr(coding, "test", None), "duration_seconds", 0.0
         ),
+        baseline_verification_executed=(
+            any(step.executed for step in plan_baseline_steps)
+            if plan_baseline is not None
+            else getattr(
+                getattr(coding, "verification_baseline", None), "executed", False
+            )
+        ),
+        baseline_duration_seconds=baseline_duration,
         post_mutation_duration_seconds=getattr(
             primary_attribution,
             "post_duration_seconds",
@@ -722,9 +763,7 @@ def score_task_result(
             getattr(activity, "evidence", "") == "baseline_verification"
             for activity in activities
         ),
-        extra_elapsed_seconds=getattr(
-            getattr(coding, "verification_baseline", None), "duration_seconds", 0.0
-        ),
+        extra_elapsed_seconds=baseline_duration,
         verification_tools=getattr(verification_gate, "verification_tools", 0),
         post_mutation_reads_before_verification=getattr(
             verification_gate, "post_mutation_reads_before_verification", 0
@@ -914,6 +953,7 @@ def _project_commands(task: RealWorldTask) -> ProjectCommands:
     return ProjectCommands(
         ProjectCommand(task.build_command, 300) if task.build_command else None,
         ProjectCommand(task.test_command, 300) if task.test_command else None,
+        task.verification_plan,
     )
 
 

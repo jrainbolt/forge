@@ -289,6 +289,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "mutation_representation",
                         MutationRepresentationPolicy.EXACT_TEXT,
                     ),
+                    verification_plan=getattr(
+                        getattr(catalog, "project_commands", ProjectCommands()),
+                        "verification_plan",
+                        None,
+                    ),
                 )
             with model, session:
                 result = run_repl(session)

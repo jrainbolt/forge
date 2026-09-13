@@ -10,6 +10,7 @@ from forge.orchestration.verification_attribution import (
     AttributionResult,
     VerificationAttribution,
     VerificationBaselineEvidence,
+    VerificationPlanBaseline,
 )
 
 
@@ -64,6 +65,25 @@ class VerificationRecord:
     truncated: bool = False
     generation: int | None = None
     outcome: str | None = None
+    duration_seconds: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationPlanRun:
+    plan_id: str
+    steps: tuple[tuple[str, VerificationRecord], ...]
+    outcome: str
+    failed_step: str | None
+    generation: int
+    required_steps: int
+
+    @property
+    def completed_steps(self) -> int:
+        return sum(record.status == "passed" for _, record in self.steps)
+
+    @property
+    def duration_seconds(self) -> float:
+        return sum(record.duration_seconds for _, record in self.steps)
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +217,8 @@ class CodingTaskResult:
     verification_baseline: VerificationBaselineEvidence | None = None
     verification_attribution: VerificationAttribution = VerificationAttribution()
     attribution_attempts: tuple[VerificationAttribution, ...] = ()
+    verification_plan_runs: tuple[VerificationPlanRun, ...] = ()
+    verification_plan_baseline: VerificationPlanBaseline | None = None
 
     @property
     def footer(self) -> str:
@@ -264,6 +286,11 @@ class CodingTaskState:
         self.verification_baseline: VerificationBaselineEvidence | None = None
         self.verification_attribution = VerificationAttribution()
         self.attribution_attempts: list[VerificationAttribution] = []
+        self.verification_plan_runs: list[VerificationPlanRun] = []
+        self.verification_plan_baseline: VerificationPlanBaseline | None = None
+        self._plan_id: str | None = None
+        self._plan_required_steps = 0
+        self._plan_steps: list[tuple[str, VerificationRecord]] = []
         self._pending_mutation_range: tuple[int, int] | None = None
         self._repair_diagnostic_id: str | None = None
         self._mutation_ready_correction_used = False
@@ -719,6 +746,41 @@ class CodingTaskState:
             provider=operation,
         )
 
+    def plan_started(self, plan_id: str, required_steps: int) -> None:
+        self._plan_id = plan_id
+        self._plan_required_steps = required_steps
+        self._plan_steps = []
+
+    def plan_step_finished(self, operation: str) -> None:
+        record = self._verification(operation)
+        if record.generation != self.generation:
+            record = VerificationRecord()
+        self._plan_steps.append((f"project.{operation}", record))
+
+    def plan_finished(self, outcome: str, failed_step: str | None = None) -> None:
+        assert self._plan_id is not None
+        self.verification_plan_runs.append(
+            VerificationPlanRun(
+                self._plan_id,
+                tuple(self._plan_steps),
+                outcome,
+                failed_step,
+                self.generation,
+                self._plan_required_steps,
+            )
+        )
+        if (
+            outcome != "pass"
+            and self._terminal_status is None
+            and not self.repair_eligible
+        ):
+            self.phase = CodingTaskPhase.COMPLETED
+            self._terminal_status = (
+                CodingTaskStatus.REPAIR_UNVERIFIED
+                if self.mutation_count == 2
+                else CodingTaskStatus.COMPLETED_UNVERIFIED
+            )
+
     def note_verification_gate(
         self,
         *,
@@ -799,6 +861,12 @@ class CodingTaskState:
                 else None
             ),
             outcome=outcome if isinstance(outcome, str) else None,
+            duration_seconds=(
+                float(output["duration_seconds"])
+                if output is not None
+                and isinstance(output.get("duration_seconds"), (int, float))
+                else 0.0
+            ),
         )
         self._attempts(operation).append(record)
         if operation == "build":
@@ -877,9 +945,17 @@ class CodingTaskState:
 
     def finish(self, answer: str) -> CodingTaskResult:
         if self._terminal_status is None:
-            if any(
-                record.status == "passed" and record.generation == self.generation
-                for record in (self.build, self.test)
+            if (
+                self._plan_id is not None
+                and self.verification_plan_runs
+                and self.verification_plan_runs[-1].generation == self.generation
+                and self.verification_plan_runs[-1].outcome == "pass"
+            ) or (
+                self._plan_id is None
+                and any(
+                    record.status == "passed" and record.generation == self.generation
+                    for record in (self.build, self.test)
+                )
             ):
                 status = (
                     CodingTaskStatus.COMPLETED_REPAIRED_VERIFIED
@@ -926,6 +1002,8 @@ class CodingTaskState:
             self.verification_baseline,
             self.verification_attribution,
             tuple(self.attribution_attempts),
+            tuple(self.verification_plan_runs),
+            self.verification_plan_baseline,
         )
 
     def _verification(self, operation: str) -> VerificationRecord:

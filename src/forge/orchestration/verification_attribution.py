@@ -47,6 +47,43 @@ class VerificationBaselineEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class VerificationPlanBaseline:
+    plan_id: str
+    operations: tuple[str, ...]
+    steps: tuple[VerificationBaselineEvidence, ...]
+
+
+def attribute_plan_failure(
+    baseline: VerificationPlanBaseline | None,
+    plan_id: str,
+    operations: tuple[str, ...],
+    successful_prior_steps: int,
+    prepared: PreparedProjectCommand | None,
+    status: str,
+    output: Mapping[str, object] | None,
+    pre_mutation_generation: int,
+) -> VerificationAttribution:
+    """Compare only the identical failed step after identical passing prerequisites."""
+    if baseline is None:
+        return attribute_failure(
+            None, prepared, status, output, pre_mutation_generation
+        )
+    if baseline.plan_id != plan_id or baseline.operations != operations:
+        return VerificationAttribution(AttributionResult.COMMAND_MISMATCH)
+    if len(baseline.steps) <= successful_prior_steps or any(
+        step.result != "passed" for step in baseline.steps[:successful_prior_steps]
+    ):
+        return VerificationAttribution(AttributionResult.UNATTRIBUTED)
+    return attribute_failure(
+        baseline.steps[successful_prior_steps],
+        prepared,
+        status,
+        output,
+        pre_mutation_generation,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class VerificationAttribution:
     result: AttributionResult = AttributionResult.NO_BASELINE
     fingerprint_equal: bool | None = None

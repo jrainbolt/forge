@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 DEFAULT_BUILD_TIMEOUT_SECONDS = 120.0
 DEFAULT_TEST_TIMEOUT_SECONDS = 300.0
 MAX_TIMEOUT_SECONDS = 3600.0
+MAX_VERIFICATION_STEPS = 4
+VERIFICATION_OPERATIONS = frozenset({"project.build", "project.test"})
 
 
 class ProjectConfigurationError(ValueError):
@@ -43,9 +46,56 @@ class ProjectCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class VerificationPlan:
+    """Trusted ordered references to configured A10 operations."""
+
+    plan_id: str
+    steps: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        steps = tuple(self.steps)
+        if (
+            not isinstance(self.plan_id, str)
+            or re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", self.plan_id) is None
+        ):
+            raise ProjectConfigurationError(
+                "verification plan id must be a non-empty identifier"
+            )
+        if not steps or len(steps) > MAX_VERIFICATION_STEPS:
+            raise ProjectConfigurationError(
+                "verification plan must contain 1 to 4 steps"
+            )
+        if any(
+            not isinstance(step, str) or step not in VERIFICATION_OPERATIONS
+            for step in steps
+        ):
+            raise ProjectConfigurationError(
+                "verification plan references an unsupported operation"
+            )
+        if len(set(steps)) != len(steps):
+            raise ProjectConfigurationError("verification plan steps must be unique")
+        object.__setattr__(self, "steps", steps)
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectCommands:
     build: ProjectCommand | None = None
     test: ProjectCommand | None = None
+    verification_plan: VerificationPlan | None = None
+
+    def __post_init__(self) -> None:
+        if self.verification_plan is not None and not isinstance(
+            self.verification_plan, VerificationPlan
+        ):
+            raise ProjectConfigurationError(
+                "verification_plan must be a VerificationPlan"
+            )
+        if self.verification_plan is not None:
+            for step in self.verification_plan.steps:
+                if getattr(self, step.removeprefix("project.")) is None:
+                    raise ProjectConfigurationError(
+                        f"verification plan step {step} is not configured"
+                    )
 
 
 def parse_project_commands(document: Mapping[str, object]) -> ProjectCommands:
@@ -55,14 +105,14 @@ def parse_project_commands(document: Mapping[str, object]) -> ProjectCommands:
         return ProjectCommands()
     if not isinstance(raw_project, dict):
         raise ProjectConfigurationError("project must be a TOML table")
-    unknown = set(raw_project) - {"commands"}
+    unknown = set(raw_project) - {"commands", "verification"}
     if unknown:
         raise ProjectConfigurationError(
             f"project has unknown keys: {_format_keys(unknown)}"
         )
     raw_commands = raw_project.get("commands")
     if raw_commands is None:
-        return ProjectCommands()
+        raw_commands = {}
     if not isinstance(raw_commands, dict):
         raise ProjectConfigurationError("project.commands must be a TOML table")
     unknown = set(raw_commands) - {"build", "test"}
@@ -73,7 +123,26 @@ def parse_project_commands(document: Mapping[str, object]) -> ProjectCommands:
     return ProjectCommands(
         build=_parse_command(raw_commands.get("build"), "build"),
         test=_parse_command(raw_commands.get("test"), "test"),
+        verification_plan=_parse_verification_plan(raw_project.get("verification")),
     )
+
+
+def _parse_verification_plan(raw: object) -> VerificationPlan | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ProjectConfigurationError("project.verification must be a TOML table")
+    unknown = set(raw) - {"id", "steps"}
+    if unknown:
+        raise ProjectConfigurationError(
+            f"project.verification has unknown keys: {_format_keys(unknown)}"
+        )
+    steps = raw.get("steps")
+    if not isinstance(steps, list) or any(not isinstance(step, str) for step in steps):
+        raise ProjectConfigurationError(
+            "project.verification.steps must be a text array"
+        )
+    return VerificationPlan(raw.get("id"), tuple(steps))  # type: ignore[arg-type]
 
 
 def _parse_command(raw: object, operation: str) -> ProjectCommand | None:

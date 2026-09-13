@@ -593,3 +593,27 @@ test executables are missing. The clean baseline and exact A35-corrected copy ha
 the same bounded failure fingerprint. A separate evaluator rebuild-and-test oracle
 passes after the correction. Attribution is therefore `PREEXISTING_OR_UNRELATED`,
 while configured verification remains failed and never constitutes verified success.
+
+## verification-plan-v1
+
+A37 adds eight deterministic full-orchestration cases using real A10 subprocesses
+in disposable workspaces. P01 passes build then test with no inter-step model
+decision. P02 stops after failed build. P03 preserves a failing test after a
+passing build. P04 blocks denied build. P05 rejects a separate ASK on test. P06
+uses the exact four-slot read, mutation, build, test budget. P07 repairs once and
+reruns the whole plan. P08 binds an explicit A36 baseline to the same build→test
+plan and suppresses repair for the matching pre-existing test failure.
+
+Realworld metrics now include plan ID, required/started/passed step counts, failed
+step, outcome, tool count, duration, and zero inter-step planning model calls.
+The plan is evaluator-owned for Foundation E04–E07; evaluator setup still performs
+the existing CMake configure step, then Forge's production gate executes trusted
+`project.build` followed by `project.test`. The independent oracle remains a
+separate build→test comparison and cannot mark Forge verified. A36's prior E04
+finding arose because immediate test ran before the build prerequisite; explicit
+A37 plan semantics resolve that sequencing without changing the task or mutation.
+The deterministic accepted A35 line-range delta, reproduced through normal Forge
+preview and approval in a disposable E04 workspace (seed 42), acquired the expected
+source via lexical bootstrap and a bounded range read, made one mutation, then
+passed production build and test. Forge returned `completed_verified`; the
+independent oracle also passed, and canonical Foundation hashes were unchanged.

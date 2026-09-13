@@ -1179,3 +1179,28 @@ realworld oracle can evaluate this decision but cannot change production status.
 Forge's internal generation cannot detect every concurrent external filesystem edit;
 baseline comparison assumes the selected workspace remains under the same task's
 control until mutation.
+
+## Verification plans
+
+A37 permits an explicit immutable `[project.verification]` plan with an ID and one
+to four ordered references to already-configured A10 `project.build` or
+`project.test` operations. The plan is loaded from trusted local configuration or
+an evaluator-owned task definition. Repository text and model output cannot
+create a plan or supply commands. Without an explicit plan, A29 continues to
+select one configured operation, preferring test.
+
+Each step executes serially through the existing ToolExecutor in the active
+workspace, with its own A14 ALLOW/ASK/DENY decision, exact per-operation approval,
+timeout, controlled environment, and tool-budget charge. No model turn occurs
+between steps. A failed, denied, rejected, or unavailable prerequisite stops the
+plan. Successful prerequisite output is compacted to status metadata; the bounded
+failing-step output remains available to A30 repair grounding.
+
+The orchestration budget reserves one mutation slot plus the configured number
+of verification steps while discovery is still active, without raising the
+ceiling. A mutation is `COMPLETED_VERIFIED` only after every plan step actually
+passes in the current workspace generation. A repair mutation restarts the full
+plan at step one, preserving the two-mutation ceiling. If A36 baseline mode is
+enabled, it runs the same ordered plan before mutation; attribution compares a
+failed step only when plan identity, command identity, and all preceding passing
+steps match. The independent evaluation oracle has no production status authority.
