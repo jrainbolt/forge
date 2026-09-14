@@ -252,6 +252,10 @@ does not prevent absolute-path filesystem access. `strict` requires an available
 Forge-owned OS sandbox and fails closed rather than falling back; macOS Seatbelt
 support constrains writes to the workspace but still allows runtime reads outside
 it. Isolation does not change per-step permission or grant source-write authority.
+Strict toolchain compatibility is still under investigation: the current macOS
+profile denies external writes but Apple `ld` fails while linking even a trivial
+object. Forge does not relax the write boundary or silently fall back to an
+unisolated process.
 
 `project.configure` is optional and has separate CONFIGURE permission. It may
 create build metadata but grants no source WRITE authority. Use trusted commands

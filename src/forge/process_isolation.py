@@ -19,6 +19,39 @@ class ExecutionIsolationMode(StrEnum):
     STRICT = "strict"
 
 
+class StrictFailureClass(StrEnum):
+    NONE = "none"
+    EXEC_DENIED = "strict_exec_denied"
+    READ_DENIED = "strict_read_denied"
+    WRITE_DENIED = "strict_write_denied"
+    SERVICE_DENIED = "strict_service_denied"
+    CHILD_PROCESS_DENIED = "strict_child_process_denied"
+    RUNTIME_INIT_FAILED = "strict_runtime_init_failed"
+    UNKNOWN_FAILURE = "strict_unknown_failure"
+
+
+def classify_strict_failure(outcome: str, stderr: str) -> StrictFailureClass:
+    """Classify explicit denial markers only; an assertion is not denial proof."""
+    if outcome == "success":
+        return StrictFailureClass.NONE
+    if outcome in {"isolation_unavailable", "isolation_failed"} or stderr.startswith(
+        "sandbox-exec:"
+    ):
+        return StrictFailureClass.RUNTIME_INIT_FAILED
+    if "deny(" in stderr:
+        if "file-write" in stderr:
+            return StrictFailureClass.WRITE_DENIED
+        if "file-read" in stderr:
+            return StrictFailureClass.READ_DENIED
+        if "mach-lookup" in stderr or "sysctl-read" in stderr:
+            return StrictFailureClass.SERVICE_DENIED
+        if "process-exec" in stderr or "process-fork" in stderr:
+            return StrictFailureClass.CHILD_PROCESS_DENIED
+        if "file-map-executable" in stderr:
+            return StrictFailureClass.EXEC_DENIED
+    return StrictFailureClass.UNKNOWN_FAILURE
+
+
 @dataclass(frozen=True, slots=True)
 class ExecutionIsolationPolicy:
     mode: ExecutionIsolationMode = ExecutionIsolationMode.NONE
@@ -54,6 +87,12 @@ class MacOSSandboxExec:
     """macOS Seatbelt: all reads, workspace-only writes, no network allowance."""
 
     identity = "macos-sandbox-exec-v1"
+    capabilities = (
+        "all_filesystem_reads",
+        "workspace_filesystem_writes",
+        "process_operations",
+        "network_not_granted",
+    )
     executable = Path("/usr/bin/sandbox-exec")
 
     def available(self) -> bool:

@@ -57,6 +57,16 @@ def main() -> int:
         outside_result = run_command(
             workspace, (sys.executable, "-c", code, str(outside))
         )
+        with tempfile.TemporaryDirectory(
+            prefix="forge-a40-home-write-probe-", dir=Path.home()
+        ) as home_probe:
+            home_target = Path(home_probe) / "outside.txt"
+            home_result = run_command(
+                workspace, (sys.executable, "-c", code, str(home_target))
+            )
+            home_denied = (
+                home_result.status.value == "failure" and not home_target.exists()
+            )
 
         def status(result):  # type: ignore[no-untyped-def]
             return result.status.value, result.output.get("outcome")
@@ -67,6 +77,7 @@ def main() -> int:
             and inside.read_text() == "ok"
             and outside_result.status.value == "failure"
             and not outside.exists()
+            and home_denied
         )
         foundation = None
         if len(sys.argv) > 1:
@@ -92,6 +103,8 @@ def main() -> int:
                     "inside": status(inside_result),
                     "outside": status(outside_result),
                     "outside_unchanged": not outside.exists(),
+                    "home_like_write": status(home_result),
+                    "home_like_unchanged": home_denied,
                     "foundation_configure": foundation,
                     "result": "PASS" if passed else "FAIL",
                 },

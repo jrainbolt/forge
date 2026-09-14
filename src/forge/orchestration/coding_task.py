@@ -73,6 +73,9 @@ class VerificationRecord:
     execution_home_redirected: bool = False
     execution_tmp_redirected: bool = False
     execution_isolation_failure: bool = False
+    strict_policy_version: str = "none"
+    strict_capabilities: tuple[str, ...] = ()
+    strict_failure_class: str = "none"
 
 
 @dataclass(frozen=True, slots=True)
@@ -913,6 +916,22 @@ class CodingTaskState:
                 output.get("execution_isolation_failure") is True
                 if output is not None
                 else False
+            ),
+            strict_policy_version=(
+                str(output.get("strict_policy_version", "none"))
+                if output is not None
+                else "none"
+            ),
+            strict_capabilities=(
+                tuple(output.get("strict_capabilities", ()))
+                if output is not None
+                and isinstance(output.get("strict_capabilities"), (tuple, list))
+                else ()
+            ),
+            strict_failure_class=(
+                str(output.get("strict_failure_class", "none"))
+                if output is not None
+                else "none"
             ),
         )
         self._attempts(operation).append(record)

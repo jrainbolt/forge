@@ -19,6 +19,7 @@ from forge.process_isolation import (
     ExecutionIsolationMode,
     ExecutionIsolationPolicy,
     ExecutionSandbox,
+    classify_strict_failure,
     controlled_environment,
     create_execution_directories,
     execution_directories,
@@ -267,6 +268,9 @@ def execute_prepared_project_command(
     ):
         output["outcome"] = "isolation_failed"
         output["execution_isolation_failure"] = True
+        output["strict_failure_class"] = classify_strict_failure(
+            "isolation_failed", str(output["stderr"])
+        ).value
         raise ToolError(
             "strict process isolation could not be established", output=output
         )
@@ -280,6 +284,10 @@ def execute_prepared_project_command(
         stdout.truncated,
         stderr.truncated,
     )
+    if prepared.isolation.mode is ExecutionIsolationMode.STRICT:
+        output["strict_failure_class"] = classify_strict_failure(
+            str(output["outcome"]), str(output["stderr"])
+        ).value
     if timed_out:
         raise ToolError("configured project command timed out", output=output)
     if process.returncode != 0:
@@ -375,6 +383,8 @@ def _unavailable_result(
         result.update(
             _isolation_metrics(prepared, False, failure=outcome.startswith("isolation"))
         )
+        if prepared.isolation.mode is ExecutionIsolationMode.STRICT:
+            result["strict_failure_class"] = classify_strict_failure(outcome, "").value
     return result
 
 
@@ -393,6 +403,17 @@ def _isolation_metrics(
         "execution_home_redirected": hardened,
         "execution_tmp_redirected": hardened,
         "execution_isolation_failure": failure,
+        "strict_policy_version": (
+            prepared.sandbox_adapter
+            if prepared.isolation.mode is ExecutionIsolationMode.STRICT
+            else "none"
+        ),
+        "strict_capabilities": (
+            tuple(getattr(prepared.sandbox, "capabilities", ()))
+            if prepared.isolation.mode is ExecutionIsolationMode.STRICT
+            else ()
+        ),
+        "strict_failure_class": "none",
     }
 
 

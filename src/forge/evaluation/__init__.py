@@ -218,6 +218,12 @@ from forge.evaluation.routing import (
 )
 from forge.evaluation.runner import EvaluationRunner
 from forge.evaluation.scoring import score_task
+from forge.evaluation.strict_toolchain import (
+    STRICT_TOOLCHAIN_V1,
+    StrictToolchainCase,
+    StrictToolchainRun,
+    run_strict_toolchain_v1,
+)
 from forge.evaluation.structured_mutation import (
     STRUCTURED_MUTATION_SUITE_VERSION,
     STRUCTURED_MUTATION_V1,
@@ -274,6 +280,10 @@ from forge.evaluation.verification_plan import (
 )
 
 __all__ = [
+    "STRICT_TOOLCHAIN_V1",
+    "StrictToolchainCase",
+    "StrictToolchainRun",
+    "run_strict_toolchain_v1",
     "AGENT_SUITE_VERSION",
     "AGENT_V1",
     "AGENT_V1_TASKS",

@@ -1854,3 +1854,20 @@ build, and test passed; Forge returned `completed_verified`; the independent ora
 passed; canonical Foundation remained unchanged. The optional full strict
 Foundation run stopped at configure, documenting a platform/toolchain compatibility
 limit without weakening strict fail-closed behavior. A40 was not started.
+
+---
+
+# Milestone A40 — Strict Toolchain Compatibility & Sandbox Capability Profiling v1
+
+**Status:** Diagnostics implemented; strict compatibility acceptance blocked.
+
+The real strict ladder isolates the failure to linking one trivial object with
+Foundation's `/usr/bin/cc`: query and compile-to-object pass, while Apple `ld`
+asserts on header alignment. Trivial CMake and Foundation configure fail at the
+same stage. No specific denial was observed, so the Forge-owned Seatbelt policy
+was not broadened. A strict failure taxonomy and ten-case deterministic
+fake-adapter suite capture the boundary without claiming simulated runs prove
+real strict linking. Real workspace writes still pass; disposable sibling and
+home-hierarchy writes remain denied. A40 is not marked accepted until a
+justified strict toolchain fix and clean Foundation acceptance pass. A41 was not
+started.

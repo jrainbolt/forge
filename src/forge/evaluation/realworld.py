@@ -227,6 +227,9 @@ class RealWorldMetrics:
     execution_home_redirected: bool = False
     execution_tmp_redirected: bool = False
     execution_isolation_failure: bool = False
+    strict_policy_version: str = "none"
+    strict_capabilities: tuple[str, ...] = ()
+    strict_failure_class: str = "none"
     baseline_verification_executed: bool = False
     baseline_duration_seconds: float = 0.0
     post_mutation_duration_seconds: float = 0.0
@@ -801,6 +804,15 @@ def score_task_result(
         ),
         execution_isolation_failure=getattr(
             getattr(coding, "configure", None), "execution_isolation_failure", False
+        ),
+        strict_policy_version=getattr(
+            getattr(coding, "configure", None), "strict_policy_version", "none"
+        ),
+        strict_capabilities=getattr(
+            getattr(coding, "configure", None), "strict_capabilities", ()
+        ),
+        strict_failure_class=getattr(
+            getattr(coding, "configure", None), "strict_failure_class", "none"
         ),
         baseline_verification_executed=(
             any(step.executed for step in plan_baseline_steps)

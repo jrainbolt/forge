@@ -1275,3 +1275,26 @@ sandboxing. Isolation constrains an already-authorized process; it grants no
 execution or source-write permission. A36 attribution identity includes mode,
 adapter, effective environment, HOME, and TMPDIR so changed conditions are not
 treated as comparable.
+
+## Strict toolchain isolation diagnostics
+
+A40 keeps the macOS `macos-sandbox-exec-v1` policy unchanged. A disposable
+compiler ladder using Foundation's `/usr/bin/cc` passed version query and
+compile-to-object, but failed while linking a trivial object with an Apple linker
+header-alignment assertion. Trivial CMake compiler detection and Foundation
+configure failed at the same link stage. Bounded linker stderr and available
+macOS sandbox logs did not identify an `ld`/`clang` denial, so Forge records this
+as `strict_unknown_failure`, not a presumed service or filesystem denial. No
+additional Seatbelt permission is justified by the observed evidence.
+
+Forge's strict failure taxonomy recognizes explicit deny markers for read, write,
+process, executable mapping, and system-service operations, and distinguishes
+sandbox startup failures. The existing adapter identity is the strict policy
+version bound to approvals and A36 attribution. Its declared capabilities remain
+all runtime reads, process operations, workspace writes, and no network grant;
+there are no new external write, HOME, temp, system-service, or network grants.
+Deterministic fake-adapter tests exercise strict orchestration contracts but do
+not prove real compiler compatibility. A real macOS write regression after the
+diagnostic pass still allows workspace writes and denies both sibling and
+disposable home-hierarchy writes. Strict remains fail-closed; `controlled_env`
+remains available for the accepted Foundation path.

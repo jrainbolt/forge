@@ -674,3 +674,27 @@ repeat took 0.40 seconds to configure, 7.03 seconds to build, and 12.02 seconds
 to test; the plan took 19.45 seconds and total evaluation took 22.46 seconds. It
 used six tools and three model calls, the same counts as A38;
 these local timings do not isolate environment-setup overhead from run variation.
+
+## strict-toolchain-v1
+
+A40's ten-case deterministic suite exercises compiler query, compile-to-object,
+link, executable run, workspace/sibling/home-like writes, unavailable-adapter
+fail-closed behavior, a strict configure→build→test fixture, and a controlled-env
+regression. S01–S09 use explicitly labeled fake adapters inside pytest because the
+enclosing development sandbox cannot install nested Seatbelt policy; fake PASS is
+an orchestration-contract result, not real strict toolchain acceptance. S10 runs
+the real controlled environment.
+
+The real macOS ladder used `/usr/bin/cc` (Apple clang 21.0.0) and the existing
+`macos-sandbox-exec-v1` adapter. Strict compiler query passed in 0.06 seconds,
+compile-to-object passed in 0.06 seconds, and link failed in 0.09 seconds with
+Apple `ld`'s header-alignment assertion. Executable run was not possible because
+the strict link produced no executable. Trivial CMake configure and clean
+Foundation configure failed at the same compiler-link stage. No specific linker
+sandbox denial was observed in bounded stderr or the available macOS logs; these
+results are classified `strict_unknown_failure`. No permission was expanded.
+
+The final real macOS boundary regression still allowed a workspace write and
+denied disposable sibling and home-hierarchy writes. A40's strict Foundation
+acceptance remains blocked at configure; no build/test step or unisolated fallback
+was attempted. The A39 `controlled_env` Foundation run remains the accepted path.

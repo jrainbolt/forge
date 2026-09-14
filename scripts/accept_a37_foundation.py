@@ -182,6 +182,9 @@ def main(*, milestone: str = "a37") -> int:
                     "execution_isolation_failure": (
                         attempt.metrics.execution_isolation_failure
                     ),
+                    "strict_policy_version": attempt.metrics.strict_policy_version,
+                    "strict_capabilities": attempt.metrics.strict_capabilities,
+                    "strict_failure_class": attempt.metrics.strict_failure_class,
                     "verification_test_duration": (
                         attempt.metrics.verification_test_duration
                     ),
