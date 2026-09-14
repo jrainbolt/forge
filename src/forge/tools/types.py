@@ -207,6 +207,7 @@ class InvocationApproval:
 @dataclass(frozen=True, slots=True)
 class ExecutionContext:
     workspace: Path
+    prepared_project_command: object | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.workspace, Path):

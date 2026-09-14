@@ -66,6 +66,13 @@ class VerificationRecord:
     generation: int | None = None
     outcome: str | None = None
     duration_seconds: float = 0.0
+    execution_isolation_mode: str = "none"
+    execution_sandbox_adapter: str = "none"
+    execution_sandbox_available: bool = False
+    execution_environment_hardened: bool = False
+    execution_home_redirected: bool = False
+    execution_tmp_redirected: bool = False
+    execution_isolation_failure: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -871,6 +878,41 @@ class CodingTaskState:
                 if output is not None
                 and isinstance(output.get("duration_seconds"), (int, float))
                 else 0.0
+            ),
+            execution_isolation_mode=(
+                str(output.get("execution_isolation_mode", "none"))
+                if output is not None
+                else "none"
+            ),
+            execution_sandbox_adapter=(
+                str(output.get("execution_sandbox_adapter", "none"))
+                if output is not None
+                else "none"
+            ),
+            execution_sandbox_available=(
+                output.get("execution_sandbox_available") is True
+                if output is not None
+                else False
+            ),
+            execution_environment_hardened=(
+                output.get("execution_environment_hardened") is True
+                if output is not None
+                else False
+            ),
+            execution_home_redirected=(
+                output.get("execution_home_redirected") is True
+                if output is not None
+                else False
+            ),
+            execution_tmp_redirected=(
+                output.get("execution_tmp_redirected") is True
+                if output is not None
+                else False
+            ),
+            execution_isolation_failure=(
+                output.get("execution_isolation_failure") is True
+                if output is not None
+                else False
             ),
         )
         self._attempts(operation).append(record)

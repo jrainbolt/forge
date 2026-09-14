@@ -2649,7 +2649,7 @@ class RepositoryChatSession:
             return result
         return self._executor.execute(
             invocation,
-            self._context,
+            replace(self._context, prepared_project_command=preview),
             approval=InvocationApproval.for_invocation(invocation),
         )
 

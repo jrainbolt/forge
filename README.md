@@ -233,19 +233,30 @@ timeout_seconds = 300
 [project.verification]
 id = "configure-build-test"
 steps = ["project.configure", "project.build", "project.test"]
+
+[project.execution]
+isolation = "controlled_env"
 ```
 
 Each approval preview displays the exact argv snapshot, workspace, and timeout.
 Execution uses no shell, receives closed stdin, runs inside the selected workspace,
 has bounded output and a timeout, and returns exit-status-based evidence. A later
 Forge write makes earlier build/test evidence stale. Project configuration is a
-trusted user-owned boundary: configured programs may themselves access the network,
-and A10 does not provide an environment or network sandbox.
+trusted user-owned boundary: in the default `none` mode, configured programs may
+access the network and inherit the parent environment.
+
+The optional execution policy defaults to `none` for backward compatibility.
+`controlled_env` constructs a bounded environment, omits unrelated ambient
+secrets, and redirects HOME/TMPDIR into `.forge-exec/` within the workspace. It
+does not prevent absolute-path filesystem access. `strict` requires an available
+Forge-owned OS sandbox and fails closed rather than falling back; macOS Seatbelt
+support constrains writes to the workspace but still allows runtime reads outside
+it. Isolation does not change per-step permission or grant source-write authority.
 
 `project.configure` is optional and has separate CONFIGURE permission. It may
 create build metadata but grants no source WRITE authority. Use trusted commands
 whose outputs remain within the workspace; A10 fixes the subprocess cwd there but
-does not OS-sandbox command filesystem effects.
+does not OS-sandbox command filesystem effects in the default `none` mode.
 
 If verification fails, the approved mutation remains on disk, Forge reports the
 failure, and the task stops without a corrective edit. A deterministic footer reports

@@ -11,9 +11,19 @@ import threading
 import time
 from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from forge.process_isolation import (
+    DEFAULT_EXECUTION_ISOLATION,
+    ExecutionIsolationMode,
+    ExecutionIsolationPolicy,
+    ExecutionSandbox,
+    controlled_environment,
+    create_execution_directories,
+    execution_directories,
+    platform_sandbox,
+)
 from forge.project_config import ProjectCommand
 from forge.tools.tool import Tool, ToolError
 from forge.tools.types import (
@@ -40,6 +50,12 @@ class PreparedProjectCommand:
     argv: tuple[str, ...]
     workspace: Path
     timeout_seconds: float
+    isolation: ExecutionIsolationPolicy = ExecutionIsolationPolicy()
+    environment: tuple[tuple[str, str], ...] | None = field(default=None, repr=False)
+    execution_home: Path | None = None
+    execution_tmp: Path | None = None
+    sandbox_adapter: str = "none"
+    sandbox: ExecutionSandbox | None = field(default=None, repr=False, compare=False)
 
 
 class _TailCapture:
@@ -62,11 +78,19 @@ class _TailCapture:
 
 
 class ProjectCommandTool(Tool):
-    def __init__(self, operation: str, command: ProjectCommand | None) -> None:
+    def __init__(
+        self,
+        operation: str,
+        command: ProjectCommand | None,
+        isolation: ExecutionIsolationPolicy = DEFAULT_EXECUTION_ISOLATION,
+        sandbox: ExecutionSandbox | None = None,
+    ) -> None:
         if operation not in {"configure", "build", "test"}:
             raise ValueError("project operation must be configure, build, or test")
         self._operation = operation
         self._command = command
+        self._isolation = isolation
+        self._sandbox = sandbox
         evidence = {
             "configure": ToolEvidence.CONFIGURE_RESULT,
             "build": ToolEvidence.BUILD_RESULT,
@@ -100,28 +124,92 @@ class ProjectCommandTool(Tool):
                 f"project {self._operation} command is not configured",
                 output=_unavailable_result(self._operation, "command_not_configured"),
             )
+        home, temporary = (
+            execution_directories(context.workspace)
+            if self._isolation.mode is not ExecutionIsolationMode.NONE
+            else (None, None)
+        )
+        sandbox = (
+            self._sandbox or platform_sandbox()
+            if self._isolation.mode is ExecutionIsolationMode.STRICT
+            else None
+        )
         return PreparedProjectCommand(
             self._operation,
             self._command.argv,
             context.workspace,
             self._command.timeout_seconds,
+            self._isolation,
+            tuple(
+                sorted(project_environment(self._isolation, context.workspace).items())
+            ),
+            home,
+            temporary,
+            sandbox.identity if sandbox is not None else "none",
+            sandbox,
         )
 
     def execute(
         self, arguments: Mapping[str, object], context: ExecutionContext
     ) -> StructuredValue:
-        return execute_prepared_project_command(self.prepare(context))
+        current = self.prepare(context)
+        approved = context.prepared_project_command
+        if approved is not None:
+            if not isinstance(approved, PreparedProjectCommand) or approved != current:
+                raise ToolError(
+                    "approved project command changed before execution",
+                    output=_unavailable_result(
+                        self._operation, "prepared_command_changed", current
+                    ),
+                )
+            current = approved
+        return execute_prepared_project_command(current)
 
 
 def execute_prepared_project_command(
     prepared: PreparedProjectCommand,
 ) -> StructuredValue:
     """Execute one previously prepared snapshot without reparsing configuration."""
-    environment = project_environment()
+    environment = (
+        dict(prepared.environment)
+        if prepared.environment is not None
+        else project_environment(prepared.isolation, prepared.workspace)
+    )
     started = time.monotonic()
+    sandbox_available = False
+    argv = prepared.argv
+    if prepared.isolation.mode is ExecutionIsolationMode.STRICT:
+        sandbox = prepared.sandbox or platform_sandbox()
+        sandbox_available = sandbox.available()
+        if not sandbox_available:
+            raise ToolError(
+                "strict process isolation is unavailable",
+                output=_unavailable_result(
+                    prepared.operation, "isolation_unavailable", prepared
+                ),
+            )
+        try:
+            argv = sandbox.wrap(prepared.argv, prepared.workspace)
+        except (OSError, RuntimeError, ValueError) as error:
+            raise ToolError(
+                "strict process isolation could not be prepared",
+                output=_unavailable_result(
+                    prepared.operation, "isolation_failed", prepared
+                ),
+            ) from error
+    if prepared.isolation.mode is not ExecutionIsolationMode.NONE:
+        try:
+            create_execution_directories(prepared.workspace)
+        except (OSError, ValueError) as error:
+            raise ToolError(
+                "workspace-local execution directories are unavailable",
+                output=_unavailable_result(
+                    prepared.operation, "isolation_failed", prepared
+                ),
+            ) from error
     try:
         process = subprocess.Popen(
-            prepared.argv,
+            argv,
             cwd=prepared.workspace,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -131,7 +219,13 @@ def execute_prepared_project_command(
             start_new_session=True,
         )
     except (OSError, ValueError) as error:
-        output = _unavailable_result(prepared.operation, "process_start_failed")
+        output = _unavailable_result(
+            prepared.operation,
+            "isolation_failed"
+            if prepared.isolation.mode is ExecutionIsolationMode.STRICT
+            else "process_start_failed",
+            prepared,
+        )
         raise ToolError(
             "configured project process could not be started", output=output
         ) from error
@@ -165,6 +259,17 @@ def execute_prepared_project_command(
         stdout,
         stderr,
     )
+    output.update(_isolation_metrics(prepared, sandbox_available))
+    if (
+        prepared.isolation.mode is ExecutionIsolationMode.STRICT
+        and process.returncode != 0
+        and stderr.data.startswith(b"sandbox-exec:")
+    ):
+        output["outcome"] = "isolation_failed"
+        output["execution_isolation_failure"] = True
+        raise ToolError(
+            "strict process isolation could not be established", output=output
+        )
     LOGGER.info(
         "Project command completed operation=%s exit_code=%s timed_out=%s "
         "duration=%.3f stdout_truncated=%s stderr_truncated=%s",
@@ -182,8 +287,15 @@ def execute_prepared_project_command(
     return output
 
 
-def project_environment() -> dict[str, str]:
+def project_environment(
+    isolation: ExecutionIsolationPolicy = DEFAULT_EXECUTION_ISOLATION,
+    workspace: Path | None = None,
+) -> dict[str, str]:
     """Return the exact noninteractive environment supplied to A10 processes."""
+    if isolation.mode is not ExecutionIsolationMode.NONE:
+        if workspace is None:
+            raise ValueError("hardened project environment requires a workspace")
+        return controlled_environment(workspace)
     environment = os.environ.copy()
     environment.update(
         {
@@ -243,8 +355,12 @@ def _execution_result(
     }
 
 
-def _unavailable_result(operation: str, outcome: str) -> StructuredValue:
-    return {
+def _unavailable_result(
+    operation: str,
+    outcome: str,
+    prepared: PreparedProjectCommand | None = None,
+) -> StructuredValue:
+    result: StructuredValue = {
         "operation": operation,
         "outcome": outcome,
         "exit_code": None,
@@ -254,6 +370,29 @@ def _unavailable_result(operation: str, outcome: str) -> StructuredValue:
         "stderr": "",
         "stdout_truncated": False,
         "stderr_truncated": False,
+    }
+    if prepared is not None:
+        result.update(
+            _isolation_metrics(prepared, False, failure=outcome.startswith("isolation"))
+        )
+    return result
+
+
+def _isolation_metrics(
+    prepared: PreparedProjectCommand,
+    sandbox_available: bool,
+    *,
+    failure: bool = False,
+) -> StructuredValue:
+    hardened = prepared.isolation.mode is not ExecutionIsolationMode.NONE
+    return {
+        "execution_isolation_mode": prepared.isolation.mode.value,
+        "execution_sandbox_adapter": prepared.sandbox_adapter,
+        "execution_sandbox_available": sandbox_available,
+        "execution_environment_hardened": hardened,
+        "execution_home_redirected": hardened,
+        "execution_tmp_redirected": hardened,
+        "execution_isolation_failure": failure,
     }
 
 

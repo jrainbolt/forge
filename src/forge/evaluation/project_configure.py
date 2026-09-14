@@ -16,6 +16,10 @@ from forge.interaction import AutonomyMode
 from forge.models import MockModel
 from forge.orchestration import RepositoryChatSession
 from forge.orchestration.coding_task import CodingTaskResult
+from forge.process_isolation import (
+    DEFAULT_EXECUTION_ISOLATION,
+    ExecutionIsolationPolicy,
+)
 from forge.project_config import ProjectCommand, ProjectCommands, VerificationPlan
 from forge.retrieval import SourceKind, classify_source
 from forge.tools import (
@@ -66,7 +70,11 @@ def _edit(old: str, new: str) -> str:
     )
 
 
-def _run(task_id: str, workspace: Path) -> ProjectConfigureTaskResult:
+def _run(
+    task_id: str,
+    workspace: Path,
+    isolation: ExecutionIsolationPolicy = DEFAULT_EXECUTION_ISOLATION,
+) -> ProjectConfigureTaskResult:
     workspace.mkdir()
     (workspace / "value.py").write_text("VALUE = 1\n")
     configure_code = (
@@ -111,6 +119,7 @@ def _run(task_id: str, workspace: Path) -> ProjectConfigureTaskResult:
             else (sys.executable, "-c", configure_code),
             0.1 if task_id == "C09" else 5,
         ),
+        execution_isolation=isolation,
     )
     registry = create_assist_repository_registry(commands)
     rules = {item.name: PermissionDecision.ALLOW for item in registry.metadata}

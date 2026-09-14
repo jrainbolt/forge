@@ -43,6 +43,7 @@ IGNORED_SEARCH_DIRECTORIES = frozenset(
         "node_modules",
         "dist",
         "build",
+        ".forge-exec",
     }
 )
 

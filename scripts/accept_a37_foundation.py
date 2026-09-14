@@ -19,6 +19,7 @@ from forge.evaluation.realworld import (
 )
 from forge.evaluation.realworld_tasks import foundation_realworld_tasks
 from forge.models import MockModel, MutationRepresentationPolicy
+from forge.process_isolation import ExecutionIsolationMode, ExecutionIsolationPolicy
 from forge.project_config import VerificationPlan
 
 
@@ -38,9 +39,18 @@ def main(*, milestone: str = "a37") -> int:
                 ("ctest", "--test-dir", "build", "--output-on-failure"),
             ),
         )
-    elif milestone == "a38":
+    elif milestone in {"a38", "a39", "a39strict"}:
         if task.setup_commands or task.configure_command is None:
             raise RuntimeError("A38 E04 must have no evaluator configure setup")
+        if milestone != "a38":
+            task = replace(
+                task,
+                execution_isolation=ExecutionIsolationPolicy(
+                    ExecutionIsolationMode.STRICT
+                    if milestone == "a39strict"
+                    else ExecutionIsolationMode.CONTROLLED_ENV
+                ),
+            )
         with tempfile.TemporaryDirectory(prefix="forge-a38-clean-check-") as name:
             copy = copy_repository(canonical, Path(name) / "workspace")
             if (copy / "build").exists():
@@ -108,7 +118,7 @@ def main(*, milestone: str = "a37") -> int:
         json.dumps(
             {
                 "canonical_unchanged": result.canonical_unchanged,
-                "initial_configured_state": milestone != "a38",
+                "initial_configured_state": milestone == "a37",
                 "repository_identity": snapshot.identity,
                 "task_id": attempt.task_id,
                 "seed": attempt.seed,
@@ -151,6 +161,27 @@ def main(*, milestone: str = "a37") -> int:
                     "configure_executed": attempt.metrics.configure_executed,
                     "configure_result": attempt.metrics.configure_result,
                     "configure_duration": attempt.metrics.configure_duration,
+                    "execution_isolation_mode": (
+                        attempt.metrics.execution_isolation_mode
+                    ),
+                    "execution_sandbox_adapter": (
+                        attempt.metrics.execution_sandbox_adapter
+                    ),
+                    "execution_sandbox_available": (
+                        attempt.metrics.execution_sandbox_available
+                    ),
+                    "execution_environment_hardened": (
+                        attempt.metrics.execution_environment_hardened
+                    ),
+                    "execution_home_redirected": (
+                        attempt.metrics.execution_home_redirected
+                    ),
+                    "execution_tmp_redirected": (
+                        attempt.metrics.execution_tmp_redirected
+                    ),
+                    "execution_isolation_failure": (
+                        attempt.metrics.execution_isolation_failure
+                    ),
                     "verification_test_duration": (
                         attempt.metrics.verification_test_duration
                     ),

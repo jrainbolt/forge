@@ -24,6 +24,7 @@ from forge.models import (
     MutationRepresentationPolicy,
 )
 from forge.orchestration import RepositoryChatSession, RepositoryOrchestrationError
+from forge.process_isolation import ExecutionIsolationPolicy
 from forge.project_config import ProjectCommand, ProjectCommands, VerificationPlan
 from forge.repository_index import RepositoryIndex
 from forge.semantic_index import SemanticIndex
@@ -39,7 +40,15 @@ REALWORLD_SUITE_VERSION = 1
 REALWORLD_SCHEMA_VERSION = 1
 DEFAULT_SEEDS = (7, 42)
 _IGNORED_NAMES = frozenset(
-    {".git", ".pytest_cache", ".ruff_cache", "__pycache__", "build", "dist"}
+    {
+        ".git",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".forge-exec",
+        "__pycache__",
+        "build",
+        "dist",
+    }
 )
 
 
@@ -105,10 +114,13 @@ class RealWorldTask:
     max_mutations: int = 0
     unsupported_reason: str | None = None
     configure_command: tuple[str, ...] | None = None
+    execution_isolation: ExecutionIsolationPolicy = ExecutionIsolationPolicy()
 
     def __post_init__(self) -> None:
         if not self.task_id or not self.prompt:
             raise ValueError("task ID and prompt must be non-empty")
+        if not isinstance(self.execution_isolation, ExecutionIsolationPolicy):
+            raise TypeError("execution_isolation must be ExecutionIsolationPolicy")
         for name in ("expected_files", "allowed_paths", "expected_changed_paths"):
             values = tuple(getattr(self, name))
             if any(
@@ -208,6 +220,13 @@ class RealWorldMetrics:
     configure_executed: bool = False
     configure_result: str = "not_run"
     configure_duration: float = 0.0
+    execution_isolation_mode: str = "none"
+    execution_sandbox_adapter: str = "none"
+    execution_sandbox_available: bool = False
+    execution_environment_hardened: bool = False
+    execution_home_redirected: bool = False
+    execution_tmp_redirected: bool = False
+    execution_isolation_failure: bool = False
     baseline_verification_executed: bool = False
     baseline_duration_seconds: float = 0.0
     post_mutation_duration_seconds: float = 0.0
@@ -446,6 +465,7 @@ class ExpectedApproval:
                 and preview.workspace.resolve() == self.workspace
                 and preview.argv == configured.argv
                 and preview.timeout_seconds == configured.timeout_seconds
+                and preview.isolation == self.commands.execution_isolation
             )
         if approved:
             self.approved += 1
@@ -759,6 +779,29 @@ def score_task_result(
         configure_duration=getattr(
             getattr(coding, "configure", None), "duration_seconds", 0.0
         ),
+        execution_isolation_mode=getattr(
+            getattr(coding, "configure", None),
+            "execution_isolation_mode",
+            task.execution_isolation.mode.value,
+        ),
+        execution_sandbox_adapter=getattr(
+            getattr(coding, "configure", None), "execution_sandbox_adapter", "none"
+        ),
+        execution_sandbox_available=getattr(
+            getattr(coding, "configure", None), "execution_sandbox_available", False
+        ),
+        execution_environment_hardened=getattr(
+            getattr(coding, "configure", None), "execution_environment_hardened", False
+        ),
+        execution_home_redirected=getattr(
+            getattr(coding, "configure", None), "execution_home_redirected", False
+        ),
+        execution_tmp_redirected=getattr(
+            getattr(coding, "configure", None), "execution_tmp_redirected", False
+        ),
+        execution_isolation_failure=getattr(
+            getattr(coding, "configure", None), "execution_isolation_failure", False
+        ),
         baseline_verification_executed=(
             any(step.executed for step in plan_baseline_steps)
             if plan_baseline is not None
@@ -974,6 +1017,7 @@ def _project_commands(task: RealWorldTask) -> ProjectCommands:
         ProjectCommand(task.test_command, 300) if task.test_command else None,
         task.verification_plan,
         ProjectCommand(task.configure_command, 300) if task.configure_command else None,
+        task.execution_isolation,
     )
 
 

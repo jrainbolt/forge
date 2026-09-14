@@ -1833,3 +1833,24 @@ All eight `project-configure-v1` subprocess cases pass. In a clean disposable
 Foundation E04 copy, the accepted A35 line-range mutation passed the production
 configure→build→test plan, Forge returned `completed_verified`, and the independent
 oracle passed. Canonical Foundation remained unchanged. A39 was not started.
+
+---
+
+# Milestone A39 — Trusted Process Isolation & Environment Hardening v1
+
+**Status:** Implemented and accepted for the required controlled-environment path.
+
+Trusted project execution now has explicit `none`, `controlled_env`, and `strict`
+isolation modes. Existing configurations default to `none`. Hardened modes use a
+bounded environment, exclude ambient secrets by default, and redirect HOME/TMPDIR
+to workspace-local generated state. `strict` fails closed without a supported
+Forge-owned adapter; on macOS, the installed Seatbelt adapter was verified to
+allow workspace writes while denying a sibling outside write. It permits runtime
+reads outside the workspace and does not claim full read confinement.
+
+The eight-case `process-isolation-v1` suite passes. The accepted Foundation E04
+delta passed from a clean disposable copy under `controlled_env`: Forge configure,
+build, and test passed; Forge returned `completed_verified`; the independent oracle
+passed; canonical Foundation remained unchanged. The optional full strict
+Foundation run stopped at configure, documenting a platform/toolchain compatibility
+limit without weakening strict fail-closed behavior. A40 was not started.

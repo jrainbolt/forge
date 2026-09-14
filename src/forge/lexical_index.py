@@ -137,6 +137,7 @@ _IGNORED_DIRECTORIES = frozenset(
         "build",
         "target",
         "cmakefiles",
+        ".forge-exec",
     }
 )
 

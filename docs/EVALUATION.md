@@ -646,3 +646,31 @@ and test 15.88 seconds; the plan took 26.71 seconds and the complete evaluation
 31.04 seconds. Relative to A37, Forge charged one additional tool execution
 (six instead of five), while both used three model calls. These are local
 observations, not general performance guarantees.
+
+## process-isolation-v1
+
+A39 adds eight deterministic cases. I01 redirects HOME/TMPDIR into the disposable
+workspace; I02 excludes a fake parent secret; I03 runs a PATH-resolved trusted
+command; I04 proves an unavailable strict adapter fails before execution; I05/I06
+exercise outside-write rejection and inside-write allowance through a deterministic
+fake adapter; I07 verifies timeout cleanup of a spawned descendant; I08 runs the
+existing configure→build→test production plan under `controlled_env` with no
+inter-step model call. Additional tests cover policy parsing, NONE compatibility,
+approval snapshot currentness, isolation attribution identity, permissions,
+symlinked execution-directory rejection, metadata classification, and log redaction.
+
+The installed macOS `sandbox-exec` adapter was probed outside the enclosing
+development sandbox. A harmless command and workspace write passed; an attempted
+write to a sibling temporary file failed and left it absent. The adapter allows
+runtime reads outside the workspace, so this is not complete read confinement.
+The optional full strict Foundation E04 run stopped at configure (the independent
+oracle still passed); this does not affect the required controlled-environment
+acceptance and remains a strict toolchain-compatibility limitation.
+
+The accepted E04 delta under `controlled_env` began in a clean disposable copy,
+passed Forge configure→build→test, returned `completed_verified`, and passed the
+independent oracle with canonical Foundation unchanged. The final PATH-hardened
+repeat took 0.40 seconds to configure, 7.03 seconds to build, and 12.02 seconds
+to test; the plan took 19.45 seconds and total evaluation took 22.46 seconds. It
+used six tools and three model calls, the same counts as A38;
+these local timings do not isolate environment-setup overhead from run variation.

@@ -6,6 +6,8 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from forge.process_isolation import ExecutionIsolationMode, ExecutionIsolationPolicy
+
 DEFAULT_BUILD_TIMEOUT_SECONDS = 120.0
 DEFAULT_CONFIGURE_TIMEOUT_SECONDS = 120.0
 DEFAULT_TEST_TIMEOUT_SECONDS = 300.0
@@ -90,8 +92,13 @@ class ProjectCommands:
     test: ProjectCommand | None = None
     verification_plan: VerificationPlan | None = None
     configure: ProjectCommand | None = None
+    execution_isolation: ExecutionIsolationPolicy = ExecutionIsolationPolicy()
 
     def __post_init__(self) -> None:
+        if not isinstance(self.execution_isolation, ExecutionIsolationPolicy):
+            raise ProjectConfigurationError(
+                "execution_isolation must be an ExecutionIsolationPolicy"
+            )
         if self.verification_plan is not None and not isinstance(
             self.verification_plan, VerificationPlan
         ):
@@ -113,7 +120,7 @@ def parse_project_commands(document: Mapping[str, object]) -> ProjectCommands:
         return ProjectCommands()
     if not isinstance(raw_project, dict):
         raise ProjectConfigurationError("project must be a TOML table")
-    unknown = set(raw_project) - {"commands", "verification"}
+    unknown = set(raw_project) - {"commands", "verification", "execution"}
     if unknown:
         raise ProjectConfigurationError(
             f"project has unknown keys: {_format_keys(unknown)}"
@@ -133,7 +140,27 @@ def parse_project_commands(document: Mapping[str, object]) -> ProjectCommands:
         test=_parse_command(raw_commands.get("test"), "test"),
         verification_plan=_parse_verification_plan(raw_project.get("verification")),
         configure=_parse_command(raw_commands.get("configure"), "configure"),
+        execution_isolation=_parse_execution_isolation(raw_project.get("execution")),
     )
+
+
+def _parse_execution_isolation(raw: object) -> ExecutionIsolationPolicy:
+    if raw is None:
+        return ExecutionIsolationPolicy()
+    if not isinstance(raw, dict):
+        raise ProjectConfigurationError("project.execution must be a TOML table")
+    unknown = set(raw) - {"isolation"}
+    if unknown:
+        raise ProjectConfigurationError(
+            f"project.execution has unknown keys: {_format_keys(unknown)}"
+        )
+    value = raw.get("isolation", "none")
+    try:
+        return ExecutionIsolationPolicy(ExecutionIsolationMode(value))
+    except (TypeError, ValueError) as error:
+        raise ProjectConfigurationError(
+            "project.execution.isolation must be none, controlled_env, or strict"
+        ) from error
 
 
 def _parse_verification_plan(raw: object) -> VerificationPlan | None:

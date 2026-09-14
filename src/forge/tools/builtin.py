@@ -96,9 +96,11 @@ def create_assist_repository_registry(
         GitDiffTool(),
         WriteFileTool(),
         ApplyPatchTool(),
-        ProjectCommandTool("configure", configured.configure),
-        ProjectCommandTool("build", configured.build),
-        ProjectCommandTool("test", configured.test),
+        ProjectCommandTool(
+            "configure", configured.configure, configured.execution_isolation
+        ),
+        ProjectCommandTool("build", configured.build, configured.execution_isolation),
+        ProjectCommandTool("test", configured.test, configured.execution_isolation),
     ]
     if semantic_index is not None:
         candidates.append(SemanticSearchTool(semantic_index))
@@ -138,9 +140,11 @@ def create_repository_registry(
         GitDiffTool(),
         WriteFileTool(),
         ApplyPatchTool(),
-        ProjectCommandTool("configure", configured.configure),
-        ProjectCommandTool("build", configured.build),
-        ProjectCommandTool("test", configured.test),
+        ProjectCommandTool(
+            "configure", configured.configure, configured.execution_isolation
+        ),
+        ProjectCommandTool("build", configured.build, configured.execution_isolation),
+        ProjectCommandTool("test", configured.test, configured.execution_isolation),
     ]
     if semantic_index is not None:
         candidates.append(SemanticSearchTool(semantic_index))

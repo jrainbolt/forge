@@ -115,6 +115,11 @@ from forge.evaluation.mutation_transition import (
     MutationTransitionTaskResult,
     run_mutation_transition_v1,
 )
+from forge.evaluation.process_isolation import (
+    PROCESS_ISOLATION_V1,
+    ProcessIsolationCase,
+    run_process_isolation_v1,
+)
 from forge.evaluation.project_configure import (
     PROJECT_CONFIGURE_V1,
     ProjectConfigureTaskResult,
@@ -486,4 +491,7 @@ __all__ = [
     "PROJECT_CONFIGURE_V1",
     "ProjectConfigureTaskResult",
     "run_project_configure_v1",
+    "PROCESS_ISOLATION_V1",
+    "ProcessIsolationCase",
+    "run_process_isolation_v1",
 ]

@@ -91,14 +91,22 @@ class VerificationAttribution:
 
 
 def command_identity(prepared: PreparedProjectCommand) -> str:
-    """Bind operation, argv, cwd, timeout, and relevant process environment."""
-    environment = project_environment()
+    """Bind operation, argv, cwd, timeout, environment, and isolation policy."""
+    environment = (
+        dict(prepared.environment)
+        if prepared.environment is not None
+        else project_environment(prepared.isolation, prepared.workspace)
+    )
     value = (
         prepared.operation,
         prepared.argv,
         str(prepared.workspace.resolve()),
         prepared.timeout_seconds,
         tuple(sorted(environment.items())),
+        prepared.isolation.mode.value,
+        prepared.sandbox_adapter,
+        str(prepared.execution_home) if prepared.execution_home else None,
+        str(prepared.execution_tmp) if prepared.execution_tmp else None,
     )
     return hashlib.sha256(json.dumps(value).encode()).hexdigest()
 

@@ -1229,6 +1229,49 @@ identities. Without a plan, legacy build/test selection is unchanged.
 Generated build paths such as `build/` and `CMakeFiles/` are classified as generated
 metadata, not implementation evidence merely because configure created them.
 Forge fixes subprocess cwd to the authorized workspace and configures no separate
-output directory or cleanup authority. As with pre-existing A10 build/test,
-trusted commands themselves are not OS-filesystem-sandboxed; project owners must
-configure commands whose outputs stay within the workspace.
+output directory or cleanup authority. In the default A10/A38 mode, trusted
+commands are not OS-filesystem-sandboxed; project owners must configure commands
+whose outputs stay within the workspace. A39 adds optional isolation below.
+
+## Trusted process isolation
+
+A39 distinguishes trusted command configuration from subprocess isolation.
+Optional `[project.execution] isolation` selects `none` (the backward-compatible
+default), `controlled_env`, or `strict` for all configured project operations in
+that task. The model and repository evidence cannot select or change this policy.
+Every configure/build/test still passes through the same ToolExecutor permission,
+approval, timeout, and process-group cleanup path; no tool-budget or model-call
+allowance changes.
+
+## Environment hardening
+
+`controlled_env` and `strict` construct a bounded subprocess environment instead
+of inheriting unrelated parent variables. A fixed allowlist retains PATH, locale,
+selected system/toolchain variables, and nonsecret user identifiers. Forge sets
+PATH from absolute entries outside the active workspace, dropping relative and
+workspace-local entries so repository content cannot supply a PATH executable.
+Forge sets
+noninteractive values, redirects HOME and TMPDIR/TMP/TEMP to workspace-local
+`.forge-exec/home` and `.forge-exec/tmp`, and rejects pre-existing symlinks at
+those directory nodes. The prepared approval snapshot binds the effective
+environment, isolation mode, adapter identity, workspace, argv, and timeout.
+Environment values are not logged. `.forge-exec/` is excluded from discovery and
+classified as generated metadata, not source evidence.
+
+## Strict isolation and authority
+
+`strict` requires an available Forge-owned OS adapter and never falls back to
+`controlled_env`. The macOS adapter uses the installed Seatbelt `sandbox-exec`
+facility with deny-by-default policy: runtime filesystem reads are allowed,
+filesystem writes are allowed only below the resolved workspace, and no network
+permission is granted. Forge constructs the policy; neither repository content
+nor the model supplies it. Where the adapter cannot start, Forge reports an
+isolation failure without running the command. This is a filesystem-write and
+network boundary, not full read confinement: a strict process may read files
+outside the workspace that its user can already read. The adapter is platform-
+specific; other platforms report strict unavailable. `controlled_env` redirects
+ambient paths and removes secrets from the environment but is not filesystem
+sandboxing. Isolation constrains an already-authorized process; it grants no
+execution or source-write permission. A36 attribution identity includes mode,
+adapter, effective environment, HOME, and TMPDIR so changed conditions are not
+treated as comparable.
