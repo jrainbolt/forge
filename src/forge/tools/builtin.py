@@ -39,7 +39,7 @@ READ_ONLY_TOOL_NAMES = (
 )
 SEMANTIC_TOOL_NAME = "repository.semantic_search"
 WRITE_TOOL_NAMES = ("repository.apply_patch", "repository.write_file")
-PROJECT_TOOL_NAMES = ("project.build", "project.test")
+PROJECT_TOOL_NAMES = ("project.configure", "project.build", "project.test")
 
 
 def create_readonly_repository_registry(
@@ -96,6 +96,7 @@ def create_assist_repository_registry(
         GitDiffTool(),
         WriteFileTool(),
         ApplyPatchTool(),
+        ProjectCommandTool("configure", configured.configure),
         ProjectCommandTool("build", configured.build),
         ProjectCommandTool("test", configured.test),
     ]
@@ -137,6 +138,7 @@ def create_repository_registry(
         GitDiffTool(),
         WriteFileTool(),
         ApplyPatchTool(),
+        ProjectCommandTool("configure", configured.configure),
         ProjectCommandTool("build", configured.build),
         ProjectCommandTool("test", configured.test),
     ]

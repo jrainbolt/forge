@@ -606,8 +606,8 @@ plan and suppresses repair for the matching pre-existing test failure.
 
 Realworld metrics now include plan ID, required/started/passed step counts, failed
 step, outcome, tool count, duration, and zero inter-step planning model calls.
-The plan is evaluator-owned for Foundation E04–E07; evaluator setup still performs
-the existing CMake configure step, then Forge's production gate executes trusted
+At A37, the plan was evaluator-owned for Foundation E04–E07; evaluator setup
+performed the CMake configure step, then Forge's production gate executed trusted
 `project.build` followed by `project.test`. The independent oracle remains a
 separate build→test comparison and cannot mark Forge verified. A36's prior E04
 finding arose because immediate test ran before the build prerequisite; explicit
@@ -617,3 +617,32 @@ preview and approval in a disposable E04 workspace (seed 42), acquired the expec
 source via lexical bootstrap and a bounded range read, made one mutation, then
 passed production build and test. Forge returned `completed_verified`; the
 independent oracle also passed, and canonical Foundation hashes were unchanged.
+
+## project-configure-v1
+
+A38 adds eight deterministic production-orchestration cases using configured
+subprocesses in disposable workspaces. C01 verifies configure→build→test from a
+clean workspace. C02 stops after nonzero configure without code repair. C03/C04
+exercise distinct CONFIGURE DENY and ASK rejection. C05 stops after build failure.
+C06 ensures configure-created build artifacts remain generated metadata, not
+implementation evidence. C07 performs one repair and reruns the full plan. C08
+binds a matching pre-existing test failure to the same configure→build→test
+baseline and blocks repair. Separate tests cover timeout and process launch
+failure. The model does not choose required plan steps, and normal configure
+output is compacted before the next model request.
+
+Foundation E04–E07 no longer use evaluator-owned CMake configure setup. Their
+trusted task definitions provide a `project.configure` argument array and the
+three-step plan. The independent oracle still runs separately after Forge. A38's
+accepted E04 line-range delta was reproduced from a clean disposable copy:
+lexical bootstrap acquired the expected source, one approved mutation executed,
+and Forge's configure, build, and test each passed in order. Forge returned
+`completed_verified`; the independent oracle passed; the canonical Foundation
+repository hash was unchanged. The historical A37 acceptance script retains its
+former evaluator-configured definition for comparison.
+
+In that E04 run, Forge's configure step took 0.57 seconds, build 10.27 seconds,
+and test 15.88 seconds; the plan took 26.71 seconds and the complete evaluation
+31.04 seconds. Relative to A37, Forge charged one additional tool execution
+(six instead of five), while both used three model calls. These are local
+observations, not general performance guarantees.

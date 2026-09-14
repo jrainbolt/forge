@@ -104,6 +104,7 @@ class RealWorldTask:
     seeds: tuple[int, ...] = (42,)
     max_mutations: int = 0
     unsupported_reason: str | None = None
+    configure_command: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if not self.task_id or not self.prompt:
@@ -203,6 +204,10 @@ class RealWorldMetrics:
     verification_plan_model_calls: int = 0
     verification_build_duration: float = 0.0
     verification_test_duration: float = 0.0
+    configure_required: bool = False
+    configure_executed: bool = False
+    configure_result: str = "not_run"
+    configure_duration: float = 0.0
     baseline_verification_executed: bool = False
     baseline_duration_seconds: float = 0.0
     post_mutation_duration_seconds: float = 0.0
@@ -588,6 +593,7 @@ def score_task_result(
             for record in (
                 *getattr(agent or coding, "build_attempts", ()),
                 *getattr(agent or coding, "test_attempts", ()),
+                *getattr(agent or coding, "configure_attempts", ()),
             )
         )
         if agent is not None or coding is not None
@@ -739,6 +745,19 @@ def score_task_result(
         ),
         verification_test_duration=getattr(
             getattr(coding, "test", None), "duration_seconds", 0.0
+        ),
+        configure_required=(
+            task.verification_plan is not None
+            and "project.configure" in task.verification_plan.steps
+        ),
+        configure_executed=getattr(
+            getattr(coding, "configure", None), "attempted", False
+        ),
+        configure_result=getattr(
+            getattr(coding, "configure", None), "status", "not_run"
+        ),
+        configure_duration=getattr(
+            getattr(coding, "configure", None), "duration_seconds", 0.0
         ),
         baseline_verification_executed=(
             any(step.executed for step in plan_baseline_steps)
@@ -954,6 +973,7 @@ def _project_commands(task: RealWorldTask) -> ProjectCommands:
         ProjectCommand(task.build_command, 300) if task.build_command else None,
         ProjectCommand(task.test_command, 300) if task.test_command else None,
         task.verification_plan,
+        ProjectCommand(task.configure_command, 300) if task.configure_command else None,
     )
 
 

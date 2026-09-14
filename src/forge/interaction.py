@@ -36,6 +36,7 @@ class AutonomyMode(Enum):
                 ToolCapability.WRITE,
                 ToolCapability.BUILD,
                 ToolCapability.TEST,
+                ToolCapability.CONFIGURE,
             }
         )
 
@@ -60,11 +61,19 @@ class PermissionProfile:
     build: PermissionDecision
     test: PermissionDecision
     default: PermissionDecision = PermissionDecision.DENY
+    configure: PermissionDecision = PermissionDecision.DENY
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:
             raise ValueError("permission profile name must be non-empty text")
-        decisions = (self.read, self.write, self.build, self.test, self.default)
+        decisions = (
+            self.read,
+            self.write,
+            self.build,
+            self.test,
+            self.default,
+            self.configure,
+        )
         if not all(isinstance(value, PermissionDecision) for value in decisions):
             raise TypeError("permission profile values must be PermissionDecision")
         if self.write is PermissionDecision.ALLOW:
@@ -76,6 +85,7 @@ class PermissionProfile:
             ToolCapability.WRITE: self.write,
             ToolCapability.BUILD: self.build,
             ToolCapability.TEST: self.test,
+            ToolCapability.CONFIGURE: self.configure,
         }.get(capability, self.default)
 
 
@@ -85,6 +95,7 @@ SAFE_PROFILE = PermissionProfile(
     PermissionDecision.DENY,
     PermissionDecision.DENY,
     PermissionDecision.DENY,
+    configure=PermissionDecision.DENY,
 )
 CONFIRM_PROFILE = PermissionProfile(
     "confirm",
@@ -92,6 +103,7 @@ CONFIRM_PROFILE = PermissionProfile(
     PermissionDecision.ASK,
     PermissionDecision.ASK,
     PermissionDecision.ASK,
+    configure=PermissionDecision.ASK,
 )
 TRUSTED_EXEC_PROFILE = PermissionProfile(
     "trusted-exec",
@@ -99,6 +111,7 @@ TRUSTED_EXEC_PROFILE = PermissionProfile(
     PermissionDecision.ASK,
     PermissionDecision.ALLOW,
     PermissionDecision.ALLOW,
+    configure=PermissionDecision.ALLOW,
 )
 BUILTIN_PERMISSION_PROFILES = MappingProxyType(
     {

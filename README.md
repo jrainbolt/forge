@@ -208,23 +208,31 @@ forge chat \
 
 Normal `--workspace` mode remains read-only. In assist mode, reads are allowed,
 Forge may inspect source, propose at most one successful code mutation for each user
-request, reread the result, and optionally propose configured build or test
-verification. Every write, patch, build, or test proposal receives a separate default-no
+request, reread the result, and optionally propose configured project verification.
+Every write, patch, configure, build, or test proposal receives a separate default-no
 approval prompt. Writes show their target and deterministic diff. Existing files
 require the SHA-256 returned by a current-turn read; approving one exact invocation
 never approves changed content or another path.
 
-`project.build` and `project.test` accept no model arguments. Their immutable argv
+`project.configure`, `project.build`, and `project.test` accept no model arguments. Their immutable argv
 arrays and timeouts come from the trusted local TOML configuration:
 
 ```toml
+[project.commands.configure]
+argv = ["cmake", "-S", ".", "-B", "build", "-DBUILD_TESTING=ON"]
+timeout_seconds = 120
+
 [project.commands.build]
-argv = ["python", "-m", "compileall", "src"]
+argv = ["cmake", "--build", "build"]
 timeout_seconds = 120
 
 [project.commands.test]
-argv = ["python", "-m", "pytest"]
+argv = ["ctest", "--test-dir", "build", "--output-on-failure"]
 timeout_seconds = 300
+
+[project.verification]
+id = "configure-build-test"
+steps = ["project.configure", "project.build", "project.test"]
 ```
 
 Each approval preview displays the exact argv snapshot, workspace, and timeout.
@@ -233,6 +241,11 @@ has bounded output and a timeout, and returns exit-status-based evidence. A late
 Forge write makes earlier build/test evidence stale. Project configuration is a
 trusted user-owned boundary: configured programs may themselves access the network,
 and A10 does not provide an environment or network sandbox.
+
+`project.configure` is optional and has separate CONFIGURE permission. It may
+create build metadata but grants no source WRITE authority. Use trusted commands
+whose outputs remain within the workspace; A10 fixes the subprocess cwd there but
+does not OS-sandbox command filesystem effects.
 
 If verification fails, the approved mutation remains on disk, Forge reports the
 failure, and the task stops without a corrective edit. A deterministic footer reports
@@ -447,15 +460,16 @@ verification-ready state before asking the model for another decision. A caller 
 explicitly skip this gate; model text cannot.
 
 Trusted project configuration can explicitly define an ordered verification plan,
-such as build then test. Every step retains separate permission and exact approval,
+such as configure then build then test. Every step retains separate permission and exact approval,
 bounded execution, and a real tool-budget charge. Steps stop at the first failure;
 Forge reports verified only when every required step passes. Without a plan, the
-single-command behavior above is unchanged.
+single-command behavior above is unchanged. Configure alone is not verification;
+configure failure does not make source-code repair eligible.
 
 ## Trusted execution
 
-Automatic verification uses the existing confined `project.test` and
-`project.build` tools, their exact configured argument arrays, timeouts, output
+Automatic verification uses the existing workspace-cwd `project.configure`,
+`project.test`, and `project.build` tools, their exact configured argument arrays, timeouts, output
 limits, and subprocess isolation. It does not introduce a shell or arbitrary
 command surface.
 

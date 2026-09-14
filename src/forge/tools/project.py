@@ -1,4 +1,4 @@
-"""Controlled execution of the two trusted, configured project commands."""
+"""Controlled execution of trusted, configured project commands."""
 
 from __future__ import annotations
 
@@ -63,15 +63,15 @@ class _TailCapture:
 
 class ProjectCommandTool(Tool):
     def __init__(self, operation: str, command: ProjectCommand | None) -> None:
-        if operation not in {"build", "test"}:
-            raise ValueError("project operation must be build or test")
+        if operation not in {"configure", "build", "test"}:
+            raise ValueError("project operation must be configure, build, or test")
         self._operation = operation
         self._command = command
-        evidence = (
-            ToolEvidence.BUILD_RESULT
-            if operation == "build"
-            else ToolEvidence.TEST_RESULT
-        )
+        evidence = {
+            "configure": ToolEvidence.CONFIGURE_RESULT,
+            "build": ToolEvidence.BUILD_RESULT,
+            "test": ToolEvidence.TEST_RESULT,
+        }[operation]
         self._metadata = ToolMetadata(
             f"project.{operation}",
             f"Run the workspace's predefined user-configured {operation} command "
@@ -79,7 +79,11 @@ class ProjectCommandTool(Tool):
             ArgumentSchema(),
             ToolRisk.EXECUTE,
             evidence,
-            ToolCapability.BUILD if operation == "build" else ToolCapability.TEST,
+            {
+                "configure": ToolCapability.CONFIGURE,
+                "build": ToolCapability.BUILD,
+                "test": ToolCapability.TEST,
+            }[operation],
         )
 
     @property

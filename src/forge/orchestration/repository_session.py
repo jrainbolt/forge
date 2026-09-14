@@ -1328,7 +1328,8 @@ class RepositoryChatSession:
             if (
                 parsed.outcome is ToolCallOutcome.TOOL_CALL
                 and parsed.tool_call is not None
-                and parsed.tool_call.tool_name in {"project.build", "project.test"}
+                and parsed.tool_call.tool_name
+                in {"project.configure", "project.build", "project.test"}
                 and coding_task is not None
                 and coding_task.repair_eligible
             ):
@@ -1685,7 +1686,8 @@ class RepositoryChatSession:
                 call.arguments,
                 generation=(
                     self._mutation_generation
-                    if call.tool_name in {"project.build", "project.test"}
+                    if call.tool_name
+                    in {"project.configure", "project.build", "project.test"}
                     else None
                 ),
             )
@@ -1797,7 +1799,8 @@ class RepositoryChatSession:
                     )
             elif (
                 self._assist_mode
-                and call.tool_name in {"project.build", "project.test"}
+                and call.tool_name
+                in {"project.configure", "project.build", "project.test"}
                 and result.status is ToolResultStatus.APPROVAL_REQUIRED
             ):
                 operation = call.tool_name.removeprefix("project.")
@@ -1844,7 +1847,11 @@ class RepositoryChatSession:
                 current_verification=(
                     result.status is ToolResultStatus.SUCCESS
                     and evidence
-                    in {ToolEvidence.BUILD_RESULT, ToolEvidence.TEST_RESULT}
+                    in {
+                        ToolEvidence.CONFIGURE_RESULT,
+                        ToolEvidence.BUILD_RESULT,
+                        ToolEvidence.TEST_RESULT,
+                    }
                 ),
                 returned_bytes=_output_integer(result, "size_bytes"),
                 returned_lines=_returned_lines(result),
@@ -2028,6 +2035,7 @@ class RepositoryChatSession:
                     replace(item, current_verification=False)
                     if item.evidence
                     in {
+                        ToolEvidence.CONFIGURE_RESULT.value,
                         ToolEvidence.BUILD_RESULT.value,
                         ToolEvidence.TEST_RESULT.value,
                     }
@@ -2518,6 +2526,7 @@ class RepositoryChatSession:
                 coding_task is not None
                 and evidence
                 in {
+                    ToolEvidence.CONFIGURE_RESULT,
                     ToolEvidence.BUILD_RESULT,
                     ToolEvidence.TEST_RESULT,
                 }
@@ -3221,7 +3230,11 @@ def _agent_progress(
     arguments: Mapping[str, object],
     generation: int,
 ) -> tuple[str | None, str | None]:
-    if evidence in {ToolEvidence.BUILD_RESULT, ToolEvidence.TEST_RESULT}:
+    if evidence in {
+        ToolEvidence.CONFIGURE_RESULT,
+        ToolEvidence.BUILD_RESULT,
+        ToolEvidence.TEST_RESULT,
+    }:
         # A completed failing command is still new evidence the agent can reason from.
         return f"verification:{result.tool_name}:{generation}", None
     if result.status is not ToolResultStatus.SUCCESS:

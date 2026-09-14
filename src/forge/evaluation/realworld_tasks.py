@@ -12,9 +12,10 @@ from forge.project_config import VerificationPlan
 _CONFIGURE = (("cmake", "-S", ".", "-B", "build", "-DBUILD_TESTING=ON"),)
 _BUILD = ("cmake", "--build", "build")
 _TEST = ("ctest", "--test-dir", "build", "--output-on-failure")
-_ORACLE = (_BUILD, _TEST)
+_ORACLE = (*_CONFIGURE, _BUILD, _TEST)
 _VERIFICATION_PLAN = VerificationPlan(
-    "foundation-build-test", ("project.build", "project.test")
+    "foundation-configure-build-test",
+    ("project.configure", "project.build", "project.test"),
 )
 _CAN_ADVANCE = "return clock != NULL && clock->tick != UINT64_MAX;"
 _BROKEN_ADVANCE = "return clock != NULL && clock->tick == UINT64_MAX;"
@@ -61,7 +62,7 @@ def foundation_realworld_tasks() -> tuple[RealWorldTask, ...]:
             allowed_paths=("src/clock.c",),
             expected_changed_paths=("src/clock.c",),
             setup=(SetupReplacement("src/clock.c", _CAN_ADVANCE, _BROKEN_ADVANCE),),
-            setup_commands=_CONFIGURE,
+            configure_command=_CONFIGURE[0],
             build_command=_BUILD,
             test_command=_TEST,
             oracle_commands=_ORACLE,
@@ -77,7 +78,7 @@ def foundation_realworld_tasks() -> tuple[RealWorldTask, ...]:
             ("tests/test_solar.c", "src/clock.c"),
             allowed_paths=("tests/test_solar.c",),
             expected_changed_paths=("tests/test_solar.c",),
-            setup_commands=_CONFIGURE,
+            configure_command=_CONFIGURE[0],
             build_command=_BUILD,
             test_command=_TEST,
             oracle_commands=_ORACLE,
@@ -100,7 +101,7 @@ def foundation_realworld_tasks() -> tuple[RealWorldTask, ...]:
                     "time_of_day > FACTORY_CLOCK_SUNSET",
                 ),
             ),
-            setup_commands=_CONFIGURE,
+            configure_command=_CONFIGURE[0],
             build_command=_BUILD,
             test_command=_TEST,
             oracle_commands=_ORACLE,
@@ -124,7 +125,7 @@ def foundation_realworld_tasks() -> tuple[RealWorldTask, ...]:
                     "time_of_day > FACTORY_CLOCK_SUNSET",
                 ),
             ),
-            setup_commands=_CONFIGURE,
+            configure_command=_CONFIGURE[0],
             build_command=_BUILD,
             test_command=_TEST,
             oracle_commands=_ORACLE,

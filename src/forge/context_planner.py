@@ -34,6 +34,7 @@ class ObservationType(Enum):
     GIT_STATE = "git_state"
     WRITE_RESULT = "write_result"
     BUILD_RESULT = "build_result"
+    CONFIGURE_RESULT = "configure_result"
     TEST_RESULT = "test_result"
     VERIFICATION_DIAGNOSTIC = "verification_diagnostic"
     OTHER = "other"
@@ -371,7 +372,11 @@ class ContextPlanner:
         observation_type = _observation_type(result.tool_name)
         if (
             observation_type
-            in {ObservationType.BUILD_RESULT, ObservationType.TEST_RESULT}
+            in {
+                ObservationType.CONFIGURE_RESULT,
+                ObservationType.BUILD_RESULT,
+                ObservationType.TEST_RESULT,
+            }
             and result.status is ToolResultStatus.FAILURE
         ):
             observation_type = ObservationType.VERIFICATION_DIAGNOSTIC
@@ -431,7 +436,11 @@ class ContextPlanner:
         self._apply_supersession(record)
         if (
             observation_type
-            in {ObservationType.BUILD_RESULT, ObservationType.TEST_RESULT}
+            in {
+                ObservationType.CONFIGURE_RESULT,
+                ObservationType.BUILD_RESULT,
+                ObservationType.TEST_RESULT,
+            }
             and result.status is ToolResultStatus.SUCCESS
         ):
             self._compact(active, "successful verification retained as metadata")
@@ -474,6 +483,7 @@ class ContextPlanner:
                 ):
                     self._drop(item, "targeted range supersedes whole file")
         if newest.observation_type in {
+            ObservationType.CONFIGURE_RESULT,
             ObservationType.BUILD_RESULT,
             ObservationType.TEST_RESULT,
         }:
@@ -632,6 +642,7 @@ def _observation_type(tool_name: str) -> ObservationType:
         "repository.write_file": ObservationType.WRITE_RESULT,
         "repository.apply_patch": ObservationType.WRITE_RESULT,
         "project.build": ObservationType.BUILD_RESULT,
+        "project.configure": ObservationType.CONFIGURE_RESULT,
         "project.test": ObservationType.TEST_RESULT,
     }.get(tool_name, ObservationType.OTHER)
 
@@ -644,6 +655,7 @@ def _priority(kind: ObservationType, status: ToolResultStatus) -> int:
     }:
         return 100
     if kind in {
+        ObservationType.CONFIGURE_RESULT,
         ObservationType.BUILD_RESULT,
         ObservationType.TEST_RESULT,
         ObservationType.VERIFICATION_DIAGNOSTIC,

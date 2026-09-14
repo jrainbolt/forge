@@ -106,6 +106,8 @@ def classify_source(path: str) -> SourceKind:
     suffix = PurePosixPath(name).suffix
     if any(part in {"vendor", "third_party", "external"} for part in parts):
         return SourceKind.THIRD_PARTY
+    if any(part in {"build", "dist", "target", "cmakefiles"} for part in parts):
+        return SourceKind.GENERATED_METADATA
     if any(part.endswith((".egg-info", ".dist-info")) for part in parts) or name in {
         "pkg-info",
         "sources.txt",

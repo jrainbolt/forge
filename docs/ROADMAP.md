@@ -1812,4 +1812,24 @@ prerequisites.
 The eight-case `verification-plan-v1` suite passes. In a disposable Foundation
 E04 copy, the accepted A35 line-range mutation passed Forge's production
 build→test plan and the independent oracle, yielding `completed_verified` while
-canonical Foundation remained unchanged. No A38 work was started.
+canonical Foundation remained unchanged.
+
+---
+
+# Milestone A38 — Trusted Project Configure & Build Bootstrap v1
+
+**Status:** Implemented and accepted.
+
+Trusted local configuration may now provide optional `project.configure` as a
+distinct, workspace-mutating A10 operation with immutable argv, bounded timeout,
+ToolExecutor execution, and separate A14 permission. An explicit A37 plan can
+order configure→build→test, stop at the first failure, reserve and charge each
+tool execution, and rerun the full sequence after an eligible repair. Configure
+failure itself does not grant code-repair authority. A36 plan attribution binds
+configure and its command identity; generated build metadata is not source evidence.
+Legacy no-plan build/test behavior remains unchanged.
+
+All eight `project-configure-v1` subprocess cases pass. In a clean disposable
+Foundation E04 copy, the accepted A35 line-range mutation passed the production
+configure→build→test plan, Forge returned `completed_verified`, and the independent
+oracle passed. Canonical Foundation remained unchanged. A39 was not started.

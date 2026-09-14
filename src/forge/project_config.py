@@ -7,10 +7,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 DEFAULT_BUILD_TIMEOUT_SECONDS = 120.0
+DEFAULT_CONFIGURE_TIMEOUT_SECONDS = 120.0
 DEFAULT_TEST_TIMEOUT_SECONDS = 300.0
 MAX_TIMEOUT_SECONDS = 3600.0
 MAX_VERIFICATION_STEPS = 4
-VERIFICATION_OPERATIONS = frozenset({"project.build", "project.test"})
+VERIFICATION_OPERATIONS = frozenset(
+    {"project.configure", "project.build", "project.test"}
+)
 
 
 class ProjectConfigurationError(ValueError):
@@ -74,6 +77,10 @@ class VerificationPlan:
             )
         if len(set(steps)) != len(steps):
             raise ProjectConfigurationError("verification plan steps must be unique")
+        if steps == ("project.configure",):
+            raise ProjectConfigurationError(
+                "project.configure alone cannot establish verification success"
+            )
         object.__setattr__(self, "steps", steps)
 
 
@@ -82,6 +89,7 @@ class ProjectCommands:
     build: ProjectCommand | None = None
     test: ProjectCommand | None = None
     verification_plan: VerificationPlan | None = None
+    configure: ProjectCommand | None = None
 
     def __post_init__(self) -> None:
         if self.verification_plan is not None and not isinstance(
@@ -115,7 +123,7 @@ def parse_project_commands(document: Mapping[str, object]) -> ProjectCommands:
         raw_commands = {}
     if not isinstance(raw_commands, dict):
         raise ProjectConfigurationError("project.commands must be a TOML table")
-    unknown = set(raw_commands) - {"build", "test"}
+    unknown = set(raw_commands) - {"configure", "build", "test"}
     if unknown:
         raise ProjectConfigurationError(
             f"project.commands has unknown keys: {_format_keys(unknown)}"
@@ -124,6 +132,7 @@ def parse_project_commands(document: Mapping[str, object]) -> ProjectCommands:
         build=_parse_command(raw_commands.get("build"), "build"),
         test=_parse_command(raw_commands.get("test"), "test"),
         verification_plan=_parse_verification_plan(raw_project.get("verification")),
+        configure=_parse_command(raw_commands.get("configure"), "configure"),
     )
 
 
@@ -164,7 +173,9 @@ def _parse_command(raw: object, operation: str) -> ProjectCommand | None:
         )
     timeout = raw.get(
         "timeout_seconds",
-        DEFAULT_BUILD_TIMEOUT_SECONDS
+        DEFAULT_CONFIGURE_TIMEOUT_SECONDS
+        if operation == "configure"
+        else DEFAULT_BUILD_TIMEOUT_SECONDS
         if operation == "build"
         else DEFAULT_TEST_TIMEOUT_SECONDS,
     )

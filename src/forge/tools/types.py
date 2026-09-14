@@ -58,6 +58,7 @@ class ToolCapability(Enum):
     WRITE = "write"
     BUILD = "build"
     TEST = "test"
+    CONFIGURE = "configure"
 
 
 class ToolEvidence(Enum):
@@ -69,6 +70,7 @@ class ToolEvidence(Enum):
     PATCH_SUCCESS = "patch_success"
     BUILD_RESULT = "build_result"
     TEST_RESULT = "test_result"
+    CONFIGURE_RESULT = "configure_result"
 
 
 class ToolValidationError(ValueError):

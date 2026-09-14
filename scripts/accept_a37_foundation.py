@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import sys
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -13,15 +14,39 @@ from forge.evaluation.realworld import (
     EvaluationOutcome,
     RealWorldEvaluationRunner,
     RepositorySnapshot,
+    copy_repository,
     hash_workspace,
 )
 from forge.evaluation.realworld_tasks import foundation_realworld_tasks
 from forge.models import MockModel, MutationRepresentationPolicy
+from forge.project_config import VerificationPlan
 
 
-def main() -> int:
+def main(*, milestone: str = "a37") -> int:
     canonical = Path(sys.argv[1]).resolve(strict=True)
     task = next(task for task in foundation_realworld_tasks() if task.task_id == "E04")
+    if milestone == "a37":
+        task = replace(
+            task,
+            setup_commands=(("cmake", "-S", ".", "-B", "build", "-DBUILD_TESTING=ON"),),
+            configure_command=None,
+            verification_plan=VerificationPlan(
+                "foundation-build-test", ("project.build", "project.test")
+            ),
+            oracle_commands=(
+                ("cmake", "--build", "build"),
+                ("ctest", "--test-dir", "build", "--output-on-failure"),
+            ),
+        )
+    elif milestone == "a38":
+        if task.setup_commands or task.configure_command is None:
+            raise RuntimeError("A38 E04 must have no evaluator configure setup")
+        with tempfile.TemporaryDirectory(prefix="forge-a38-clean-check-") as name:
+            copy = copy_repository(canonical, Path(name) / "workspace")
+            if (copy / "build").exists():
+                raise RuntimeError("A38 disposable workspace is already configured")
+    else:
+        raise ValueError("unknown acceptance milestone")
     if len(sys.argv) > 2 and sys.argv[2] == "--diagnose":
         logging.basicConfig(level=logging.DEBUG)
         task = replace(task, oracle_commands=())
@@ -72,7 +97,7 @@ def main() -> int:
         0.0,
     )
     result = RealWorldEvaluationRunner(
-        "a37-accepted-e04-delta",
+        f"{milestone}-accepted-e04-delta",
         model,
         canonical,
         mutation_representation=MutationRepresentationPolicy.LINE_RANGE,
@@ -83,6 +108,7 @@ def main() -> int:
         json.dumps(
             {
                 "canonical_unchanged": result.canonical_unchanged,
+                "initial_configured_state": milestone != "a38",
                 "repository_identity": snapshot.identity,
                 "task_id": attempt.task_id,
                 "seed": attempt.seed,
@@ -121,6 +147,10 @@ def main() -> int:
                     "verification_build_duration": (
                         attempt.metrics.verification_build_duration
                     ),
+                    "configure_required": attempt.metrics.configure_required,
+                    "configure_executed": attempt.metrics.configure_executed,
+                    "configure_result": attempt.metrics.configure_result,
+                    "configure_duration": attempt.metrics.configure_duration,
                     "verification_test_duration": (
                         attempt.metrics.verification_test_duration
                     ),

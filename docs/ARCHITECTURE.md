@@ -1183,8 +1183,9 @@ control until mutation.
 ## Verification plans
 
 A37 permits an explicit immutable `[project.verification]` plan with an ID and one
-to four ordered references to already-configured A10 `project.build` or
-`project.test` operations. The plan is loaded from trusted local configuration or
+to four ordered references to already-configured A10 project operations. A38 adds
+the optional `project.configure` prerequisite; a configure-only plan is invalid.
+The plan is loaded from trusted local configuration or
 an evaluator-owned task definition. Repository text and model output cannot
 create a plan or supply commands. Without an explicit plan, A29 continues to
 select one configured operation, preferring test.
@@ -1204,3 +1205,30 @@ plan at step one, preserving the two-mutation ceiling. If A36 baseline mode is
 enabled, it runs the same ordered plan before mutation; attribution compares a
 failed step only when plan identity, command identity, and all preceding passing
 steps match. The independent evaluation oracle has no production status authority.
+
+## Trusted project configuration
+
+A38 adds optional `[project.commands.configure]` with the same immutable argv and
+bounded timeout format as build/test. It is a distinct, workspace-mutating
+`CONFIGURE` capability, not READ or source WRITE. Safe policy denies it, confirm
+asks per exact prepared invocation, and trusted-exec allows it. The model cannot
+supply argv, cwd, timeout, or environment. Execution uses the existing A10
+ToolExecutor and subprocess boundary (`shell=False`, workspace cwd, controlled
+environment, DEVNULL stdin, bounded output, and process-group timeout cleanup).
+No package-install, clean, hook, or generic shell operation is added.
+
+An explicit plan may now run configure→build→test. Each step consumes one tool
+execution and advances only after a pass; successful configure output is compacted
+in model context, while bounded failure diagnostics remain available for truthful
+reporting. Configure failure does not authorize source-code repair. A later
+repair-eligible build/test failure may lead to one repair mutation and a complete
+configure→build→test rerun. Optional A36 baseline mode runs the same trusted plan
+before mutation and compares only matching plan, step, command, and predecessor
+identities. Without a plan, legacy build/test selection is unchanged.
+
+Generated build paths such as `build/` and `CMakeFiles/` are classified as generated
+metadata, not implementation evidence merely because configure created them.
+Forge fixes subprocess cwd to the authorized workspace and configures no separate
+output directory or cleanup authority. As with pre-existing A10 build/test,
+trusted commands themselves are not OS-filesystem-sandboxed; project owners must
+configure commands whose outputs stay within the workspace.

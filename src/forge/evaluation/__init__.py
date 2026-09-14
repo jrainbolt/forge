@@ -115,6 +115,11 @@ from forge.evaluation.mutation_transition import (
     MutationTransitionTaskResult,
     run_mutation_transition_v1,
 )
+from forge.evaluation.project_configure import (
+    PROJECT_CONFIGURE_V1,
+    ProjectConfigureTaskResult,
+    run_project_configure_v1,
+)
 from forge.evaluation.protocol_compatibility import (
     DIAGNOSTIC_GENERATION,
     PROTOCOL_COMPATIBILITY_SCHEMA_VERSION,
@@ -478,4 +483,7 @@ __all__ = [
     "VERIFICATION_PLAN_V1",
     "VerificationPlanTaskResult",
     "run_verification_plan_v1",
+    "PROJECT_CONFIGURE_V1",
+    "ProjectConfigureTaskResult",
+    "run_project_configure_v1",
 ]

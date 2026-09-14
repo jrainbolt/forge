@@ -219,6 +219,8 @@ class CodingTaskResult:
     attribution_attempts: tuple[VerificationAttribution, ...] = ()
     verification_plan_runs: tuple[VerificationPlanRun, ...] = ()
     verification_plan_baseline: VerificationPlanBaseline | None = None
+    configure: VerificationRecord = VerificationRecord()
+    configure_attempts: tuple[VerificationRecord, ...] = ()
 
     @property
     def footer(self) -> str:
@@ -265,6 +267,7 @@ class CodingTaskState:
         self.generation = generation
         self.build = VerificationRecord()
         self.test = VerificationRecord()
+        self.configure = VerificationRecord()
         self.verification_decision = VerificationDecision.NOT_DECIDED
         self.tool_sequence: list[str] = []
         self.repair_enabled = repair_enabled
@@ -274,6 +277,7 @@ class CodingTaskState:
         self.mutations: list[MutationRecord] = []
         self.build_attempts: list[VerificationRecord] = []
         self.test_attempts: list[VerificationRecord] = []
+        self.configure_attempts: list[VerificationRecord] = []
         self._terminal_status: CodingTaskStatus | None = None
         self.mutation_candidates: list[MutationCandidate] = []
         self.transition_metrics = MutationTransitionMetrics()
@@ -668,6 +672,7 @@ class CodingTaskState:
         self.generation = generation
         self.build = _stale(self.build)
         self.test = _stale(self.test)
+        self.configure = _stale(self.configure)
         self.verification_decision = VerificationDecision.NOT_DECIDED
         self.repair_eligible = False
         self.phase = (
@@ -869,13 +874,18 @@ class CodingTaskState:
             ),
         )
         self._attempts(operation).append(record)
-        if operation == "build":
+        if operation == "configure":
+            self.configure = record
+        elif operation == "build":
             self.build = record
         else:
             self.test = record
         if label == "failed":
             self.verification_decision = VerificationDecision.COMPLETED
-            eligible = outcome in {"nonzero_exit", "timeout"}
+            eligible = operation != "configure" and outcome in {
+                "nonzero_exit",
+                "timeout",
+            }
             preexisting = (
                 self.verification_attribution.result
                 is AttributionResult.PREEXISTING_OR_UNRELATED
@@ -1004,21 +1014,27 @@ class CodingTaskState:
             tuple(self.attribution_attempts),
             tuple(self.verification_plan_runs),
             self.verification_plan_baseline,
+            self.configure,
+            tuple(self.configure_attempts),
         )
 
     def _verification(self, operation: str) -> VerificationRecord:
+        if operation == "configure":
+            return self.configure
         if operation == "build":
             return self.build
         if operation == "test":
             return self.test
-        raise ValueError("verification operation must be build or test")
+        raise ValueError("verification operation must be configure, build, or test")
 
     def _attempts(self, operation: str) -> list[VerificationRecord]:
+        if operation == "configure":
+            return self.configure_attempts
         if operation == "build":
             return self.build_attempts
         if operation == "test":
             return self.test_attempts
-        raise ValueError("verification operation must be build or test")
+        raise ValueError("verification operation must be configure, build, or test")
 
 
 def _stale(record: VerificationRecord) -> VerificationRecord:
