@@ -29,6 +29,8 @@ def test_strict_toolchain_v1_deterministic_contracts(tmp_path: Path) -> None:
     assert result.strict_compile_pass
     assert result.strict_link_pass
     assert result.strict_external_write_denied
+    assert result.result_scope == "deterministic_fake_adapter_contracts"
+    assert result.real_platform_acceptance is None
 
 
 @pytest.mark.parametrize(

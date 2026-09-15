@@ -1278,23 +1278,23 @@ treated as comparable.
 
 ## Strict toolchain isolation diagnostics
 
-A40 keeps the macOS `macos-sandbox-exec-v1` policy unchanged. A disposable
-compiler ladder using Foundation's `/usr/bin/cc` passed version query and
-compile-to-object, but failed while linking a trivial object with an Apple linker
-header-alignment assertion. Trivial CMake compiler detection and Foundation
-configure failed at the same link stage. Bounded linker stderr and available
-macOS sandbox logs did not identify an `ld`/`clang` denial, so Forge records this
-as `strict_unknown_failure`, not a presumed service or filesystem denial. No
-additional Seatbelt permission is justified by the observed evidence.
+A40 versions the macOS policy as `macos-sandbox-exec-toolchain-v2`. It adds only
+the exact `sysctl-read hw.pagesize_compat` capability required by the installed
+Apple linker. A permissive diagnostic Seatbelt profile linked successfully while
+the former strict profile failed, macOS logs recorded the named denial, and a
+one-rule diagnostic profile restored linking and Foundation configure without
+weakening the external-write boundary. No arbitrary sysctl, Mach-service,
+external-write, or network capability was added.
 
 Forge's strict failure taxonomy recognizes explicit deny markers for read, write,
 process, executable mapping, and system-service operations, and distinguishes
-sandbox startup failures. The existing adapter identity is the strict policy
-version bound to approvals and A36 attribution. Its declared capabilities remain
-all runtime reads, process operations, workspace writes, and no network grant;
-there are no new external write, HOME, temp, system-service, or network grants.
-Deterministic fake-adapter tests exercise strict orchestration contracts but do
-not prove real compiler compatibility. A real macOS write regression after the
-diagnostic pass still allows workspace writes and denies both sibling and
-disposable home-hierarchy writes. Strict remains fail-closed; `controlled_env`
-remains available for the accepted Foundation path.
+sandbox startup failures. The adapter identity is the strict policy version bound
+to approvals and A36 attribution, so old-policy approvals and baselines do not
+compare as current. Its declared capabilities remain all runtime reads, process
+operations, workspace writes, and no network grant. Deterministic fake-adapter
+tests exercise strict orchestration contracts but do not prove real compiler
+compatibility; suite output explicitly labels its aggregate scope. Real macOS
+checks passed query, compile, link, execution, and clean Foundation
+configure→build→test. Write regressions before and after acceptance allowed the
+workspace and denied sibling and disposable home-hierarchy writes. Strict remains
+fail-closed and `controlled_env` behavior is unchanged.

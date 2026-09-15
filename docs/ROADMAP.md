@@ -1859,15 +1859,15 @@ limit without weakening strict fail-closed behavior. A40 was not started.
 
 # Milestone A40 — Strict Toolchain Compatibility & Sandbox Capability Profiling v1
 
-**Status:** Diagnostics implemented; strict compatibility acceptance blocked.
+**Status:** Accepted.
 
-The real strict ladder isolates the failure to linking one trivial object with
-Foundation's `/usr/bin/cc`: query and compile-to-object pass, while Apple `ld`
-asserts on header alignment. Trivial CMake and Foundation configure fail at the
-same stage. No specific denial was observed, so the Forge-owned Seatbelt policy
-was not broadened. A strict failure taxonomy and ten-case deterministic
-fake-adapter suite capture the boundary without claiming simulated runs prove
-real strict linking. Real workspace writes still pass; disposable sibling and
-home-hierarchy writes remain denied. A40 is not marked accepted until a
-justified strict toolchain fix and clean Foundation acceptance pass. A41 was not
+The corrected `macos-sandbox-exec-toolchain-v2` policy grants only the observed
+`sysctl-read hw.pagesize_compat` capability required by Apple `ld`. The production
+strict ladder passes compiler query, compile, link, executable run, and trivial
+CMake configure. A clean disposable Foundation E04 run passes strict
+configure→build→test, reaches `completed_verified`, and passes its independent
+oracle. Workspace writes remain allowed while sibling and home-hierarchy writes
+remain denied before and after acceptance. Policy versioning invalidates stale
+approvals and A36 baseline comparison. The deterministic suite remains explicitly
+fake-adapter contract evidence rather than real-platform evidence. A41 was not
 started.

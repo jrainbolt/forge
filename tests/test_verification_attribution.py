@@ -16,6 +16,7 @@ from forge.orchestration.verification_attribution import (
     baseline_evidence,
     failure_fingerprint,
 )
+from forge.process_isolation import ExecutionIsolationMode, ExecutionIsolationPolicy
 from forge.project_config import ProjectCommand, ProjectCommands
 from forge.tools import (
     PermissionDecision,
@@ -115,6 +116,35 @@ def test_baseline_is_bound_to_workspace_command_and_generation(tmp_path: Path) -
         attribute_failure(baseline, different_timeout, "failure", failure, 0).result
         is AttributionResult.COMMAND_MISMATCH
     )
+
+
+def test_baseline_policy_version_mismatch_is_not_comparable(tmp_path: Path) -> None:
+    policy = ExecutionIsolationPolicy(ExecutionIsolationMode.STRICT)
+    old = PreparedProjectCommand(
+        "test",
+        ("python", "-c", "pass"),
+        tmp_path,
+        5,
+        policy,
+        sandbox_adapter="macos-sandbox-exec-v1",
+    )
+    current = PreparedProjectCommand(
+        "test",
+        old.argv,
+        tmp_path,
+        5,
+        policy,
+        sandbox_adapter="macos-sandbox-exec-toolchain-v2",
+    )
+    baseline = baseline_evidence(
+        old, "success", {"outcome": "success", "duration_seconds": 0.1}, 0
+    )
+
+    comparison = attribute_failure(
+        baseline, current, "failure", _failure("case_alpha FAILED\n"), 0
+    )
+
+    assert comparison.result is AttributionResult.COMMAND_MISMATCH
 
 
 def test_matching_preexisting_failure_never_claims_verified(tmp_path: Path) -> None:

@@ -45,6 +45,8 @@ class StrictToolchainRun:
     strict_compile_pass: bool
     strict_link_pass: bool
     strict_external_write_denied: bool
+    result_scope: str
+    real_platform_acceptance: bool | None
 
 
 class _PassthroughFake:
@@ -191,4 +193,6 @@ def run_strict_toolchain_v1(root: Path) -> StrictToolchainRun:
         cases[1].passed,
         cases[2].passed,
         cases[5].passed and cases[6].passed,
+        "deterministic_fake_adapter_contracts",
+        None,
     )

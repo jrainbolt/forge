@@ -86,11 +86,12 @@ class UnavailableSandbox:
 class MacOSSandboxExec:
     """macOS Seatbelt: all reads, workspace-only writes, no network allowance."""
 
-    identity = "macos-sandbox-exec-v1"
+    identity = "macos-sandbox-exec-toolchain-v2"
     capabilities = (
         "all_filesystem_reads",
         "workspace_filesystem_writes",
         "process_operations",
+        "sysctl_read_hw_pagesize_compat",
         "network_not_granted",
     )
     executable = Path("/usr/bin/sandbox-exec")
@@ -128,6 +129,10 @@ class MacOSSandboxExec:
             "(deny default)"
             "(allow process*)"
             "(allow file-read*)"
+            # Apple ld requires this exact query on the observed macOS toolchain:
+            # denying it caused UnsafeHeaderWriter failure; this read alone restored
+            # linking while external writes remained denied.
+            '(allow sysctl-read (sysctl-name "hw.pagesize_compat"))'
             f"(allow file-write* (subpath {quoted}))"
         )
         return (str(self.executable), "-p", profile, *argv)

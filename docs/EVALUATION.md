@@ -685,16 +685,17 @@ enclosing development sandbox cannot install nested Seatbelt policy; fake PASS i
 an orchestration-contract result, not real strict toolchain acceptance. S10 runs
 the real controlled environment.
 
-The real macOS ladder used `/usr/bin/cc` (Apple clang 21.0.0) and the existing
-`macos-sandbox-exec-v1` adapter. Strict compiler query passed in 0.06 seconds,
-compile-to-object passed in 0.06 seconds, and link failed in 0.09 seconds with
-Apple `ld`'s header-alignment assertion. Executable run was not possible because
-the strict link produced no executable. Trivial CMake configure and clean
-Foundation configure failed at the same compiler-link stage. No specific linker
-sandbox denial was observed in bounded stderr or the available macOS logs; these
-results are classified `strict_unknown_failure`. No permission was expanded.
+The final real macOS ladder used `/usr/bin/cc` (Apple clang 21.0.0) and production
+adapter `macos-sandbox-exec-toolchain-v2`. Targeted diagnostics isolated Apple
+`ld`'s required `sysctl-read hw.pagesize_compat`: its denial caused the observed
+`UnsafeHeaderWriter` assertion, while granting that exact read alone restored
+linking. Compiler query, compile-to-object, link, executable run, and trivial
+CMake configure all passed under the corrected production policy.
 
-The final real macOS boundary regression still allowed a workspace write and
-denied disposable sibling and home-hierarchy writes. A40's strict Foundation
-acceptance remains blocked at configure; no build/test step or unisolated fallback
-was attempted. The A39 `controlled_env` Foundation run remains the accepted path.
+The real boundary regression before and after acceptance allowed workspace writes
+and denied disposable sibling and home-hierarchy writes. From a clean disposable
+Foundation copy, strict configure, build, and test passed, Forge returned
+`completed_verified`, and the independent oracle passed with canonical Foundation
+unchanged. Deterministic suite aggregate fields explicitly report fake-adapter
+contract scope and leave real-platform acceptance unset; real acceptance is
+reported only by the separate macOS run.

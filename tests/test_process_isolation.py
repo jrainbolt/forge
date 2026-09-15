@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import replace
@@ -14,6 +15,7 @@ from forge.orchestration.verification_attribution import command_identity
 from forge.process_isolation import (
     ExecutionIsolationMode,
     ExecutionIsolationPolicy,
+    MacOSSandboxExec,
     controlled_environment,
 )
 from forge.project_config import (
@@ -149,6 +151,69 @@ def test_attribution_identity_includes_isolation(tmp_path: Path) -> None:
         )
         == 3
     )
+
+
+def test_macos_strict_policy_grants_only_required_toolchain_sysctl(
+    tmp_path: Path,
+) -> None:
+    adapter = MacOSSandboxExec()
+    wrapped = adapter.wrap(("/usr/bin/true",), tmp_path)
+    profile = wrapped[2]
+
+    assert adapter.identity == "macos-sandbox-exec-toolchain-v2"
+    assert "sysctl_read_hw_pagesize_compat" in adapter.capabilities
+    assert profile.count("(allow sysctl-read") == 1
+    assert '(allow sysctl-read (sysctl-name "hw.pagesize_compat"))' in profile
+    assert "(allow sysctl-read)" not in profile
+    assert "hw.optional" not in profile
+    assert "(allow network" not in profile
+    assert profile.count("(allow file-write*") == 1
+    assert f"(allow file-write* (subpath {json.dumps(str(tmp_path))}))" in profile
+
+
+def test_policy_version_invalidates_approval_and_attribution_identity(
+    tmp_path: Path,
+) -> None:
+    class VersionedAdapter:
+        capabilities = ()
+
+        def __init__(self, identity: str) -> None:
+            self.identity = identity
+
+        def available(self) -> bool:
+            return True
+
+        def wrap(self, argv: tuple[str, ...], workspace: Path) -> tuple[str, ...]:
+            return argv
+
+    policy = ExecutionIsolationPolicy(ExecutionIsolationMode.STRICT)
+    command = ProjectCommand((sys.executable, "-c", "pass"), 5)
+    old = ProjectCommandTool(
+        "test", command, policy, VersionedAdapter("macos-sandbox-exec-v1")
+    ).prepare(ExecutionContext(tmp_path))
+    current_tool = ProjectCommandTool(
+        "test",
+        command,
+        policy,
+        VersionedAdapter("macos-sandbox-exec-toolchain-v2"),
+    )
+    current = current_tool.prepare(ExecutionContext(tmp_path))
+
+    assert old != current
+    assert command_identity(old) != command_identity(current)
+
+    executor = ToolExecutor(
+        ToolRegistry((current_tool,)),
+        RuleBasedPolicy({"project.test": PermissionDecision.ASK}),
+    )
+    invocation = ToolInvocation("stale-policy", "project.test", {})
+    result = executor.execute(
+        invocation,
+        ExecutionContext(tmp_path, prepared_project_command=old),
+        approval=InvocationApproval.for_invocation(invocation),
+    )
+    assert result.status is ToolResultStatus.FAILURE
+    assert result.output["outcome"] == "prepared_command_changed"
 
 
 def test_approval_snapshot_rejects_policy_change(tmp_path: Path) -> None:
