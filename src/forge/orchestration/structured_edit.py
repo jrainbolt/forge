@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -13,6 +14,7 @@ from forge.tools.paths import WorkspacePathError, resolve_workspace_write_path
 MAX_EDIT_TEXT_BYTES = 16 * 1024
 MAX_EDIT_TOTAL_BYTES = 24 * 1024
 MAX_EDIT_LINES = 200
+MAX_GROUPED_FILES = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +34,16 @@ class LineRangeEditProposal:
     new_text: str
 
 
+@dataclass(frozen=True, slots=True)
+class MultiFileStructuredEditProposal:
+    edits: tuple[StructuredEditProposal, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MultiFileLineRangeEditProposal:
+    edits: tuple[LineRangeEditProposal, ...]
+
+
 class StructuredEditFailure(Enum):
     NO_OP_EDIT = "no_op_edit"
     MATERIALIZED_NO_DELTA = "materialized_no_delta"
@@ -43,6 +55,8 @@ class StructuredEditFailure(Enum):
     TOO_LARGE = "too_large"
     INVALID_ENCODING = "invalid_encoding"
     MATERIALIZATION_FAILED = "materialization_failed"
+    DUPLICATE_PATH = "duplicate_path"
+    GROUP_BOUNDS = "group_bounds"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +69,81 @@ class StructuredEditValidation:
     @property
     def valid(self) -> bool:
         return self.failure is None and self.arguments is not None
+
+
+@dataclass(frozen=True, slots=True)
+class MultiFileEditValidation:
+    failure: StructuredEditFailure | None
+    arguments: dict[str, object] | None = None
+    ranges: tuple[tuple[str, int, int], ...] = ()
+    failed_path: str | None = None
+
+    @property
+    def valid(self) -> bool:
+        return self.failure is None and self.arguments is not None
+
+
+def validate_multi_file_structured_edit(
+    proposal: MultiFileStructuredEditProposal,
+    candidates: tuple[MutationCandidate, ...],
+    workspace: Path,
+    generation: int,
+) -> MultiFileEditValidation:
+    return _validate_group(proposal.edits, candidates, workspace, generation, False)
+
+
+def validate_multi_file_line_range_edit(
+    proposal: MultiFileLineRangeEditProposal,
+    candidates: tuple[MutationCandidate, ...],
+    workspace: Path,
+    generation: int,
+) -> MultiFileEditValidation:
+    return _validate_group(proposal.edits, candidates, workspace, generation, True)
+
+
+def _validate_group(
+    edits: tuple[StructuredEditProposal, ...] | tuple[LineRangeEditProposal, ...],
+    candidates: tuple[MutationCandidate, ...],
+    workspace: Path,
+    generation: int,
+    line_range: bool,
+) -> MultiFileEditValidation:
+    """Validate and materialize every child before producing one tool invocation."""
+    if not 2 <= len(edits) <= MAX_GROUPED_FILES:
+        return MultiFileEditValidation(StructuredEditFailure.GROUP_BOUNDS)
+    paths = [edit.path for edit in edits]
+    if len(paths) != len(set(paths)):
+        return MultiFileEditValidation(StructuredEditFailure.DUPLICATE_PATH)
+    patches: list[dict[str, object]] = []
+    ranges: list[tuple[str, int, int]] = []
+    for edit in sorted(edits, key=lambda item: item.path):
+        validation = (
+            validate_line_range_edit(edit, candidates, workspace, generation)  # type: ignore[arg-type]
+            if line_range
+            else validate_structured_edit(edit, candidates, workspace, generation)  # type: ignore[arg-type]
+        )
+        if not validation.valid:
+            return MultiFileEditValidation(validation.failure, failed_path=edit.path)
+        assert validation.arguments is not None
+        assert validation.start_line is not None and validation.end_line is not None
+        patches.append(validation.arguments)
+        ranges.append((edit.path, validation.start_line, validation.end_line))
+    identity_payload = {
+        "workspace_generation": generation,
+        "patches": patches,
+    }
+    group_id = hashlib.sha256(
+        json.dumps(identity_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return MultiFileEditValidation(
+        None,
+        {
+            "group_id": group_id,
+            "workspace_generation": generation,
+            "patches": patches,
+        },
+        tuple(ranges),
+    )
 
 
 def validate_structured_edit(

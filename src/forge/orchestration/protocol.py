@@ -76,6 +76,53 @@ LINE_RANGE_EDIT_SCHEMA = {
     "required": ["type", "path", "start_line", "end_line", "new_text"],
     "additionalProperties": False,
 }
+MULTI_FILE_STRUCTURED_EDIT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"const": "multi_file_structured_edit"},
+        "edits": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 4,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "old_text": {"type": "string"},
+                    "new_text": {"type": "string"},
+                },
+                "required": ["path", "old_text", "new_text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["type", "edits"],
+    "additionalProperties": False,
+}
+MULTI_FILE_LINE_RANGE_EDIT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"const": "multi_file_line_range_edit"},
+        "edits": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 4,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "start_line": {"type": "integer", "minimum": 1},
+                    "end_line": {"type": "integer", "minimum": 1},
+                    "new_text": {"type": "string"},
+                },
+                "required": ["path", "start_line", "end_line", "new_text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["type", "edits"],
+    "additionalProperties": False,
+}
 REPOSITORY_RESPONSE_SCHEMA = {
     "oneOf": [
         TOOL_CALL_SCHEMA,
@@ -169,6 +216,36 @@ def build_repository_output(
                         "minItems": 1,
                     }
                 )
+            elif argument.value_type is ArgumentType.MULTI_FILE_PATCHES:
+                property_schema.update(
+                    {
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string"},
+                                "expected_sha256": {"type": "string"},
+                                "edits": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "maxItems": 1,
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "old": {"type": "string"},
+                                            "new": {"type": "string"},
+                                        },
+                                        "required": ["old", "new"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                            },
+                            "required": ["path", "expected_sha256", "edits"],
+                            "additionalProperties": False,
+                        },
+                        "minItems": 2,
+                        "maxItems": 4,
+                    }
+                )
             if argument.name == "path":
                 if metadata.name in {
                     "repository.file_outline",
@@ -246,6 +323,8 @@ def _json_schema_type(argument_type: ArgumentType) -> str:
         return "boolean"
     if argument_type is ArgumentType.TEXT_EDITS:
         return "array"
+    if argument_type is ArgumentType.MULTI_FILE_PATCHES:
+        return "array"
     raise TypeError("unsupported argument type")
 
 
@@ -258,6 +337,8 @@ class ToolCallOutcome(Enum):
     TOOL_CALL = "tool_call"
     STRUCTURED_EDIT = "structured_edit"
     LINE_RANGE_EDIT = "line_range_edit"
+    MULTI_FILE_STRUCTURED_EDIT = "multi_file_structured_edit"
+    MULTI_FILE_LINE_RANGE_EDIT = "multi_file_line_range_edit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +368,8 @@ class ParsedModelOutput:
     tool_call: ToolCall | None = None
     structured_edit: Mapping[str, str] | None = None
     line_range_edit: Mapping[str, object] | None = None
+    multi_file_structured_edit: tuple[Mapping[str, str], ...] | None = None
+    multi_file_line_range_edit: tuple[Mapping[str, object], ...] | None = None
 
     def __post_init__(self) -> None:
         if self.outcome is ToolCallOutcome.FINAL:
@@ -316,6 +399,12 @@ class ParsedModelOutput:
                 or self.structured_edit
             ):
                 raise ValueError("line-range output must contain only one edit")
+        elif self.outcome is ToolCallOutcome.MULTI_FILE_STRUCTURED_EDIT:
+            if self.multi_file_structured_edit is None:
+                raise ValueError("multi-file structured output requires edits")
+        elif self.outcome is ToolCallOutcome.MULTI_FILE_LINE_RANGE_EDIT:
+            if self.multi_file_line_range_edit is None:
+                raise ValueError("multi-file line-range output requires edits")
         else:
             raise TypeError("outcome must be a ToolCallOutcome")
 
@@ -395,10 +484,50 @@ def parse_model_output(text: str) -> ParsedModelOutput:
             ToolCallOutcome.LINE_RANGE_EDIT,
             line_range_edit=MappingProxyType(edit),
         )
+    if response_type == "multi_file_structured_edit":
+        edits = _multi_edits(payload, {"path", "old_text", "new_text"})
+        if not all(
+            all(isinstance(value, str) for value in edit.values()) for edit in edits
+        ):
+            raise ProtocolError("multi-file structured edit fields must be text")
+        return ParsedModelOutput(
+            ToolCallOutcome.MULTI_FILE_STRUCTURED_EDIT,
+            multi_file_structured_edit=tuple(MappingProxyType(edit) for edit in edits),
+        )
+    if response_type == "multi_file_line_range_edit":
+        edits = _multi_edits(payload, {"path", "start_line", "end_line", "new_text"})
+        for edit in edits:
+            if not isinstance(edit["path"], str) or not isinstance(
+                edit["new_text"], str
+            ):
+                raise ProtocolError("multi-file line-range text fields are invalid")
+            for bound in (edit["start_line"], edit["end_line"]):
+                if isinstance(bound, bool) or not isinstance(bound, int):
+                    raise ProtocolError("multi-file line-range bounds must be integers")
+        return ParsedModelOutput(
+            ToolCallOutcome.MULTI_FILE_LINE_RANGE_EDIT,
+            multi_file_line_range_edit=tuple(MappingProxyType(edit) for edit in edits),
+        )
     raise ProtocolError(
         "model response type must be tool_call, structured_edit, line_range_edit, "
-        "or final"
+        "multi_file_structured_edit, multi_file_line_range_edit, or final"
     )
+
+
+def _multi_edits(
+    payload: dict[str, object], fields: set[str]
+) -> list[dict[str, object]]:
+    if set(payload) != {"type", "edits"}:
+        raise ProtocolError("multi-file edit must contain exactly type and edits")
+    raw = payload["edits"]
+    if not isinstance(raw, list) or not (2 <= len(raw) <= 4):
+        raise ProtocolError("multi-file edit requires between 2 and 4 edits")
+    edits: list[dict[str, object]] = []
+    for item in raw:
+        if not isinstance(item, dict) or set(item) != fields:
+            raise ProtocolError("multi-file child edit has invalid fields")
+        edits.append(dict(item))
+    return edits
 
 
 def build_mutation_ready_output(
@@ -409,16 +538,36 @@ def build_mutation_ready_output(
     ),
     allow_targeted_reread: bool = False,
     reread_schema: dict[str, object] | None = None,
+    allow_single_file_subset: bool = False,
 ) -> OutputSpecification:
     """Require one candidate-bound configured mutation representation."""
+    grouped = len(candidate_paths) > 1
     source_schema = (
-        LINE_RANGE_EDIT_SCHEMA
+        MULTI_FILE_LINE_RANGE_EDIT_SCHEMA
+        if grouped and representation is MutationRepresentationPolicy.LINE_RANGE
+        else MULTI_FILE_STRUCTURED_EDIT_SCHEMA
+        if grouped
+        else LINE_RANGE_EDIT_SCHEMA
         if representation is MutationRepresentationPolicy.LINE_RANGE
         else STRUCTURED_EDIT_SCHEMA
     )
     edit = json.loads(json.dumps(source_schema))
-    edit["properties"]["path"]["enum"] = sorted(candidate_paths)
+    if grouped:
+        edit["properties"]["edits"]["items"]["properties"]["path"]["enum"] = sorted(
+            candidate_paths
+        )
+    else:
+        edit["properties"]["path"]["enum"] = sorted(candidate_paths)
     branches = [edit]
+    if grouped and allow_single_file_subset:
+        single_source = (
+            LINE_RANGE_EDIT_SCHEMA
+            if representation is MutationRepresentationPolicy.LINE_RANGE
+            else STRUCTURED_EDIT_SCHEMA
+        )
+        single = json.loads(json.dumps(single_source))
+        single["properties"]["path"]["enum"] = sorted(candidate_paths)
+        branches.append(single)
     if allow_targeted_reread and reread_schema is not None:
         branches.append(reread_schema)
     branches.append(FINAL_SCHEMA)

@@ -23,6 +23,7 @@ class ArgumentType(Enum):
     INTEGER = "integer"
     BOOLEAN = "boolean"
     TEXT_EDITS = "text_edits"
+    MULTI_FILE_PATCHES = "multi_file_patches"
 
 
 class ToolResultStatus(Enum):
@@ -287,6 +288,23 @@ def _matches_type(value: object, value_type: ArgumentType) -> bool:
             and isinstance(edit["new"], str)
             for edit in value
         )
+    if value_type is ArgumentType.MULTI_FILE_PATCHES:
+        return isinstance(value, (list, tuple)) and all(
+            isinstance(patch, Mapping)
+            and set(patch) == {"path", "expected_sha256", "edits"}
+            and isinstance(patch["path"], str)
+            and isinstance(patch["expected_sha256"], str)
+            and isinstance(patch["edits"], (list, tuple))
+            and len(patch["edits"]) == 1
+            and all(
+                isinstance(edit, Mapping)
+                and set(edit) == {"old", "new"}
+                and isinstance(edit["old"], str)
+                and isinstance(edit["new"], str)
+                for edit in patch["edits"]
+            )
+            for patch in value
+        )
     return False
 
 
@@ -294,6 +312,9 @@ def _freeze_argument(value: object, value_type: ArgumentType) -> object:
     if value_type is ArgumentType.TEXT_EDITS:
         assert isinstance(value, (list, tuple))
         return tuple(MappingProxyType(dict(edit)) for edit in value)
+    if value_type is ArgumentType.MULTI_FILE_PATCHES:
+        assert isinstance(value, (list, tuple))
+        return tuple(freeze_structured_value(patch) for patch in value)
     return value
 
 

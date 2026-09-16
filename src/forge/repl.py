@@ -11,7 +11,12 @@ from forge.orchestration import (
     RepositoryResponse,
 )
 from forge.session import ChatSession
-from forge.tools import MutationPreview, PreparedProjectCommand, ToolInvocation
+from forge.tools import (
+    MultiFileMutationPreview,
+    MutationPreview,
+    PreparedProjectCommand,
+    ToolInvocation,
+)
 
 InputFunction = Callable[[str], str]
 OutputFunction = Callable[[str], None]
@@ -200,12 +205,23 @@ def _approval_prompt(
     input_fn: InputFunction,
     output_fn: OutputFunction,
     cancel_on_interrupt: bool = False,
-) -> Callable[[ToolInvocation, MutationPreview | PreparedProjectCommand], bool]:
+) -> Callable[
+    [
+        ToolInvocation,
+        MutationPreview | MultiFileMutationPreview | PreparedProjectCommand,
+    ],
+    bool,
+]:
     def approve(
         invocation: ToolInvocation,
-        preview: MutationPreview | PreparedProjectCommand,
+        preview: MutationPreview | MultiFileMutationPreview | PreparedProjectCommand,
     ) -> bool:
-        if isinstance(preview, MutationPreview):
+        if isinstance(preview, MultiFileMutationPreview):
+            output_fn(f"[proposed] {invocation.tool_name}: {preview.proposal_identity}")
+            output_fn(preview.diff)
+            prompt = "Approve grouped write? [y/N] "
+            rejection = "Grouped write rejected."
+        elif isinstance(preview, MutationPreview):
             output_fn(f"[proposed] {invocation.tool_name}: {preview.path}")
             output_fn(preview.diff)
             prompt = "Approve? [y/N] "

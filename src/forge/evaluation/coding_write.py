@@ -13,6 +13,7 @@ from forge.models import GenerationConfig, Model
 from forge.orchestration import CodingTaskStatus, RepositoryChatSession
 from forge.project_config import ProjectCommands
 from forge.tools import (
+    MultiFileMutationPreview,
     MutationPreview,
     PreparedProjectCommand,
     ToolInvocation,
@@ -23,7 +24,11 @@ from forge.tools import (
 CODING_WRITE_V1 = "coding-write-v1"
 CODING_WRITE_SUITE_VERSION = 1
 ApprovalCallback = Callable[
-    [ToolInvocation, MutationPreview | PreparedProjectCommand], bool
+    [
+        ToolInvocation,
+        MutationPreview | MultiFileMutationPreview | PreparedProjectCommand,
+    ],
+    bool,
 ]
 
 

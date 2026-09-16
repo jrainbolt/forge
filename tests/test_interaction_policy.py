@@ -36,6 +36,7 @@ EXPECTED_CAPABILITIES = {
     "repository.read_range": ToolCapability.READ,
     "repository.search_files": ToolCapability.READ,
     "repository.apply_patch": ToolCapability.WRITE,
+    "repository.apply_multi_patch": ToolCapability.WRITE,
     "repository.write_file": ToolCapability.WRITE,
     "project.configure": ToolCapability.CONFIGURE,
     "project.build": ToolCapability.BUILD,

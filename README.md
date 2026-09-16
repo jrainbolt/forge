@@ -214,6 +214,13 @@ approval prompt. Writes show their target and deterministic diff. Existing files
 require the SHA-256 returned by a current-turn read; approving one exact invocation
 never approves changed content or another path.
 
+For coordinated tasks, Forge can preview and approve one bounded edit across two
+to four trusted existing source files as one logical mutation. Every child edit and
+current hash is validated before any workspace replacement; a handled application
+failure restores files already replaced from retained original bytes. This is an
+application-level rollback guarantee, not a crash- or power-loss-proof filesystem
+transaction.
+
 `project.configure`, `project.build`, and `project.test` accept no model arguments. Their immutable argv
 arrays and timeouts come from the trusted local TOML configuration:
 

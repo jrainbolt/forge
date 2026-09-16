@@ -13,6 +13,7 @@ from forge.models import GenerationConfig, Model
 from forge.orchestration import AgentStopReason, RepositoryChatSession
 from forge.project_config import ProjectCommands
 from forge.tools import (
+    MultiFileMutationPreview,
     MutationPreview,
     PreparedProjectCommand,
     ToolInvocation,
@@ -23,7 +24,11 @@ from forge.tools import (
 AGENT_V1 = "agent-v1"
 AGENT_SUITE_VERSION = 1
 AgentApproval = Callable[
-    [ToolInvocation, MutationPreview | PreparedProjectCommand], bool
+    [
+        ToolInvocation,
+        MutationPreview | MultiFileMutationPreview | PreparedProjectCommand,
+    ],
+    bool,
 ]
 
 

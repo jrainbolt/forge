@@ -22,7 +22,11 @@ from forge.tools.repository_analysis import (
     FindSymbolTool,
     ReadRangeTool,
 )
-from forge.tools.repository_write import ApplyPatchTool, WriteFileTool
+from forge.tools.repository_write import (
+    ApplyPatchTool,
+    MultiFilePatchTool,
+    WriteFileTool,
+)
 from forge.tools.semantic import SemanticSearchTool
 from forge.tools.types import PermissionDecision
 
@@ -38,7 +42,11 @@ READ_ONLY_TOOL_NAMES = (
     "repository.search_files",
 )
 SEMANTIC_TOOL_NAME = "repository.semantic_search"
-WRITE_TOOL_NAMES = ("repository.apply_patch", "repository.write_file")
+WRITE_TOOL_NAMES = (
+    "repository.apply_multi_patch",
+    "repository.apply_patch",
+    "repository.write_file",
+)
 PROJECT_TOOL_NAMES = ("project.configure", "project.build", "project.test")
 
 
@@ -96,6 +104,7 @@ def create_assist_repository_registry(
         GitDiffTool(),
         WriteFileTool(),
         ApplyPatchTool(),
+        MultiFilePatchTool(),
         ProjectCommandTool(
             "configure", configured.configure, configured.execution_isolation
         ),
@@ -140,6 +149,7 @@ def create_repository_registry(
         GitDiffTool(),
         WriteFileTool(),
         ApplyPatchTool(),
+        MultiFilePatchTool(),
         ProjectCommandTool(
             "configure", configured.configure, configured.execution_isolation
         ),

@@ -50,10 +50,15 @@ from forge.orchestration.repository_session import (
 )
 from forge.orchestration.structured_edit import (
     LineRangeEditProposal,
+    MultiFileEditValidation,
+    MultiFileLineRangeEditProposal,
+    MultiFileStructuredEditProposal,
     StructuredEditFailure,
     StructuredEditProposal,
     StructuredEditValidation,
     validate_line_range_edit,
+    validate_multi_file_line_range_edit,
+    validate_multi_file_structured_edit,
     validate_structured_edit,
 )
 
@@ -80,6 +85,9 @@ __all__ = [
     "CodingTaskStatus",
     "MutationCandidate",
     "LineRangeEditProposal",
+    "MultiFileEditValidation",
+    "MultiFileLineRangeEditProposal",
+    "MultiFileStructuredEditProposal",
     "MutationRecord",
     "MutationTransitionMetrics",
     "RepairEvidence",
@@ -100,6 +108,8 @@ __all__ = [
     "VerificationGateMetrics",
     "validate_structured_edit",
     "validate_line_range_edit",
+    "validate_multi_file_line_range_edit",
+    "validate_multi_file_structured_edit",
     "VerificationDecision",
     "parse_model_output",
     "render_tool_definitions",

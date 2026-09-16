@@ -1871,3 +1871,28 @@ remain denied before and after acceptance. Policy versioning invalidates stale
 approvals and A36 baseline comparison. The deterministic suite remains explicitly
 fake-adapter contract evidence rather than real-platform evidence. A41 was not
 started.
+
+---
+
+# Milestone A41 — Atomic Multi-File Mutation v1
+
+**Status:** Implemented and accepted.
+
+Forge can now represent one coordinated exact-text or line-range mutation over two
+to four trusted existing source files. It prevalidates and materializes every child,
+canonicalizes paths, shows one immutable grouped preview, obtains one exact WRITE
+approval, rechecks all hashes, and applies one logical transaction. Detected
+application failure restores prior replacements from exact retained bytes; rollback
+failure produces a fatal workspace-integrity status and suppresses model continuation,
+repair, and verification. Success advances generation and mutation count once, then
+uses the unchanged trusted verification plan. Grouped repair remains within A13's
+two-mutation ceiling and cannot expand beyond primary paths.
+
+The `multi-file-mutation-v1` deterministic suite passes M01–M10 plus transaction
+edge cases. E08 is now faithfully representable as a coordinated `src/clock.c` and
+`tests/test_solar.c` line-range mutation. Its unchanged qwen-large acceptance attempt
+did not reach grouped readiness because the model failed to acquire the test source
+and reused a tool-call identifier; no mutation occurred. This is recorded as a
+model-quality/protocol limitation, not a transaction defect. A41 guarantees rollback
+for detected and handled failures, not crash- or power-loss atomicity. A42 was not
+started.

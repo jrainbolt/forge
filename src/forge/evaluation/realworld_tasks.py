@@ -141,10 +141,11 @@ def foundation_realworld_tasks() -> tuple[RealWorldTask, ...]:
             ("src/clock.c", "tests/test_solar.c"),
             allowed_paths=("src/clock.c", "tests/test_solar.c"),
             expected_changed_paths=("src/clock.c", "tests/test_solar.c"),
-            max_mutations=2,
-            unsupported_reason=(
-                "CAPABILITY GAP — multi-file atomic coding task unsupported by "
-                "the current non-repair mutation ceiling"
-            ),
+            configure_command=_CONFIGURE[0],
+            build_command=_BUILD,
+            test_command=_TEST,
+            oracle_commands=_ORACLE,
+            verification_plan=_VERIFICATION_PLAN,
+            max_mutations=1,
         ),
     )

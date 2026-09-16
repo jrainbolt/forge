@@ -1298,3 +1298,53 @@ checks passed query, compile, link, execution, and clean Foundation
 configure→build→test. Write regressions before and after acceptance allowed the
 workspace and denied sibling and disposable home-hierarchy writes. Strict remains
 fail-closed and `controlled_env` behavior is unchanged.
+
+## Atomic multi-file mutation
+
+A41 extends mutation-ready orchestration with representation-specific
+`multi_file_structured_edit` and `multi_file_line_range_edit` outcomes. A group
+contains one contiguous edit for each of two to four unique existing UTF-8 files.
+Single-file exact-text and line-range outcomes remain unchanged. Before exposing
+grouped authority, Forge requires current trusted source, hash, workspace generation,
+mutation-candidate authority, and an authorized observation range for every path.
+Candidate sources are independently delimited and, for line ranges, numbered in
+their own raw-file-local coordinate systems.
+
+Validation canonicalizes children by normalized path and independently reuses A28
+or A35 semantics. An unauthorized, duplicate, stale, out-of-range, ambiguous, or
+no-op child rejects the complete proposal before preview or write. All new file
+images and hashes are materialized before application. The immutable grouped preview
+contains the exact ordered paths, before/after hashes, diffs, generation, and a
+canonical proposal identity. One invocation-specific WRITE approval binds that
+complete group; a subset, superset, reordering with changed data, or changed result
+requires a new preview and approval.
+
+`repository.apply_multi_patch` is one ToolExecutor operation and converges each child
+through the existing exact patch materialization. It stages every result below the
+workspace-local generated `.forge-exec/transactions` area, preserves file modes,
+then rechecks every regular target and current hash before the first replacement.
+Replacement order is canonical. Success emits one grouped event with bounded child
+hash metadata, increments workspace generation once, and counts as one mutation.
+No create, delete, rename, directory, binary, Git, shell, package-install, or network
+authority is added.
+
+## Atomicity boundary
+
+A41 provides all-or-nothing behavior for validation failures and detected, handled
+application failures. If a later replacement fails, Forge restores every earlier
+replacement from retained exact original bytes, verifies those bytes and hashes, and
+returns failure without verification. If restoration fails, the task enters the
+distinct fatal workspace-integrity state: model execution, repair, and verification
+stop because the workspace may be inconsistent.
+
+Multiple filesystem renames cannot form a globally atomic filesystem transaction.
+A process kill, interpreter crash, kernel failure, or power loss during the
+replacement sequence can therefore leave incomplete state. A41 deliberately does
+not claim crash consistency or journaling; its guarantee is complete prevalidation
+plus rollback for failures Forge detects and handles.
+
+Grouped primary mutations use the existing A37/A38 verification plan. Under A13/A30
+repair, fresh trusted source may authorize a grouped repair or a single-file subset,
+but only among paths changed by the primary group. The repair remains one additional
+logical mutation, preserving the two-mutation ceiling and rerunning the complete
+verification plan from its first step.

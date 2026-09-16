@@ -55,8 +55,11 @@ from forge.tools.repository_analysis import (
 from forge.tools.repository_write import (
     MAX_WRITE_BYTES,
     ApplyPatchTool,
+    MultiFileMutationPreview,
+    MultiFilePatchTool,
     MutationPreview,
     WriteFileTool,
+    preview_multi_file_mutation,
     preview_repository_mutation,
 )
 from forge.tools.tool import Tool, ToolError
@@ -85,6 +88,7 @@ __all__ = [
     "ArgumentSpec",
     "ArgumentType",
     "ApplyPatchTool",
+    "MultiFilePatchTool",
     "DenyAllPolicy",
     "ExecutionContext",
     "InvocationApproval",
@@ -107,6 +111,7 @@ __all__ = [
     "MAX_SEARCH_RESULTS",
     "MAX_WRITE_BYTES",
     "MutationPreview",
+    "MultiFileMutationPreview",
     "PermissionDecision",
     "PermissionPolicy",
     "RuleBasedPolicy",
@@ -144,5 +149,6 @@ __all__ = [
     "resolve_workspace_path",
     "resolve_workspace_write_path",
     "preview_repository_mutation",
+    "preview_multi_file_mutation",
     "workspace_relative_path",
 ]

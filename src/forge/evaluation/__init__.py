@@ -108,6 +108,12 @@ from forge.evaluation.model_capability import (
     summarize_model,
     write_model_capability_json,
 )
+from forge.evaluation.multi_file_mutation import (
+    MULTI_FILE_MUTATION_V1,
+    MultiFileMutationCase,
+    MultiFileMutationRun,
+    run_multi_file_mutation_v1,
+)
 from forge.evaluation.mutation_transition import (
     MUTATION_TRANSITION_SUITE_VERSION,
     MUTATION_TRANSITION_V1,
@@ -461,6 +467,10 @@ __all__ = [
     "write_edit_representation_json",
     "run_finalization_v1",
     "run_line_range_mutation_v1",
+    "MULTI_FILE_MUTATION_V1",
+    "MultiFileMutationCase",
+    "MultiFileMutationRun",
+    "run_multi_file_mutation_v1",
     "run_mutation_transition_v1",
     "STRUCTURED_MUTATION_SUITE_VERSION",
     "STRUCTURED_MUTATION_V1",

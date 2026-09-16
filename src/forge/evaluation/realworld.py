@@ -29,6 +29,7 @@ from forge.project_config import ProjectCommand, ProjectCommands, VerificationPl
 from forge.repository_index import RepositoryIndex
 from forge.semantic_index import SemanticIndex
 from forge.tools import (
+    MultiFileMutationPreview,
     MutationPreview,
     PreparedProjectCommand,
     ToolInvocation,
@@ -185,6 +186,13 @@ class RealWorldMetrics:
     line_range_materialized: int = 0
     line_range_corrections: int = 0
     line_range_preview_created: int = 0
+    mutation_file_count: int = 0
+    mutation_group_id: str | None = None
+    mutation_group_validation_result: str = "not_run"
+    mutation_group_preview_created: int = 0
+    mutation_group_apply_result: str = "not_run"
+    mutation_group_rollback_attempted: bool = False
+    mutation_group_rollback_result: str = "not_run"
     structured_edit_recovery_used: bool = False
     actual_delta_proposed: bool = False
     preview_created: int = 0
@@ -407,6 +415,7 @@ class RealWorldEvaluationRunner:
                 mutation_representation=self._mutation_representation,
                 verification_baseline=self._verification_baseline,
                 verification_plan=commands.verification_plan,
+                minimum_source_files=max(1, len(task.expected_changed_paths)),
             )
             response = None
             coding_result = None
@@ -456,10 +465,12 @@ class ExpectedApproval:
     def __call__(
         self,
         _invocation: ToolInvocation,
-        preview: MutationPreview | PreparedProjectCommand,
+        preview: MutationPreview | MultiFileMutationPreview | PreparedProjectCommand,
     ) -> bool:
         approved = False
-        if isinstance(preview, MutationPreview):
+        if isinstance(preview, MultiFileMutationPreview):
+            approved = set(preview.paths).issubset(self.task.allowed_paths)
+        elif isinstance(preview, MutationPreview):
             approved = preview.path in self.task.allowed_paths
         elif isinstance(preview, PreparedProjectCommand):
             configured = getattr(self.commands, preview.operation, None)
@@ -718,6 +729,23 @@ def score_task_result(
         line_range_materialized=getattr(structured, "line_range_materialized", 0),
         line_range_corrections=getattr(structured, "line_range_corrections", 0),
         line_range_preview_created=getattr(structured, "line_range_preview_created", 0),
+        mutation_file_count=getattr(structured, "mutation_file_count", 0),
+        mutation_group_id=getattr(structured, "mutation_group_id", None),
+        mutation_group_validation_result=getattr(
+            structured, "mutation_group_validation_result", "not_run"
+        ),
+        mutation_group_preview_created=getattr(
+            structured, "mutation_group_preview_created", 0
+        ),
+        mutation_group_apply_result=getattr(
+            structured, "mutation_group_apply_result", "not_run"
+        ),
+        mutation_group_rollback_attempted=getattr(
+            structured, "mutation_group_rollback_attempted", False
+        ),
+        mutation_group_rollback_result=getattr(
+            structured, "mutation_group_rollback_result", "not_run"
+        ),
         structured_edit_recovery_used=getattr(structured, "corrections", 0) > 0,
         actual_delta_proposed=getattr(structured, "non_noop_proposals", 0) > 0,
         preview_created=getattr(structured, "materialized_previews", 0),

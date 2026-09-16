@@ -47,6 +47,7 @@ class CodingTaskStatus(Enum):
     REPAIR_UNVERIFIED = "repair_unverified"
     REPAIR_VERIFICATION_FAILED = "repair_verification_failed"
     REPAIR_FAILED = "repair_failed"
+    WORKSPACE_INTEGRITY_FAILED = "workspace_integrity_failed"
 
 
 class VerificationDecision(Enum):
@@ -105,6 +106,8 @@ class MutationRecord:
     generation: int
     start_line: int | None = None
     end_line: int | None = None
+    group_id: str | None = None
+    files: tuple[tuple[str, str | None, str | None], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +184,13 @@ class StructuredMutationMetrics:
     line_range_materialized: int = 0
     line_range_corrections: int = 0
     line_range_preview_created: int = 0
+    mutation_file_count: int = 0
+    mutation_group_id: str | None = None
+    mutation_group_validation_result: str = "not_run"
+    mutation_group_preview_created: int = 0
+    mutation_group_apply_result: str = "not_run"
+    mutation_group_rollback_attempted: bool = False
+    mutation_group_rollback_result: str = "not_run"
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,6 +316,7 @@ class CodingTaskState:
         self._plan_required_steps = 0
         self._plan_steps: list[tuple[str, VerificationRecord]] = []
         self._pending_mutation_range: tuple[int, int] | None = None
+        self._pending_mutation_ranges: tuple[tuple[str, int, int], ...] = ()
         self._repair_diagnostic_id: str | None = None
         self._mutation_ready_correction_used = False
         self._structured_edit_correction_used = False
@@ -554,6 +565,10 @@ class CodingTaskState:
             "materialized_previews": metrics.materialized_previews + 1,
             "approved_previews": metrics.approved_previews + (1 if approved else 0),
         }
+        if metrics.mutation_file_count > 1:
+            changes["mutation_group_preview_created"] = (
+                metrics.mutation_group_preview_created + 1
+            )
         if metrics.mutation_representation == "line_range":
             changes["line_range_preview_created"] = (
                 metrics.line_range_preview_created + 1
@@ -570,6 +585,40 @@ class CodingTaskState:
 
     def set_pending_mutation_range(self, start_line: int, end_line: int) -> None:
         self._pending_mutation_range = (start_line, end_line)
+
+    def set_pending_mutation_ranges(
+        self, ranges: tuple[tuple[str, int, int], ...]
+    ) -> None:
+        self._pending_mutation_ranges = ranges
+
+    def note_group_validation(
+        self, *, result: str, file_count: int, group_id: str | None = None
+    ) -> None:
+        self.structured_mutation_metrics = _structured_replace(
+            self.structured_mutation_metrics,
+            mutation_file_count=file_count,
+            mutation_group_id=group_id,
+            mutation_group_validation_result=result,
+        )
+
+    def note_group_apply(self, output: Mapping[str, object]) -> None:
+        self.structured_mutation_metrics = _structured_replace(
+            self.structured_mutation_metrics,
+            mutation_group_apply_result=str(
+                output.get("mutation_group_apply_result", "failed")
+            ),
+            mutation_group_rollback_attempted=(
+                output.get("mutation_group_rollback_attempted") is True
+            ),
+            mutation_group_rollback_result=str(
+                output.get("mutation_group_rollback_result", "not_run")
+            ),
+        )
+
+    def mutation_integrity_failed(self) -> None:
+        self.phase = CodingTaskPhase.FAILED
+        self._terminal_status = CodingTaskStatus.WORKSPACE_INTEGRITY_FAILED
+        self.repair_eligible = False
 
     def mutation_blocked_by_policy(self) -> None:
         if self.mutation_count or self.terminal:
@@ -657,12 +706,37 @@ class CodingTaskState:
         self.mutation_count += 1
         self.mutation_tool = tool
         path = output.get("path")
-        if isinstance(path, str):
-            self.changed_files.append(path)
+        paths_value = output.get("paths")
+        paths = (
+            tuple(item for item in paths_value if isinstance(item, str))
+            if isinstance(paths_value, (list, tuple))
+            else (path,)
+            if isinstance(path, str)
+            else ()
+        )
+        self.changed_files.extend(
+            item for item in paths if item not in self.changed_files
+        )
         old_hash = output.get("old_sha256")
         new_hash = output.get("new_sha256")
         self.old_sha256 = old_hash if isinstance(old_hash, str) else None
         self.new_sha256 = new_hash if isinstance(new_hash, str) else None
+        child_files: list[tuple[str, str | None, str | None]] = []
+        changes = output.get("changes")
+        if isinstance(changes, (list, tuple)):
+            for change in changes:
+                if isinstance(change, Mapping) and isinstance(change.get("path"), str):
+                    child_files.append(
+                        (
+                            str(change["path"]),
+                            str(change["old_sha256"])
+                            if isinstance(change.get("old_sha256"), str)
+                            else None,
+                            str(change["new_sha256"])
+                            if isinstance(change.get("new_sha256"), str)
+                            else None,
+                        )
+                    )
         self.mutations.append(
             MutationRecord(
                 tool,
@@ -676,9 +750,16 @@ class CodingTaskState:
                 self._pending_mutation_range[1]
                 if self._pending_mutation_range is not None
                 else None,
+                str(output["mutation_group_id"])
+                if isinstance(output.get("mutation_group_id"), str)
+                else None,
+                tuple(child_files),
             )
         )
         self._pending_mutation_range = None
+        self._pending_mutation_ranges = ()
+        if child_files:
+            self.note_group_apply(output)
         self.generation = generation
         self.build = _stale(self.build)
         self.test = _stale(self.test)
@@ -728,6 +809,12 @@ class CodingTaskState:
             or self._repair_diagnostic_id is None
             or generation != self.generation
             or self.phase is not CodingTaskPhase.DIAGNOSING
+        ):
+            return False
+        if (
+            self.mutations
+            and len(self.mutations[-1].files) > 1
+            and not set(self.changed_files).issubset(self.mutation_candidate_paths)
         ):
             return False
         self.repair_evidence = RepairEvidence(

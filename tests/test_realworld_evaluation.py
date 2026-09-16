@@ -57,7 +57,9 @@ def test_suite_is_versioned_bounded_and_records_seed_policy() -> None:
     assert [value.task_id for value in tasks] == [f"E0{i}" for i in range(1, 9)]
     assert all(value.seeds == (7, 42) for value in tasks[:3])
     assert all(value.seeds == (42,) for value in tasks[3:])
-    assert tasks[-1].unsupported_reason is not None
+    assert tasks[-1].unsupported_reason is None
+    assert tasks[-1].expected_changed_paths == ("src/clock.c", "tests/test_solar.c")
+    assert tasks[-1].max_mutations == 1
 
 
 def test_copy_isolated_from_canonical_and_omits_git(tmp_path: Path) -> None:

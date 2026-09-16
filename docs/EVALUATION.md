@@ -699,3 +699,39 @@ Foundation copy, strict configure, build, and test passed, Forge returned
 unchanged. Deterministic suite aggregate fields explicitly report fake-adapter
 contract scope and leave real-platform acceptance unset; real acceptance is
 reported only by the separate macOS run.
+
+## multi-file-mutation-v1
+
+A41 adds ten deterministic grouped-mutation scenarios. M01 and M02 cover two-file
+exact-text and line-range success. M03 and M05 reject an invalid or no-op child before
+preview/application, while M04 changes the second file after preview and proves the
+complete compare-before-write pass leaves the first untouched. M06 binds approval to
+the exact complete group. M07 injects failure on the second replacement and verifies
+exact-byte rollback, modes, generation, and cleanup. M08 injects rollback failure and
+requires the fatal workspace-integrity result. M09 runs normal post-group
+verification to `completed_verified`; M10 performs grouped primary mutation, failed
+verification, fresh reads, grouped repair, and successful reverification while
+counting two logical mutations rather than four file writes.
+
+Additional transaction tests cover deterministic path ordering, canonical proposal
+identity, the four-file ceiling, duplicate and unauthorized paths, symlink rejection,
+LF/CRLF/unterminated UTF-8 files, file-mode preservation, and temporary-state cleanup.
+These tests establish application-level rollback for handled failures; they do not
+claim crash- or power-loss consistency across several filesystem replacements.
+
+Foundation realworld-v1 E08 historically remained unsupported because its unchanged
+request requires one coordinated non-repair change to both `src/clock.c` and
+`tests/test_solar.c`, beyond the prior single-file mutation envelope. It requires no
+creation, deletion, rename, binary edit, or fifth file, so A41 now represents it with
+one two-file grouped line-range mutation and the existing configure→build→test plan.
+
+The qwen-large, seed-42, 8192-context acceptance was attempted unchanged on a
+disposable Foundation copy. Baseline verification passed and lexical bootstrap ran,
+but the model inspected `src/clock.c`, `src/power.c`, `src/simulation.c`, and
+`src/snapshot.c` without acquiring `tests/test_solar.c`; it then emitted a duplicate
+tool-call identifier. Forge consequently did not reach grouped MUTATION_READY or
+preview, made no mutation, and did not run post-mutation verification. The harness
+classified the run as model-quality/protocol failure. Its independent oracle passed
+only because the unchanged baseline already satisfies the oracle, not because Forge
+applied the requested grouped change. Transactional safety and schema constraints
+were not weakened or retried.
