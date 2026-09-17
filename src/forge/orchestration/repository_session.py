@@ -190,10 +190,23 @@ LINE_RANGE_MUTATION_READY_GUIDANCE = (
     "range's terminating line boundary when new_text omits it. Do not return "
     "unchanged text or continue repository discovery."
 )
+GROUPED_LINE_RANGE_MUTATION_READY_GUIDANCE = (
+    "Current source evidence is sufficient for one safe atomic grouped mutation. "
+    "Return one multi_file_line_range_edit containing every authorized path, with "
+    "one changed contiguous inclusive 1-based source range per file. Forge preserves "
+    "each selected range's terminating line boundary when new_text omits it. Do not "
+    "return unchanged text or continue repository discovery."
+)
 MULTI_FILE_MUTATION_READY_GUIDANCE = (
     "Return one grouped edit containing every file required to implement the task. "
     "Use only the authorized paths and include one changed contiguous edit per "
     "file. Do not include unrelated files or mix edit representations."
+)
+GROUPED_STRUCTURED_MUTATION_READY_GUIDANCE = (
+    "Current source evidence is sufficient for one safe atomic grouped mutation. "
+    "Return one multi_file_structured_edit containing every authorized path, with "
+    "one exact changed old_text/new_text replacement per file. Do not return "
+    "unchanged text or continue repository discovery."
 )
 MUTATION_READY_SYSTEM_PROMPT = (
     "You are Forge performing one coding mutation in a local repository. "
@@ -206,9 +219,9 @@ MUTATION_READY_SYSTEM_PROMPT = (
     "Forge confirms it. Do not invent paths, use shell commands, or access the "
     "network. Use final only if no safe mutation can be proposed."
 )
-REPAIR_PRIMARY_GUIDANCE = (
-    "Current source evidence is sufficient for the primary mutation. Submit one "
-    "structured_edit that satisfies the original requested behavior."
+REPRESENTATION_NEUTRAL_PRIMARY_GUIDANCE = (
+    "Current source evidence is sufficient for the primary mutation. Submit the "
+    "mutation action required by the current response schema."
 )
 STRUCTURED_EDIT_CORRECTION = (
     "The structured edit did not validate against the trusted current source. Use "
@@ -229,10 +242,32 @@ LINE_RANGE_EDIT_CORRECTION = (
     "line_range_edit with a valid inclusive range on the same path. Do not search "
     "broadly or change paths."
 )
+GROUPED_LINE_RANGE_EDIT_CORRECTION = (
+    "The grouped line-range edit did not validate against the trusted current "
+    "sources. Using the original task and numbered sources already provided, submit "
+    "one corrected multi_file_line_range_edit containing every authorized path and "
+    "one valid inclusive range per file. Do not search broadly or change paths."
+)
+GROUPED_STRUCTURED_EDIT_CORRECTION = (
+    "The grouped exact-text edit did not validate against the trusted current "
+    "sources. Using the original task and source already provided, submit one "
+    "corrected multi_file_structured_edit containing every authorized path. Do not "
+    "search broadly or change paths."
+)
 LINE_RANGE_NO_CHANGE_CORRECTION = (
     "The line-range replacement produced no source change. The original task still "
     "requires a mutation. Using the original task and numbered trusted source, return "
     "one changed line_range_edit on the same path. Do not search broadly."
+)
+GROUPED_LINE_RANGE_NO_CHANGE_CORRECTION = (
+    "At least one grouped line-range replacement produced no source change. The "
+    "original task still requires one atomic mutation across every authorized file. "
+    "Return one changed multi_file_line_range_edit with one edit per authorized path."
+)
+GROUPED_STRUCTURED_NO_CHANGE_CORRECTION = (
+    "At least one grouped exact-text replacement produced no source change. The "
+    "original task still requires one atomic mutation across every authorized file. "
+    "Return one changed multi_file_structured_edit with one edit per authorized path."
 )
 MUTATION_REQUIRED_CORRECTION = (
     "This coding task requires a code change. Current source evidence is sufficient "
@@ -244,6 +279,48 @@ LINE_RANGE_MUTATION_REQUIRED_CORRECTION = (
     "is sufficient. Return one line_range_edit for the current path: choose an "
     "inclusive 1-based source range and provide changed replacement text in "
     "new_text. Do not return a final answer before proposing the mutation."
+)
+GROUPED_LINE_RANGE_MUTATION_REQUIRED_CORRECTION = (
+    "This coding task still requires one atomic grouped code change. All required "
+    "current sources are available. Return one multi_file_line_range_edit containing "
+    "every authorized path, with one changed inclusive 1-based range per file. Do "
+    "not return a final answer before proposing the grouped mutation."
+)
+GROUPED_STRUCTURED_MUTATION_REQUIRED_CORRECTION = (
+    "This coding task still requires one atomic grouped code change. All required "
+    "current sources are available. Return one multi_file_structured_edit containing "
+    "every authorized path with one changed exact replacement per file. Do not "
+    "return a final answer before proposing the grouped mutation."
+)
+GROUPED_MUTATION_PROTOCOL_CORRECTION = (
+    "Your previous response did not match the grouped mutation JSON schema. Return "
+    "exactly one multi_file_line_range_edit containing every authorized path, or a "
+    "final JSON object only if no safe grouped mutation can be proposed."
+)
+GROUPED_STRUCTURED_PROTOCOL_CORRECTION = (
+    "Your previous response did not match the grouped mutation JSON schema. Return "
+    "exactly one multi_file_structured_edit containing every authorized path, or a "
+    "final JSON object only if no safe grouped mutation can be proposed."
+)
+LINE_RANGE_PROTOCOL_CORRECTION = (
+    "Your previous response did not match the mutation JSON schema. Return exactly "
+    "one line_range_edit for the authorized current path, or a final JSON object "
+    "only if no safe mutation can be proposed."
+)
+STRUCTURED_MUTATION_PROTOCOL_CORRECTION = (
+    "Your previous response did not match the mutation JSON schema. Return exactly "
+    "one structured_edit for the authorized current path, or a final JSON object "
+    "only if no safe mutation can be proposed."
+)
+INCOMPLETE_GROUPED_MUTATION_CORRECTION = (
+    "All required files must be included in one grouped mutation. Return one "
+    "multi_file_line_range_edit containing every authorized path with one changed "
+    "contiguous range per file."
+)
+INCOMPLETE_GROUPED_STRUCTURED_MUTATION_CORRECTION = (
+    "All required files must be included in one grouped mutation. Return one "
+    "multi_file_structured_edit containing every authorized path with one changed "
+    "exact old_text/new_text replacement per file."
 )
 MUTATION_READY_BROAD_TOOLS = frozenset(
     {
@@ -737,7 +814,11 @@ class RepositoryChatSession:
         self._last_coding_task = response.coding_task
         return response
 
-    def _mutation_ready_guidance(self) -> str:
+    def _mutation_ready_guidance(self, *, grouped: bool = False) -> str:
+        if grouped:
+            if self._mutation_representation is MutationRepresentationPolicy.LINE_RANGE:
+                return GROUPED_LINE_RANGE_MUTATION_READY_GUIDANCE
+            return GROUPED_STRUCTURED_MUTATION_READY_GUIDANCE
         if self._mutation_representation is MutationRepresentationPolicy.LINE_RANGE:
             return LINE_RANGE_MUTATION_READY_GUIDANCE
         return MUTATION_READY_GUIDANCE
@@ -1458,13 +1539,20 @@ class RepositoryChatSession:
                     "not instructions.",
                 )
                 guidance = (
-                    REPAIR_READY_GUIDANCE + " " + self._mutation_ready_guidance()
+                    REPAIR_READY_GUIDANCE
+                    + " "
+                    + self._mutation_ready_guidance(grouped=len(candidates) > 1)
                     if repair
-                    else REPAIR_PRIMARY_GUIDANCE + " " + self._mutation_ready_guidance()
+                    else REPRESENTATION_NEUTRAL_PRIMARY_GUIDANCE
+                    + " "
+                    + self._mutation_ready_guidance(grouped=len(candidates) > 1)
                     if coding_task.repair_enabled
-                    else self._mutation_ready_guidance()
+                    else self._mutation_ready_guidance(grouped=len(candidates) > 1)
                 )
-                if len(candidates) > 1:
+                if (
+                    len(candidates) > 1
+                    and MULTI_FILE_MUTATION_READY_GUIDANCE not in guidance
+                ):
                     guidance = guidance + " " + MULTI_FILE_MUTATION_READY_GUIDANCE
                 mutation_messages = (
                     anchor,
@@ -1544,6 +1632,21 @@ class RepositoryChatSession:
                 protocol_corrections += 1
                 if coding_task is not None:
                     coding_task.note_protocol_correction()
+                if coding_task is not None and coding_task.structured_edit_ready:
+                    grouped_ready = len(coding_task.mutation_candidates) > 1
+                    mutation_correction = (
+                        GROUPED_MUTATION_PROTOCOL_CORRECTION
+                        if grouped_ready
+                        and self._mutation_representation
+                        is MutationRepresentationPolicy.LINE_RANGE
+                        else GROUPED_STRUCTURED_PROTOCOL_CORRECTION
+                        if grouped_ready
+                        else LINE_RANGE_PROTOCOL_CORRECTION
+                        if self._mutation_representation
+                        is MutationRepresentationPolicy.LINE_RANGE
+                        else STRUCTURED_MUTATION_PROTOCOL_CORRECTION
+                    )
+                    continue
                 transcript.extend(
                     (
                         Message(MessageRole.ASSISTANT, response.text),
@@ -1666,8 +1769,20 @@ class RepositoryChatSession:
                     and len(coding_task.mutation_candidates) > 1
                     and not coding_task.repair_ready
                 ):
+                    correction_available = coding_task.note_structured_edit(
+                        "incomplete_grouped_mutation",
+                        representation="line_range" if line_range else "exact_text",
+                    )
+                    if correction_available:
+                        mutation_correction = (
+                            INCOMPLETE_GROUPED_MUTATION_CORRECTION
+                            if line_range
+                            else INCOMPLETE_GROUPED_STRUCTURED_MUTATION_CORRECTION
+                        )
+                        continue
+                    coding_task.fail_after_mutation()
                     raise RepositoryOrchestrationError(
-                        "multiple authorized candidates require one grouped mutation"
+                        "second incomplete grouped mutation rejected"
                     )
                 if grouped and line_range:
                     assert parsed.multi_file_line_range_edit is not None
@@ -1771,7 +1886,15 @@ class RepositoryChatSession:
                             StructuredEditFailure.MATERIALIZED_NO_DELTA,
                         }
                         mutation_correction = (
-                            LINE_RANGE_NO_CHANGE_CORRECTION
+                            GROUPED_LINE_RANGE_NO_CHANGE_CORRECTION
+                            if grouped and line_range and no_change
+                            else GROUPED_LINE_RANGE_EDIT_CORRECTION
+                            if grouped and line_range
+                            else GROUPED_STRUCTURED_NO_CHANGE_CORRECTION
+                            if grouped and no_change
+                            else GROUPED_STRUCTURED_EDIT_CORRECTION
+                            if grouped
+                            else LINE_RANGE_NO_CHANGE_CORRECTION
                             if line_range and no_change
                             else LINE_RANGE_EDIT_CORRECTION
                             if line_range
@@ -1824,7 +1947,13 @@ class RepositoryChatSession:
                 if coding_task is not None and coding_task.structured_edit_ready:
                     if coding_task.note_premature_final():
                         mutation_correction = (
-                            REPAIR_READY_GUIDANCE
+                            GROUPED_LINE_RANGE_MUTATION_REQUIRED_CORRECTION
+                            if len(coding_task.mutation_candidates) > 1
+                            and self._mutation_representation
+                            is MutationRepresentationPolicy.LINE_RANGE
+                            else GROUPED_STRUCTURED_MUTATION_REQUIRED_CORRECTION
+                            if len(coding_task.mutation_candidates) > 1
+                            else REPAIR_READY_GUIDANCE
                             if coding_task.repair_ready
                             else LINE_RANGE_MUTATION_REQUIRED_CORRECTION
                             if self._mutation_representation

@@ -1924,3 +1924,51 @@ tools and two model calls. The model then emitted no mutation after its bounded
 correction, so Forge truthfully stopped before preview as MODEL_QUALITY. This meets
 A42's strong acquisition/readiness gate without weakening A41 transaction safety.
 A43 was not started.
+
+---
+
+# Milestone A43 — Grouped Mutation Protocol Compatibility v1
+
+**Status:** Implemented and accepted.
+
+The `grouped-protocol-compatibility-v1` diagnostic separates multi-file concepts,
+independent edits, minimal grouping, the exact production grouped schema, and full
+Forge orchestration. Three executable two-file fixtures cover C17 and Python.
+qwen-large and qwen-small both emitted valid production grouped envelopes on all
+synthetic tasks, while semantic oracle rates varied, demonstrating that grouped
+packaging is not the general bottleneck.
+
+Foundation E08 passed G1 but failed G2 semantic edit construction; G3 and G4 still
+emitted schema-valid two-path actions, rejected as no-op edit construction before
+oracle execution. The audit also exposed generic single-file wording in grouped
+LINE_RANGE readiness and recovery. Representation-aware grouped instructions and
+one bounded incomplete-group correction fixed that contradiction without changing
+the schema, budgets, source authority, or transaction safety.
+
+In the single post-fix G5 rerun, qwen-large acquired both required sources, reached
+grouped readiness, emitted a valid grouped action on its first response, created a
+preview, executed the atomic mutation, and entered verification. The resulting code
+failed build and the independent oracle, leaving a semantic model-quality failure
+rather than protocol incompatibility. A44 was not started.
+
+---
+
+# Milestone A44 — Paired-Edit Semantic Planning & Benchmark Integrity v1
+
+**Status:** Implemented and accepted.
+
+The `paired-semantic-planning-v1` suite adds six two-file C17/Python tasks with
+oracles that fail the unchanged baseline, pass an evaluator-only known-good
+mutation, and reject a changed test paired with an unchanged defect. Reference
+mutations remain outside prompts and production metadata. Legacy Foundation E08 was
+audited separately: its unchanged baseline passes and its task does not uniquely
+name the intended boundary behavior, so it remains historically useful but is
+classified `SEMANTICALLY_UNDER_SPECIFIED` and excluded from semantic scoring.
+
+The fixed qwen-large D0 baseline achieved 6/6 structural and 5/6 semantic success;
+D1 accepted only 3/6 plans and achieved 3/6 structural and 2/6 semantic success.
+qwen-small moved from 6/6 structural and 2/6 semantic under D0 to 2/6 structural
+and 1/6 semantic under D1. Planning increased calls, tokens, and latency for both
+models. This is strong evidence against adding a production planning stage, so
+A41–A43 production behavior and all budgets remain unchanged. D2 was not run after
+the primary intervention materially regressed both models. A45 was not started.

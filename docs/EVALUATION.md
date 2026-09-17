@@ -765,3 +765,106 @@ model calls in 51.89 seconds. Compared with A41's seven tools, seven model calls
 sources, reached readiness, avoided an observed duplicate, and used five fewer tool
 and model calls. These timings and savings are observations from the two acceptance
 runs, not general guarantees.
+
+## grouped-protocol-compatibility-v1
+
+A43 separates five layers while holding seed 42, temperature zero, 8192 context,
+512 output tokens, task text, source bytes, and normalized source order constant.
+G1 asks only for a short implementation/test concept description. G2 uses two
+independent evaluator-owned line-range objects. G3 adds a minimal evaluation-only
+`edits` group. G4 calls the live `build_mutation_ready_output` function and parses
+the actual A41 `multi_file_line_range_edit` envelope. G5 runs unchanged production
+orchestration. No diagnostic edit is transformed into a production action.
+
+The three synthetic tasks coordinate exactly two existing files and use executable
+oracles: P01 compiles and runs a C17 boundary test; P02 and P03 run Python
+implementation/test pairs. qwen-large passed concepts on 3/3, produced valid targets
+on 3/3 G2 cases, and passed 2/3 G2, 2/3 G3, and 2/3 G4 oracles. All G3/G4 envelopes
+and path sets were valid. qwen-small also passed concepts and target construction on
+3/3; it passed 1/3 G2, 1/3 G3, and 2/3 G4 oracles. This shows grouped packaging and
+the production envelope are generally usable; semantic edit quality varies by task.
+
+For Foundation E08, G1 recognized both implementation and regression-test concepts.
+G2 produced two selectable material edits, but both conservative per-file semantic
+checks and the combined oracle failed. G3 and G4 each produced a schema-valid
+two-path grouped response without truncation, but A41 rejected a no-op child before
+oracle execution. G4 used 153 of 512 output tokens. Thus Foundation first loses at
+exact edit construction, not grouped packaging or the production schema.
+
+The production prompt audit nevertheless found a generic contradiction: grouped
+LINE_RANGE readiness and premature-final recovery still requested one single-file
+`line_range_edit`, and schema-error recovery could ask for a `tool_call` that the
+mutation-ready schema did not offer. After representation-aware grouped wording and
+bounded incomplete-group recovery were added, the one permitted G5 rerun emitted a
+valid two-file grouped action on its first response. Forge created the grouped
+preview, executed the atomic transaction, and entered verification. Build and the
+independent oracle failed, so Forge truthfully returned
+`mutated_verification_failed`. The mutation-ready generation used 4,858 input and
+198 output tokens and took 25.32 seconds; it was not truncated. The full-run elapsed
+value was not retained by the initial A43 result serializer and is reported as an
+instrumentation limitation rather than estimated.
+
+The A42 zero-context observation was a failure-path reporting gap, not an empty
+request: direct G1–G4 Foundation requests measured roughly 4,549–4,572 input tokens,
+and G5 measured 4,858 actual input tokens. After G5 completed far enough to return
+production metrics, its context peak was nonzero. Source presentation was complete:
+`src/clock.c` preceded `tests/test_solar.c`, each had an explicit path boundary and
+independent line numbering, and their numbered-source estimates were 774 and 3,962
+tokens respectively.
+
+## Benchmark integrity
+
+A semantic mutation result is score-eligible only when its evaluator-owned oracle
+fails the unchanged baseline and passes a known-good reference mutation. Reference
+source and oracle metadata never enter model prompts, candidate metadata, or source
+observations. A baseline-passing oracle is classified as non-discriminating and may
+still support architectural or protocol observations, but it cannot prove semantic
+success. The A44 fixtures also reject an obviously wrong mutation in which the test
+changes but the implementation defect remains.
+
+## paired-semantic-planning-v1
+
+A44 compares D0 direct grouped editing with D1 plan-then-grouped-edit for six paired
+implementation/test tasks in C17 and Python. Both conditions use seed 42,
+temperature zero, an 8192-token context, the live production grouped LINE_RANGE
+schema, and a 512-token edit allowance. D1 adds one 256-token call for a concise
+externally visible change contract; it does not request hidden reasoning and does
+not translate the plan into edits. Plans are limited to four required paths and are
+bound to the task, normalized required-path set, workspace generation, and source
+hashes. They grant no mutation authority.
+
+Every P01–P06 oracle failed its unchanged baseline, passed its evaluator-only
+reference mutation, and rejected a changed test paired with the broken
+implementation. P01–P03 retain the A43 source tasks; P04 covers a retry-count
+boundary, P05 a C parser-token maximum, and P06 a validation minimum.
+
+For qwen-large, D0 produced 6/6 structurally valid groups and 5/6 semantic passes.
+D1 accepted 3/6 plans, produced 3/6 structurally valid groups, and retained 2/6
+semantic passes. It used nine model calls, 2,635 input tokens, 1,419 output tokens,
+and 50.18 seconds, versus D0's six calls, 1,281 input tokens, 820 output tokens, and
+28.99 seconds. For qwen-small, D0 produced 6/6 structurally valid groups and 2/6
+semantic passes. D1 accepted 3/6 plans, produced 2/6 structurally valid groups, and
+passed 1/6 semantic oracles. It used nine calls, 2,876 input tokens, 1,268 output
+tokens, and 62.15 seconds, versus D0's six calls, 1,407 input tokens, 503 output
+tokens, and 26.44 seconds.
+
+Planning improved qwen-small P02 but regressed qwen-small P01 structurally and did
+not improve qwen-large on any task. P04–P06 plans missed required deterministic
+concepts for both models and therefore conferred no authority to proceed. The
+intervention is neither broadly beneficial nor structurally neutral, so A44 makes
+no production planning change. D2 was not run because D1 was already materially
+worse while adding cost; an additional call could not justify production adoption
+under the milestone standard.
+
+## Foundation E08 semantic integrity
+
+The unchanged Foundation E08 configure/build/test oracle passes the unchanged
+repository. Its task asks for "a clock boundary" and a corresponding source fix but
+does not identify which clock boundary or specify its intended behavior. The oracle
+only establishes that the project builds and existing tests pass; it does not
+establish either required semantic delta. E08 is therefore retained unchanged as a
+legacy architectural benchmark for multi-file acquisition, grouped readiness,
+protocol, transaction, and verification-path observations, but is classified
+`SEMANTICALLY_UNDER_SPECIFIED` and excluded from semantic success rates. No E08v2
+was created because doing so would require silently inventing task semantics, and
+no additional E08 model run was performed.

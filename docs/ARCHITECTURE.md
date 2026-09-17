@@ -1397,3 +1397,21 @@ existing bounded protocol correction, asking only for a new unique identifier. A
 second duplicate (or a duplicate after that correction allowance is spent) terminates
 as a protocol/model-quality failure. Forge never silently rewrites a model identifier;
 the same textual action with a different unique identifier remains legal.
+
+## Grouped mutation protocol continuity
+
+A43 keeps the A41 grouped schema and transaction boundary unchanged, but makes every
+mutation-ready instruction representation- and group-aware. A grouped LINE_RANGE
+request consistently names `multi_file_line_range_edit`, every authorized path, and
+one contiguous inclusive range per file. Exact-text grouped state names
+`multi_file_structured_edit` instead. Neither path reuses single-file wording.
+
+The same distinction applies to bounded recovery. A schema-invalid grouped response,
+an incomplete single-file response, a failed grouped validation, a grouped no-op,
+or a premature final receives at most the existing one correction, expressed in the
+active grouped representation. A single-file response in primary grouped state is
+classified as an incomplete grouped mutation and is never applied. The correction
+contains no semantic hint, range, replacement, or benchmark-specific path. A second
+invalid response terminates normally. A35 single-file behavior, A42 acquisition,
+and A41 validation, approval, atomic application, rollback, and integrity-failure
+semantics are unchanged.
