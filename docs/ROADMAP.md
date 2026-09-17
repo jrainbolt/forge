@@ -1972,3 +1972,29 @@ and 1/6 semantic under D1. Planning increased calls, tokens, and latency for bot
 models. This is strong evidence against adding a production planning stage, so
 A41–A43 production behavior and all budgets remain unchanged. D2 was not run after
 the primary intervention materially regressed both models. A45 was not started.
+
+---
+
+# Milestone A45 — Realistic Semantic Coding Benchmark v1
+
+**Status:** Implemented and accepted.
+
+`realistic-semantic-v1` freezes eight versioned maintenance tasks in a 36-file mixed
+Python/C17 repository. Four tasks exercise discovery and the production single-file
+path; four use legitimate task-named candidates and the production grouped path.
+Every task's unchanged post-setup baseline fails, its evaluator-only canonical
+reference passes, and a plausible wrong mutation fails. Hidden behavior and paired
+regression-sensitivity checks remain outside prompts, retrieval, and packaging.
+
+qwen-large produced identical results for seeds 42 and 43 at temperature zero:
+three paired tasks passed end-to-end, four single-file tasks reached readiness but
+failed edit construction, and one paired task failed protocol. qwen-small seed 42
+passed four semantic oracles; one was a verification-only failure, three repair
+attempts produced no recovery, and the remaining failures spanned verification,
+repair source reacquisition, and edit construction. Every cell reached mutation
+readiness and no primary discovery failure occurred.
+
+The results do not justify production planning, retrieval changes, larger context,
+new mutation formats, or more retries. They instead support an A46 alternative
+local coding-model benchmark because the dominant limitation is stable edit/protocol
+quality after successful discovery and source acquisition. A46 was not started.

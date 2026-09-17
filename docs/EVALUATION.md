@@ -868,3 +868,64 @@ protocol, transaction, and verification-path observations, but is classified
 `SEMANTICALLY_UNDER_SPECIFIED` and excluded from semantic success rates. No E08v2
 was created because doing so would require silently inventing task semantics, and
 no additional E08 model run was performed.
+
+## realistic-semantic-v1
+
+A45 adds a frozen, non-packaged mixed Python/C17 service-engine snapshot with 25
+non-test source/tool files, 10 tests, 436 source/test LOC, and 36 files overall.
+The repository includes retry, configuration, state, header validation, parsing,
+quota, window, status, storage, service, checksum, and clock code so relevant edits
+are surrounded by plausible adjacent implementation. Every model cell uses an
+independent disposable copy; the canonical snapshot identity is
+`99e6155e9350711bbcafcb72f6d401a76a58f56ecef1bd30a7f32ece559f37a5`.
+
+R01-v1 through R04-v1 are discovery-required single-file maintenance tasks covering
+retry accounting, configuration interpretation, complete-input parsing, and quota
+underflow. R05-v1 through R08-v1 are path-known paired implementation/regression
+tasks covering terminal state transitions, header validation, exclusive event
+limits, and error propagation. The paired paths are legitimate trusted task
+metadata and use unchanged A41–A43 grouped acquisition and atomic mutation. All
+tasks run unchanged production orchestration with LINE_RANGE, 8192 context,
+temperature zero, 512 output tokens, and the existing bounded repair opportunity.
+
+Integrity is established before model execution. Each post-setup baseline fails its
+evaluator-only semantic oracle, restoration from the canonical reference passes,
+and a plausible wrong mutation fails. Hidden behavior assertions are external to
+the workspace. Paired-task oracles additionally mutation-test the submitted
+regression against the known defect, allowing alternative correct implementations
+while rejecting tests that do not detect the behavior. Neither canonical reference
+bytes nor hidden assertions enter prompts, retrieval, candidate evidence, or the
+wheel.
+
+qwen-large ran all tasks at seeds 42 and 43. Results were identical at temperature
+zero: R05, R07, and R08 passed mutation, configured verification, and the semantic
+oracle; R01–R04 reached mutation readiness but emitted no valid edit; R06 failed the
+grouped protocol before preview. Thus each seed produced 3/8 first-pass and final
+semantic passes, with no repairs. The repeated result demonstrates stability but
+also stable failure rather than seed robustness.
+
+qwen-small ran seed 42 only as the cost-control matrix. R01, R04, R06, and R07
+passed the semantic oracle. R01, R04, and R07 also passed configured verification;
+R06 is a verification-only failure because the mutation passed the independent
+semantic oracle while project verification failed. R02 and R03 failed verification,
+R05 failed during repair-phase source reacquisition after a failed first mutation,
+and R08 failed edit construction. Three repairs were attempted and none succeeded.
+The result is 4/8 semantic passes, all attributable to the first mutation rather
+than repair.
+
+Across the 24 cells Forge reached mutation readiness every time and had no primary
+discovery failure. qwen-large used 32 recorded model calls and 418.38 seconds;
+qwen-small used 29 calls and 318.43 seconds. Average wall time was 30.70 seconds per
+cell. Successful/returned-result cells recorded at least 57,472 input and 5,102
+output tokens in aggregate. Existing failure-path usage reporting leaves token
+fields null for some pre-response and orchestration-error cells, so those token
+totals are explicit lower bounds rather than fabricated estimates.
+
+Structural and semantic evidence remains separate: a semantic pass requires an
+actual mutation plus independent-oracle PASS, while readiness, schema, preview,
+transaction, and verification are reported independently. First-pass and repaired
+success are also distinct. The dominant qwen-large limitation was edit construction
+and grouped protocol compliance rather than discovery; qwen-small showed more
+successful edit construction but costly unsuccessful repair and verification
+failures. This evidence favors an alternative local coding-model benchmark next,
+not new planning, retrieval, mutation, context, or retry architecture.
