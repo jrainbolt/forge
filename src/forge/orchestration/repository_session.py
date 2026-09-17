@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -59,6 +60,7 @@ from forge.orchestration.agent_task import (
     AgentTaskState,
 )
 from forge.orchestration.coding_task import (
+    CodingTaskPhase,
     CodingTaskResult,
     CodingTaskState,
     CodingTaskStatus,
@@ -259,6 +261,10 @@ PROTOCOL_CORRECTION = (
     "Your previous response did not match the Forge JSON response schema. Return "
     "exactly one valid tool_call or final JSON object and no other text."
 )
+DUPLICATE_TOOL_CALL_ID_CORRECTION = (
+    "Tool-call identifiers must be unique within this repository session. Return "
+    "the required next action with a new identifier. Do not repeat the prior ID."
+)
 EVIDENCE_CORRECTION = (
     "An implementation answer requires source content relevant to the exact question. "
     "Search again if needed, then read a relevant implementation file before final "
@@ -276,6 +282,12 @@ class RepositoryOrchestrationError(RuntimeError):
     """A repository-aware turn could not produce a safe final answer."""
 
 
+class DuplicateToolCallIdError(RepositoryOrchestrationError):
+    """A model reused an executed session-local protocol correlation ID."""
+
+    classification = "DUPLICATE_TOOL_CALL_ID"
+
+
 @dataclass(frozen=True, slots=True)
 class ToolActivity:
     invocation_id: str
@@ -289,6 +301,7 @@ class ToolActivity:
     current_verification: bool = False
     returned_bytes: int | None = None
     returned_lines: int | None = None
+    acquisition_origin: str = "model_requested"
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,6 +384,7 @@ class RepositoryChatSession:
         max_repeated_calls: int = DEFAULT_MAX_REPEATED_CALLS,
         max_no_progress: int = DEFAULT_MAX_NO_PROGRESS_CYCLES,
         minimum_source_files: int | None = None,
+        required_candidate_paths: tuple[str, ...] = (),
         require_relevant_source: bool = True,
         require_mutation_relevance: bool | None = None,
         skip_verification: bool = False,
@@ -448,6 +462,14 @@ class RepositoryChatSession:
             or minimum_source_files <= 0
         ):
             raise ValueError("minimum_source_files must be positive or None")
+        required_candidate_paths = tuple(sorted(set(required_candidate_paths)))
+        if len(required_candidate_paths) > 4 or any(
+            not path or Path(path).is_absolute() or ".." in Path(path).parts
+            for path in required_candidate_paths
+        ):
+            raise ValueError(
+                "required_candidate_paths must contain at most four confined paths"
+            )
         if not isinstance(require_relevant_source, bool):
             raise TypeError("require_relevant_source must be a Boolean")
         if require_mutation_relevance is not None and not isinstance(
@@ -549,6 +571,7 @@ class RepositoryChatSession:
         self._max_repeated_calls = max_repeated_calls
         self._max_no_progress = max_no_progress
         self._minimum_source_files = minimum_source_files
+        self._required_candidate_paths = required_candidate_paths
         self._require_relevant_source = require_relevant_source
         self._require_mutation_relevance = (
             require_relevant_source
@@ -574,6 +597,7 @@ class RepositoryChatSession:
         self._active_agent_task: AgentTaskState | None = None
         self._last_agent_task: AgentTaskResult | None = None
         self._agent_stop_hint: AgentStopReason | None = None
+        self._model_invocation_ids: set[str] = set()
         LOGGER.info(
             "Repository session policy mode=%s permissions=%s tools=%d",
             self._mode.value,
@@ -697,6 +721,10 @@ class RepositoryChatSession:
             ),
             mutation_representation=self._mutation_representation.value,
         )
+        if self._required_candidate_paths:
+            self._active_coding_task.establish_required_candidates(
+                self._required_candidate_paths
+            )
         self._last_coding_task = None
         try:
             response = self._ask(user_text)
@@ -753,7 +781,6 @@ class RepositoryChatSession:
             reserved_output=self._generation.max_tokens,
         )
         activities: list[ToolActivity] = []
-        invocation_ids: set[str] = set()
         call_counts: dict[str, int] = {}
         protocol_corrections = 0
         verification_corrections = 0
@@ -788,6 +815,189 @@ class RepositoryChatSession:
             user_text
         )
         estimator = ConservativeTokenEstimator()
+
+        def acquire_required_sources() -> None:
+            if (
+                coding_task is None
+                or not coding_task.required_candidate_paths
+                or coding_task.terminal
+                or coding_task.phase
+                not in {CodingTaskPhase.INSPECTING, CodingTaskPhase.DIAGNOSING}
+            ):
+                return
+            missing = tuple(
+                sorted(
+                    coding_task.missing_required_candidates,
+                    key=lambda item: item.path,
+                )
+            )
+            if not missing:
+                return
+            verification_reserve = (
+                len(self._verification_plan.steps)
+                if self._verification_plan is not None and not self._skip_verification
+                else 1
+                if _has_configured_verification(self._registry)
+                and not self._skip_verification
+                else 0
+            )
+            mutation_reserve = 1
+            if (
+                len(activities) + len(missing) + mutation_reserve + verification_reserve
+                > self._max_tool_executions
+            ):
+                coding_task.note_source_acquisition_failure()
+                coding_task.mutation_blocked_by_policy()
+                raise RepositoryOrchestrationError(
+                    "required source acquisition blocked by reserved tool budget"
+                )
+            registered_tools = {item.name for item in self._registry.metadata}
+            if "repository.read_file" not in registered_tools:
+                coding_task.note_source_acquisition_failure()
+                coding_task.mutation_blocked_by_policy()
+                raise RepositoryOrchestrationError(
+                    "required source acquisition tool is unavailable"
+                )
+            for index, candidate in enumerate(missing):
+                if not coding_task.begin_source_acquisition(candidate.path):
+                    coding_task.note_source_acquisition_failure()
+                    coding_task.mutation_blocked_by_policy()
+                    raise RepositoryOrchestrationError(
+                        "required source acquisition attempt limit exceeded"
+                    )
+                invocation = ToolInvocation(
+                    f"forge-required-source-{self._mutation_generation}-{index}",
+                    "repository.read_file",
+                    {"path": candidate.path},
+                )
+                LOGGER.info(
+                    "required_source_acquisition_started path=%s generation=%d",
+                    candidate.path,
+                    self._mutation_generation,
+                )
+                started = time.perf_counter()
+                result = self._executor.execute(invocation, self._context)
+                duration = time.perf_counter() - started
+                coding_task.record_tool(invocation.tool_name)
+                if agent_task is not None:
+                    agent_task.tool_requested()
+                evidence = _tool_evidence(
+                    self._registry, invocation.tool_name, invocation.arguments
+                )
+                activity = ToolActivity(
+                    invocation.invocation_id,
+                    invocation.tool_name,
+                    result.status.value,
+                    evidence.value,
+                    True,
+                    candidate.path,
+                    generation=self._mutation_generation,
+                    returned_bytes=_output_integer(result, "size_bytes"),
+                    returned_lines=_returned_lines(result),
+                    acquisition_origin="orchestrator_required",
+                )
+                activities.append(activity)
+                if self._activity_callback is not None:
+                    self._activity_callback(activity)
+                context_planner.register(
+                    assistant_text=json.dumps(
+                        {
+                            "type": "required_source_acquisition",
+                            "path": candidate.path,
+                        },
+                        sort_keys=True,
+                    ),
+                    rendered_result=render_tool_result(result, evidence),
+                    result=result,
+                    evidence=evidence,
+                    arguments=invocation.arguments,
+                    generation=self._mutation_generation,
+                    assistant_role=MessageRole.SYSTEM,
+                )
+                transcript[:] = context_planner.active_messages
+                if (
+                    result.status is not ToolResultStatus.SUCCESS
+                    or not isinstance(result.output, Mapping)
+                    or not isinstance(result.output.get("sha256"), str)
+                ):
+                    coding_task.note_source_acquisition_failure()
+                    coding_task.mutation_blocked_by_policy()
+                    LOGGER.info(
+                        "required_source_failed path=%s status=%s",
+                        candidate.path,
+                        result.status.value,
+                    )
+                    raise RepositoryOrchestrationError(
+                        "required source acquisition failed before mutation readiness"
+                    )
+                source_hash = str(result.output["sha256"])
+                content = result.output.get("content")
+                file_lines = (
+                    len(content.splitlines()) if isinstance(content, str) else 0
+                )
+                start_line = 1 if file_lines else None
+                end_line = file_lines if file_lines else None
+                coding_task.note_source_acquired(
+                    candidate.path,
+                    source_hash,
+                    start_line=start_line,
+                    end_line=end_line,
+                    deterministic=True,
+                    duration_seconds=duration,
+                )
+                coding_task.consider_source(
+                    candidate.path,
+                    source_hash,
+                    self._mutation_generation,
+                    invocation.invocation_id,
+                    start_line=start_line,
+                    end_line=end_line,
+                )
+                observed_hashes[candidate.path] = source_hash
+                candidate_files.add(candidate.path)
+                active = coverage.active_goal
+                if active is not None:
+                    coverage.register_source(
+                        active.goal_id,
+                        candidate.path,
+                        self._mutation_generation,
+                        invocation.invocation_id,
+                    )
+                if coding_task.repair_eligible:
+                    coding_task.repair_source_refreshed(
+                        observation_id=invocation.invocation_id,
+                        path=candidate.path,
+                        generation=self._mutation_generation,
+                    )
+                LOGGER.info(
+                    "required_source_acquired path=%s generation=%d",
+                    candidate.path,
+                    self._mutation_generation,
+                )
+            if coding_task.phase is CodingTaskPhase.INSPECTING:
+                write_available = any(
+                    item.name == "repository.apply_patch"
+                    for item in self._registry.metadata
+                )
+                write_decision = self._executor.permission(
+                    ToolInvocation(
+                        "forge-mutation-permission-probe",
+                        "repository.apply_patch",
+                        {},
+                    ),
+                    self._context,
+                )
+                if not write_available or write_decision is PermissionDecision.DENY:
+                    coding_task.mutation_blocked_by_policy()
+                elif (
+                    coverage.complete or not coverage_required
+                ) and coding_task.enter_mutation_ready(len(activities)):
+                    LOGGER.info(
+                        "grouped_mutation_ready paths=%s generation=%d",
+                        coding_task.required_candidate_paths,
+                        self._mutation_generation,
+                    )
+
         if (
             coding_task is not None
             and self._verification_baseline
@@ -856,6 +1066,7 @@ class RepositoryChatSession:
                     tuple(plan_baseline_steps),
                 )
         for _step in range(self._max_steps):
+            acquire_required_sources()
             if agent_task is not None:
                 if agent_task.model_calls >= self._max_model_calls:
                     self._agent_stop_hint = AgentStopReason.MODEL_CALL_LIMIT
@@ -1331,10 +1542,41 @@ class RepositoryChatSession:
                 if protocol_corrections:
                     raise RepositoryOrchestrationError(str(error)) from error
                 protocol_corrections += 1
+                if coding_task is not None:
+                    coding_task.note_protocol_correction()
                 transcript.extend(
                     (
                         Message(MessageRole.ASSISTANT, response.text),
                         Message(MessageRole.USER, PROTOCOL_CORRECTION),
+                    )
+                )
+                continue
+            if (
+                parsed.outcome is ToolCallOutcome.TOOL_CALL
+                and parsed.tool_call is not None
+                and parsed.tool_call.invocation_id in self._model_invocation_ids
+            ):
+                if protocol_corrections:
+                    if coding_task is not None:
+                        coding_task.note_duplicate_tool_call_id(corrected=False)
+                    raise DuplicateToolCallIdError(
+                        "DUPLICATE_TOOL_CALL_ID protocol failure: duplicate "
+                        "identifier repeated after bounded correction"
+                    )
+                protocol_corrections += 1
+                if coding_task is not None:
+                    coding_task.note_duplicate_tool_call_id(corrected=True)
+                LOGGER.info(
+                    "duplicate_tool_call_rejected id=%s",
+                    parsed.tool_call.invocation_id,
+                )
+                transcript.extend(
+                    (
+                        Message(MessageRole.ASSISTANT, response.text),
+                        Message(
+                            MessageRole.USER,
+                            DUPLICATE_TOOL_CALL_ID_CORRECTION,
+                        ),
                     )
                 )
                 continue
@@ -1802,9 +2044,7 @@ class RepositoryChatSession:
                     )
                 )
                 continue
-            if call.invocation_id in invocation_ids:
-                raise RepositoryOrchestrationError("duplicate tool-call id within turn")
-            invocation_ids.add(call.invocation_id)
+            self._model_invocation_ids.add(call.invocation_id)
             signature = _call_signature(
                 call.tool_name,
                 call.arguments,
@@ -2079,6 +2319,15 @@ class RepositoryChatSession:
                             file_lines = len(content.splitlines())
                             actual_start = 1 if file_lines else None
                             actual_end = file_lines if file_lines else None
+                    coding_task.note_source_acquired(
+                        activity.path,
+                        source_hash,
+                        start_line=(
+                            actual_start if isinstance(actual_start, int) else None
+                        ),
+                        end_line=(actual_end if isinstance(actual_end, int) else None),
+                        deterministic=False,
+                    )
                     coding_task.consider_source(
                         activity.path,
                         source_hash,

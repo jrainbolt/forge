@@ -1348,3 +1348,52 @@ repair, fresh trusted source may authorize a grouped repair or a single-file sub
 but only among paths changed by the primary group. The repair remains one additional
 logical mutation, preserving the two-mutation ceiling and rerunning the complete
 verification plan from its first step.
+
+## Required source acquisition
+
+A42 separates discovery relevance from source authority. Once trusted orchestration
+has established a bounded required-candidate set for a mutation-capable task, Forge
+may acquire missing current source deterministically. Task metadata, evidence-goal
+coverage, or existing candidate-promotion rules may establish that set; lexical or
+semantic rank alone cannot. Evaluator scoring fields remain separate from production
+required-candidate metadata.
+
+Every acquisition invokes the existing `repository.read_file` operation through
+ToolRegistry and ToolExecutor. Workspace confinement, READ permission, bounded
+output, and the ordinary tool ceiling therefore remain authoritative. Acquisitions
+use normalized path order, attempt each candidate once per workspace generation, and
+cannot add an unlisted path. Source observations enter
+the same evidence and context structures as model-requested reads and bind path,
+authorized range, content hash, and workspace generation. A whole-file result that
+cannot be represented within existing bounds fails truthfully; A42 does not invent
+an authoritative range or silently truncate omitted source.
+
+The orchestration budget reserves remaining required reads, one mutation, and the
+configured verification-plan steps without raising any ceiling. Insufficient
+capacity, READ denial, confinement failure, or a missing path blocks readiness
+boundedly. Already-current source is not reread. Read-only tasks and mutation tasks
+without explicit required candidates retain their previous behavior.
+
+## Multi-file readiness
+
+Grouped MUTATION_READY requires current trusted source for every explicit required
+candidate, and its mutation-candidate set must match that required set exactly.
+Candidate currentness is invalidated by workspace-generation changes. After a
+primary mutation, repair may reacquire the original grouped paths deterministically
+before REPAIR_READY; it cannot expand repair authority. Required source has higher
+context priority than optional discovery prose, while duplicate observations of the
+same path, range, and generation remain subject to existing context deduplication.
+
+## Tool-call identity
+
+Model-supplied tool-call identifiers are correlation metadata, not authority. They
+must be unique for the lifetime of one `RepositoryChatSession`, including across
+user turns and context compaction. A new independent session starts a fresh identity
+scope. Forge-owned deterministic acquisition identifiers use a separate namespace.
+
+The first valid occurrence is retained unchanged. Reuse cannot overwrite its record
+and executes no tool. Forge records `DUPLICATE_TOOL_CALL_ID` and permits the one
+existing bounded protocol correction, asking only for a new unique identifier. A
+second duplicate (or a duplicate after that correction allowance is spent) terminates
+as a protocol/model-quality failure. Forge never silently rewrites a model identifier;
+the same textual action with a different unique identifier remains legal.

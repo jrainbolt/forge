@@ -735,3 +735,33 @@ classified the run as model-quality/protocol failure. Its independent oracle pas
 only because the unchanged baseline already satisfies the oracle, not because Forge
 applied the requested grouped change. Transactional safety and schema constraints
 were not weakened or retried.
+
+## multi-source-acquisition-v1
+
+A42 adds ten deterministic scenarios. Q01 acquires two required candidates without
+an intervening model turn; Q02 skips an already-current candidate; Q03 proves stable
+path ordering; Q04 and Q05 bound READ denial and a missing file; Q06 protects the
+remaining read, grouped mutation, and three verification steps or blocks before
+mutation; Q07 invalidates source after a generation change; Q08 reacquires both
+original paths before grouped repair; Q09 accepts one corrected unique identifier
+after rejecting a duplicate; and Q10 terminates on a repeated duplicate. Additional
+tests prove that identical actions with different IDs are legal, IDs remain scoped
+across turns/compaction within a session, and independent sessions have fresh scopes.
+
+The unchanged Foundation E08 qwen-large run used seed 42, the 8192-token profile,
+LINE_RANGE, and a disposable repository at identity
+`26caf0fb85a0efbe2fa709edceca585793071a0a`. The trusted production task definition,
+separate from evaluator-only expected/scoring fields, established `src/clock.c` and
+`tests/test_solar.c` as required candidates. Forge acquired both through two
+orchestrator-required ToolExecutor reads in normalized order, with no model-requested
+source reads, and reached grouped MUTATION_READY. Acquisition took 0.0017 seconds.
+
+The model then failed to emit a mutation after the bounded mutation-ready correction,
+so there was no proposal, preview, transaction, or post-mutation verification. Forge
+truthfully returned `failed_before_mutation` with MODEL_QUALITY; the independent
+oracle passed only against the unchanged baseline. The run used two tools and two
+model calls in 51.89 seconds. Compared with A41's seven tools, seven model calls,
+79.70 seconds, missing test source, and duplicate identifier, A42 acquired both
+sources, reached readiness, avoided an observed duplicate, and used five fewer tool
+and model calls. These timings and savings are observations from the two acceptance
+runs, not general guarantees.

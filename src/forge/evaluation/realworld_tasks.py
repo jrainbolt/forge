@@ -141,6 +141,7 @@ def foundation_realworld_tasks() -> tuple[RealWorldTask, ...]:
             ("src/clock.c", "tests/test_solar.c"),
             allowed_paths=("src/clock.c", "tests/test_solar.c"),
             expected_changed_paths=("src/clock.c", "tests/test_solar.c"),
+            required_candidate_paths=("src/clock.c", "tests/test_solar.c"),
             configure_command=_CONFIGURE[0],
             build_command=_BUILD,
             test_command=_TEST,

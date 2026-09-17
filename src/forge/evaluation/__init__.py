@@ -114,6 +114,12 @@ from forge.evaluation.multi_file_mutation import (
     MultiFileMutationRun,
     run_multi_file_mutation_v1,
 )
+from forge.evaluation.multi_source_acquisition import (
+    MULTI_SOURCE_ACQUISITION_V1,
+    MultiSourceAcquisitionCase,
+    MultiSourceAcquisitionRun,
+    run_multi_source_acquisition_v1,
+)
 from forge.evaluation.mutation_transition import (
     MUTATION_TRANSITION_SUITE_VERSION,
     MUTATION_TRANSITION_V1,
@@ -471,6 +477,10 @@ __all__ = [
     "MultiFileMutationCase",
     "MultiFileMutationRun",
     "run_multi_file_mutation_v1",
+    "MULTI_SOURCE_ACQUISITION_V1",
+    "MultiSourceAcquisitionCase",
+    "MultiSourceAcquisitionRun",
+    "run_multi_source_acquisition_v1",
     "run_mutation_transition_v1",
     "STRUCTURED_MUTATION_SUITE_VERSION",
     "STRUCTURED_MUTATION_V1",

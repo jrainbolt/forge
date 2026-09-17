@@ -59,6 +59,10 @@ def test_suite_is_versioned_bounded_and_records_seed_policy() -> None:
     assert all(value.seeds == (42,) for value in tasks[3:])
     assert tasks[-1].unsupported_reason is None
     assert tasks[-1].expected_changed_paths == ("src/clock.c", "tests/test_solar.c")
+    assert tasks[-1].required_candidate_paths == (
+        "src/clock.c",
+        "tests/test_solar.c",
+    )
     assert tasks[-1].max_mutations == 1
 
 

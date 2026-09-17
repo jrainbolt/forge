@@ -23,7 +23,11 @@ from forge.models import (
     ModelUsage,
     MutationRepresentationPolicy,
 )
-from forge.orchestration import RepositoryChatSession, RepositoryOrchestrationError
+from forge.orchestration import (
+    DuplicateToolCallIdError,
+    RepositoryChatSession,
+    RepositoryOrchestrationError,
+)
 from forge.process_isolation import ExecutionIsolationPolicy
 from forge.project_config import ProjectCommand, ProjectCommands, VerificationPlan
 from forge.repository_index import RepositoryIndex
@@ -105,6 +109,7 @@ class RealWorldTask:
     expected_files: tuple[str, ...]
     allowed_paths: tuple[str, ...] = ()
     expected_changed_paths: tuple[str, ...] = ()
+    required_candidate_paths: tuple[str, ...] = ()
     setup: tuple[SetupReplacement, ...] = ()
     setup_commands: tuple[tuple[str, ...], ...] = ()
     build_command: tuple[str, ...] | None = None
@@ -122,7 +127,12 @@ class RealWorldTask:
             raise ValueError("task ID and prompt must be non-empty")
         if not isinstance(self.execution_isolation, ExecutionIsolationPolicy):
             raise TypeError("execution_isolation must be ExecutionIsolationPolicy")
-        for name in ("expected_files", "allowed_paths", "expected_changed_paths"):
+        for name in (
+            "expected_files",
+            "allowed_paths",
+            "expected_changed_paths",
+            "required_candidate_paths",
+        ):
             values = tuple(getattr(self, name))
             if any(
                 not value or Path(value).is_absolute() or ".." in Path(value).parts
@@ -193,6 +203,15 @@ class RealWorldMetrics:
     mutation_group_apply_result: str = "not_run"
     mutation_group_rollback_attempted: bool = False
     mutation_group_rollback_result: str = "not_run"
+    required_candidate_count: int = 0
+    required_sources_ready: int = 0
+    required_sources_missing: int = 0
+    deterministic_source_reads: int = 0
+    model_source_reads: int = 0
+    source_acquisition_failures: int = 0
+    duplicate_tool_call_ids: int = 0
+    protocol_corrections: int = 0
+    source_acquisition_duration_seconds: float = 0.0
     structured_edit_recovery_used: bool = False
     actual_delta_proposed: bool = False
     preview_created: int = 0
@@ -416,6 +435,7 @@ class RealWorldEvaluationRunner:
                 verification_baseline=self._verification_baseline,
                 verification_plan=commands.verification_plan,
                 minimum_source_files=max(1, len(task.expected_changed_paths)),
+                required_candidate_paths=task.required_candidate_paths,
             )
             response = None
             coding_result = None
@@ -581,6 +601,8 @@ def classify_realworld_failure(error: Exception) -> RealWorldFailure:
         return RealWorldFailure.CONTEXT
     if isinstance(error, ModelError):
         return RealWorldFailure.MODEL_QUALITY
+    if isinstance(error, DuplicateToolCallIdError):
+        return RealWorldFailure.PROTOCOL
     if isinstance(error, RepositoryOrchestrationError):
         message = str(error).casefold()
         if "protocol" in message or "json" in message:
@@ -640,6 +662,7 @@ def score_task_result(
     )
     transition = getattr(coding, "transition_metrics", None)
     structured = getattr(coding, "structured_mutation_metrics", None)
+    acquisition = getattr(coding, "source_acquisition_metrics", None)
     verification_gate = getattr(coding, "verification_gate_metrics", None)
     repair_grounding = getattr(coding, "repair_grounding_metrics", None)
     oracle_pass = oracle in {EvaluationOutcome.PASS, EvaluationOutcome.NOT_RUN}
@@ -745,6 +768,21 @@ def score_task_result(
         ),
         mutation_group_rollback_result=getattr(
             structured, "mutation_group_rollback_result", "not_run"
+        ),
+        required_candidate_count=getattr(acquisition, "required_candidate_count", 0),
+        required_sources_ready=getattr(acquisition, "required_sources_ready", 0),
+        required_sources_missing=getattr(acquisition, "required_sources_missing", 0),
+        deterministic_source_reads=getattr(
+            acquisition, "deterministic_source_reads", 0
+        ),
+        model_source_reads=getattr(acquisition, "model_source_reads", 0),
+        source_acquisition_failures=getattr(
+            acquisition, "source_acquisition_failures", 0
+        ),
+        duplicate_tool_call_ids=getattr(acquisition, "duplicate_tool_call_ids", 0),
+        protocol_corrections=getattr(acquisition, "protocol_corrections", 0),
+        source_acquisition_duration_seconds=getattr(
+            acquisition, "acquisition_duration_seconds", 0.0
         ),
         structured_edit_recovery_used=getattr(structured, "corrections", 0) > 0,
         actual_delta_proposed=getattr(structured, "non_noop_proposals", 0) > 0,

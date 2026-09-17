@@ -398,6 +398,7 @@ def test_duplicate_invocation_id_fails_transactionally(workspace: Path) -> None:
         (
             call("same", "git.status", {}),
             call("same", "git.diff", {"staged": False}),
+            call("same", "git.diff", {"staged": False}),
         )
     )
     session = RepositoryChatSession(

@@ -543,3 +543,8 @@ separate model coding errors from edit-format friction.
 Forge can optionally accept a bounded line-range replacement from compatible local
 models. Forge resolves that range against current trusted source and still produces
 the same exact approval diff before writing.
+
+For grouped edits, Forge can deterministically acquire current source for
+already-established required candidates before asking the model for a mutation.
+These reads retain normal permission, confinement, and tool-budget enforcement;
+discovery and search results alone never become source or write authority.

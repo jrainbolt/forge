@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from forge.orchestration.verification_attribution import (
@@ -144,6 +144,34 @@ class MutationCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class RequiredSourceCandidate:
+    """A trusted orchestration-selected path awaiting current source authority."""
+
+    path: str
+    goal_ids: tuple[str, ...] = ()
+    discovery_provenance: str = "trusted_task_metadata"
+    source_generation: int | None = None
+    source_sha256: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+    attempt_generation: int | None = None
+    acquisition_attempts: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SourceAcquisitionMetrics:
+    required_candidate_count: int = 0
+    required_sources_ready: int = 0
+    required_sources_missing: int = 0
+    deterministic_source_reads: int = 0
+    model_source_reads: int = 0
+    source_acquisition_failures: int = 0
+    duplicate_tool_call_ids: int = 0
+    protocol_corrections: int = 0
+    acquisition_duration_seconds: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class MutationTransitionMetrics:
     entries: int = 0
     model_calls: int = 0
@@ -241,6 +269,8 @@ class CodingTaskResult:
     verification_plan_baseline: VerificationPlanBaseline | None = None
     configure: VerificationRecord = VerificationRecord()
     configure_attempts: tuple[VerificationRecord, ...] = ()
+    required_candidates: tuple[RequiredSourceCandidate, ...] = ()
+    source_acquisition_metrics: SourceAcquisitionMetrics = SourceAcquisitionMetrics()
 
     @property
     def footer(self) -> str:
@@ -300,6 +330,8 @@ class CodingTaskState:
         self.configure_attempts: list[VerificationRecord] = []
         self._terminal_status: CodingTaskStatus | None = None
         self.mutation_candidates: list[MutationCandidate] = []
+        self.required_candidates: list[RequiredSourceCandidate] = []
+        self.source_acquisition_metrics = SourceAcquisitionMetrics()
         self.transition_metrics = MutationTransitionMetrics()
         self.structured_mutation_metrics = StructuredMutationMetrics(
             mutation_representation=mutation_representation
@@ -372,6 +404,130 @@ class CodingTaskState:
     def mutation_candidate_paths(self) -> tuple[str, ...]:
         return tuple(candidate.path for candidate in self.mutation_candidates)
 
+    @property
+    def required_candidate_paths(self) -> tuple[str, ...]:
+        return tuple(candidate.path for candidate in self.required_candidates)
+
+    @property
+    def required_sources_ready(self) -> bool:
+        return bool(self.required_candidates) and all(
+            item.source_generation == self.generation and item.source_sha256 is not None
+            for item in self.required_candidates
+        )
+
+    @property
+    def missing_required_candidates(self) -> tuple[RequiredSourceCandidate, ...]:
+        return tuple(
+            item
+            for item in self.required_candidates
+            if item.source_generation != self.generation or item.source_sha256 is None
+        )
+
+    def establish_required_candidates(
+        self,
+        paths: tuple[str, ...],
+        *,
+        provenance: str = "trusted_task_metadata",
+    ) -> None:
+        """Install a bounded caller-authorized set; discovery rank cannot call this."""
+        ordered = tuple(sorted(set(paths)))
+        if len(ordered) > 4:
+            raise ValueError("required mutation candidates are limited to four paths")
+        self.required_candidates = [
+            RequiredSourceCandidate(path, discovery_provenance=provenance)
+            for path in ordered
+        ]
+        self._refresh_source_acquisition_metrics()
+
+    def begin_source_acquisition(self, path: str) -> bool:
+        for index, candidate in enumerate(self.required_candidates):
+            if candidate.path != path:
+                continue
+            if (
+                candidate.attempt_generation == self.generation
+                and candidate.acquisition_attempts >= 1
+            ):
+                return False
+            self.required_candidates[index] = replace(
+                candidate,
+                attempt_generation=self.generation,
+                acquisition_attempts=(
+                    candidate.acquisition_attempts + 1
+                    if candidate.attempt_generation == self.generation
+                    else 1
+                ),
+            )
+            return True
+        return False
+
+    def note_source_acquired(
+        self,
+        path: str,
+        sha256: str,
+        *,
+        start_line: int | None,
+        end_line: int | None,
+        deterministic: bool,
+        duration_seconds: float = 0.0,
+    ) -> None:
+        for index, candidate in enumerate(self.required_candidates):
+            if candidate.path == path:
+                self.required_candidates[index] = replace(
+                    candidate,
+                    source_generation=self.generation,
+                    source_sha256=sha256,
+                    start_line=start_line,
+                    end_line=end_line,
+                )
+                break
+        metrics = self.source_acquisition_metrics
+        self.source_acquisition_metrics = replace(
+            metrics,
+            deterministic_source_reads=(
+                metrics.deterministic_source_reads + int(deterministic)
+            ),
+            model_source_reads=metrics.model_source_reads + int(not deterministic),
+            acquisition_duration_seconds=(
+                metrics.acquisition_duration_seconds + duration_seconds
+            ),
+        )
+        self._refresh_source_acquisition_metrics()
+
+    def note_source_acquisition_failure(self) -> None:
+        metrics = self.source_acquisition_metrics
+        self.source_acquisition_metrics = replace(
+            metrics,
+            source_acquisition_failures=metrics.source_acquisition_failures + 1,
+        )
+        self._refresh_source_acquisition_metrics()
+
+    def note_duplicate_tool_call_id(self, *, corrected: bool) -> None:
+        metrics = self.source_acquisition_metrics
+        self.source_acquisition_metrics = replace(
+            metrics,
+            duplicate_tool_call_ids=metrics.duplicate_tool_call_ids + 1,
+            protocol_corrections=(metrics.protocol_corrections + int(corrected)),
+        )
+
+    def note_protocol_correction(self) -> None:
+        metrics = self.source_acquisition_metrics
+        self.source_acquisition_metrics = replace(
+            metrics, protocol_corrections=metrics.protocol_corrections + 1
+        )
+
+    def _refresh_source_acquisition_metrics(self) -> None:
+        metrics = self.source_acquisition_metrics
+        ready = sum(
+            item.source_generation == self.generation and item.source_sha256 is not None
+            for item in self.required_candidates
+        )
+        self.source_acquisition_metrics = replace(
+            metrics,
+            required_candidate_count=len(self.required_candidates),
+            required_sources_ready=max(metrics.required_sources_ready, ready),
+            required_sources_missing=len(self.required_candidates) - ready,
+        )
+
     def consider_source(
         self,
         path: str,
@@ -417,6 +573,12 @@ class CodingTaskState:
             self.terminal
             or self.mutation_count
             or not self.mutation_candidates
+            or (self.required_candidates and not self.required_sources_ready)
+            or (
+                self.required_candidates
+                and set(self.required_candidate_paths)
+                != set(self.mutation_candidate_paths)
+            )
             or self.phase is not CodingTaskPhase.INSPECTING
         ):
             return False
@@ -491,6 +653,7 @@ class CodingTaskState:
         self.phase = CodingTaskPhase.INSPECTING
         if generation is not None:
             self.generation = generation
+            self._refresh_source_acquisition_metrics()
         self._mutation_ready_correction_used = False
         self._structured_edit_awaiting_correction = False
         self._no_op_awaiting_correction = False
@@ -761,6 +924,7 @@ class CodingTaskState:
         if child_files:
             self.note_group_apply(output)
         self.generation = generation
+        self._refresh_source_acquisition_metrics()
         self.build = _stale(self.build)
         self.test = _stale(self.test)
         self.configure = _stale(self.configure)
@@ -809,6 +973,7 @@ class CodingTaskState:
             or self._repair_diagnostic_id is None
             or generation != self.generation
             or self.phase is not CodingTaskPhase.DIAGNOSING
+            or (self.required_candidates and not self.required_sources_ready)
         ):
             return False
         if (
@@ -1164,6 +1329,8 @@ class CodingTaskState:
             self.verification_plan_baseline,
             self.configure,
             tuple(self.configure_attempts),
+            tuple(self.required_candidates),
+            self.source_acquisition_metrics,
         )
 
     def _verification(self, operation: str) -> VerificationRecord:

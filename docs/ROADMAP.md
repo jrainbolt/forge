@@ -1896,3 +1896,31 @@ and reused a tool-call identifier; no mutation occurred. This is recorded as a
 model-quality/protocol limitation, not a transaction defect. A41 guarantees rollback
 for detected and handled failures, not crash- or power-loss atomicity. A42 was not
 started.
+
+---
+
+# Milestone A42 — Multi-File Evidence Acquisition & Protocol Continuity v1
+
+**Status:** Implemented and accepted.
+
+For an explicitly established bounded mutation-candidate set, Forge now acquires
+missing current source through the normal safe read ToolExecutor path before asking
+for a grouped edit. Reads preserve READ permission, workspace confinement, context
+bounds, and ordinary tool accounting. They are deterministic, generation-bound,
+limited to one attempt per required path and generation, and reserve capacity for
+mutation plus the trusted verification plan. Discovery results remain non-authority,
+and no candidate path is fabricated or expanded.
+
+Model-supplied tool-call identifiers are unique within a RepositoryChatSession,
+including across turns and compaction. A duplicate executes no tool and receives one
+generic bounded correction; a second duplicate terminates explicitly as
+`DUPLICATE_TOOL_CALL_ID`. Independent sessions begin fresh, and Forge never silently
+rewrites model IDs.
+
+The ten-case `multi-source-acquisition-v1` suite passes. In the unchanged qwen-large
+E08 acceptance, trusted production task metadata established the two required paths,
+both were deterministically read, and grouped MUTATION_READY was reached using two
+tools and two model calls. The model then emitted no mutation after its bounded
+correction, so Forge truthfully stopped before preview as MODEL_QUALITY. This meets
+A42's strong acquisition/readiness gate without weakening A41 transaction safety.
+A43 was not started.
