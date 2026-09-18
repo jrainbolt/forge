@@ -929,3 +929,34 @@ and grouped protocol compliance rather than discovery; qwen-small showed more
 successful edit construction but costly unsuccessful repair and verification
 failures. This evidence favors an alternative local coding-model benchmark next,
 not new planning, retrieval, mutation, context, or retry architecture.
+
+## alternative-model-bakeoff-v1
+
+A46 consumes the frozen `realistic-semantic-v1` task definitions and A45 result
+artifacts without copying or changing the benchmark. Candidate enumeration reads
+only trusted configured model profiles. Repository files cannot register model
+artifacts. Static eligibility requires the existing generic llama.cpp backend, a
+local GGUF artifact, the unchanged 8192-token context, instruction/coding use, and
+no model-specific production parser or orchestration branch.
+
+The comparison schema keeps semantic success, single-file and multi-file success,
+mutation readiness, valid schema, preview, transaction, verification, repair,
+failure layer, model calls, token availability, and elapsed time separate. Artifact
+identity supports exact filename, byte size, SHA-256, GGUF version, architecture,
+quantization, declared context, and chat-template provenance. Load and protocol
+smoke results are represented independently from semantic scores. A45 baseline
+reuse validates suite/schema versions, repository identity, context 8192, output
+512, temperature zero, and canonical safety before aggregation.
+
+The trusted local catalog currently contains only `qwen-large` and `qwen-small`,
+which are the directly comparable A45 baselines. No genuinely new coding/instruct
+profile or artifact is available, and the unrelated embedding artifact is not a
+configured candidate. Consequently no candidate was loaded, no protocol smoke or
+R01–R08 candidate matrix was run, and no model was downloaded. A46 remains blocked
+pending explicit acquisition and trusted configuration of at least one new model;
+two different model families are the strong target. Each should be an
+instruction-tuned coding GGUF that runs through the existing llama.cpp backend,
+supports at least 8192 effective context and 512 output tokens, includes or has a
+trusted generic chat template, and fits the local runtime. Once present, every
+candidate receives unchanged tasks, source authority, LINE_RANGE representation,
+verification, oracle, repair ceiling, context, output, and temperature settings.
