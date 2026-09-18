@@ -1086,3 +1086,69 @@ repair triggers correlated with semantic incorrectness. R1 recovered R01 and R0
 recovered R06 to `V_PASS / S_PASS`; these are aligned semantic recoveries even though
 the intervention did not improve aggregate effectiveness. A48 changes no production
 verification, repair prompt, retry, model, budget, benchmark, or mutation behavior.
+
+## acceptance-test-synthesis-v1
+
+A49 asks whether a local model can synthesize one bounded behavioral acceptance test
+using production-visible information only. C0 supplies the task plus minimal trusted
+language/test conventions. C1 additionally supplies the task's relevant current
+source and existing visible test source. Neither condition contains the hidden
+oracle, reference or wrong mutation, semantic labels, expected implementation, or
+A48 classification. The model returns only a constrained test name and test body;
+execution commands remain evaluator-owned argument arrays.
+
+Static validation bounds source size and rejects evaluator leakage, path escape,
+network/process/file access, unsupported Python imports/calls, unsupported C
+includes/operations, and source-text patch matching. Python candidates must parse;
+C candidates must supply a standalone `main` and compile as C17 against the trusted
+task implementation. Valid candidates run with a ten-second timeout and a restricted
+environment in fresh independent BASELINE, REFERENCE, and WRONG workspaces. A
+candidate qualifies only for FAIL/PASS/FAIL and an identical second REFERENCE run.
+Standard JSON stores only source hash, size, classifications, and metrics—not the
+generated body. Evaluator materialization grants no production write authority.
+
+The real matrix used seed 42, temperature zero, context 8192, and output 512, with
+one generation per cell. Both qwen-small and Codestral ran R05–R08 under C0/C1 plus
+R01/R02 controls. qwen-small qualified 0/6 C0 cells and 2/6 C1 cells: grounded R01
+and grounded R05. Its R05 candidate also passed an evaluator-owned behaviorally
+equivalent implementation. R06 exhausted the bounded schema output in the task-only
+condition and emitted syntax-invalid Python when grounded. R07/R08 produced one
+compile-invalid and three unsafe C artifacts.
+Codestral qualified 0/6 in both conditions. Its Python candidates either missed the
+baseline or rejected the reference; its C0 outputs were schema-invalid and its C1
+outputs lacked a standalone `main`.
+
+For the primary verification-blind tasks, only R05 was recovered by any model and no
+task was recovered by both. R06–R08 remained uncovered. No qualified candidate was
+flaky, leaked evaluator data, inspected source text, or mutated the canonical
+repository. Model-free tests additionally prove behavioral tests accept alternative
+correct R05 and R06 implementations. Qualified tests compose with A48 full
+verification using AND semantics: R05 changes from baseline-accepting PASS/PASS/FAIL
+to FAIL/PASS/FAIL without replacing the full plan.
+
+Across six cells per condition, qwen-small generation took 56.88 seconds for C0 and
+65.81 for C1; candidate qualification took 2.63 and 1.38 seconds. Codestral generation
+took 122.89 seconds for C0 and 75.79 for C1; qualification took 7.94 and 7.43 seconds.
+The 15 executed candidate qualifications took 19.38 seconds total, including four
+runs per candidate, versus A48's 30.29 seconds for 24 full-plan states. Focused tests
+are cheap to execute, but generation dominates and reliability is inadequate.
+
+Cross-model testing against A45/A46 patches was investigated but could not be run:
+the durable historical artifacts intentionally retain classifications and metrics,
+not submitted source or reconstructable workspaces, while A49 standard artifacts
+likewise omit raw test bodies. No patch model was rerun and no model-coupling claim is
+made. The reference/wrong qualification itself remains generator-independent, and
+the qualified R05 candidate accepted an independently authored alternative correct
+implementation.
+
+The production qualification gap is decisive. Evaluation knows a good reference and
+a plausible wrong state; production knows only the current repository, task, and a
+future mutation. Baseline failure is necessary evidence that a test adds signal, and
+post-mutation success is necessary evidence of compatibility, but neither proves the
+test expresses the requested behavior. A single model can generate a mutually
+consistent wrong patch and wrong test, and even independent-model review cannot
+equal B/R/W qualification. Human approval, structural/safety checks, baseline fail,
+post-mutation pass, and full regression verification could form a conservative
+future gate, but no automated trustworthy replacement for evaluator qualification
+was established. A49 therefore makes no production adoption, repair integration,
+test-file creation, verification-plan, prompt, retry, model, or budget change.

@@ -2066,3 +2066,26 @@ triggers align with semantic incorrectness; qwen-small R06 is potentially harmfu
 No hidden oracle entered production, and no verification, repair, benchmark, prompt,
 retry, model, context, output, tool, mutation, or packaging behavior changed. A49 was
 not started.
+
+---
+
+# Milestone A49 — Task-Derived Acceptance Test Synthesis & Validation v1
+
+**Status:** Implemented and accepted as an evaluation; not adopted in production.
+
+`acceptance-test-synthesis-v1` evaluates one-shot C0 task-only and C1 grounded test
+synthesis with qwen-small and Codestral on R05–R08 plus R01/R02 controls. Candidate
+tests receive only production-visible task, source, tests, and conventions. Static
+safety/structure validation precedes independent BASELINE/REFERENCE/WRONG
+qualification, a repeated reference flakiness check, and evaluator-only composition
+with the unchanged full verification plan.
+
+Only qwen-small grounded C1 recovered R05; it also qualified the R01 control.
+Codestral qualified no cell, neither model recovered R06–R08, and no primary task was
+recovered by both models. Execution was inexpensive relative to generation, but
+schema, structural, safety, baseline-detection, and reference-compatibility failures
+made the signal too unreliable for production. Production also lacks evaluator
+reference/wrong states, so baseline-fail plus post-mutation-pass cannot exclude a
+mutually wrong patch/test pair. No generated test entered production verification,
+no repository-creation authority or repair integration was added, and A50 was not
+started.
