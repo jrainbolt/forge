@@ -46,6 +46,7 @@ class LlamaCppConfig:
     gpu_layers: int = -1
     threads: int | None = None
     verbose: bool = False
+    chat_format: str | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -78,6 +79,11 @@ class LlamaCppConfig:
                 raise ValueError("threads must be greater than zero")
         if not isinstance(self.verbose, bool):
             raise TypeError("verbose must be a Boolean")
+        if self.chat_format is not None:
+            if not isinstance(self.chat_format, str):
+                raise TypeError("chat_format must be text or None")
+            if not self.chat_format.strip():
+                raise ValueError("chat_format must not be empty")
 
     @property
     def resolved_model_id(self) -> str:
@@ -120,6 +126,8 @@ class LlamaCppModel(Model):
         }
         if config.threads is not None:
             load_options["n_threads"] = config.threads
+        if config.chat_format is not None:
+            load_options["chat_format"] = config.chat_format
 
         LOGGER.info(
             "Loading model %s with backend=%s context_size=%d gpu_layers=%d",
@@ -135,7 +143,7 @@ class LlamaCppModel(Model):
                 f"failed to load llama.cpp model from {config.model_path}: {error}"
             ) from error
 
-        if not _has_chat_template(llama):
+        if not _has_chat_template(llama, config.chat_format):
             _close_llama(llama)
             raise ModelError(
                 "the GGUF model does not provide a chat template; Forge will not "
@@ -202,7 +210,9 @@ class LlamaCppModel(Model):
             raise ModelError(f"failed to close llama.cpp model: {error}") from error
 
 
-def _has_chat_template(llama: Any) -> bool:
+def _has_chat_template(llama: Any, configured_format: str | None = None) -> bool:
+    if configured_format is not None:
+        return True
     metadata = getattr(llama, "metadata", None)
     if not isinstance(metadata, Mapping):
         return False

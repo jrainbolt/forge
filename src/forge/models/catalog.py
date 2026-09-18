@@ -234,7 +234,14 @@ def _parse_profile(
 def _parse_llama_cpp_config(
     model_id: str, settings: Mapping[str, object]
 ) -> LlamaCppConfig:
-    allowed = {"model_path", "context_size", "gpu_layers", "threads", "verbose"}
+    allowed = {
+        "model_path",
+        "context_size",
+        "gpu_layers",
+        "threads",
+        "verbose",
+        "chat_format",
+    }
     unknown = set(settings) - allowed
     if unknown:
         raise ModelConfigurationError(

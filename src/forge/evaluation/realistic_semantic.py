@@ -293,6 +293,13 @@ def classify_semantic_failure(
     if not eligible:
         return SemanticFailureLayer.SEMANTIC_SCORE_INELIGIBLE
     semantic_pass = metrics.mutations > 0 and result.oracle is EvaluationOutcome.PASS
+    verification = metrics.verification_plan_result
+    if verification == "not_run":
+        verification = metrics.verification_result
+    if semantic_pass:
+        if verification in {"pass", "passed"}:
+            return SemanticFailureLayer.PASS
+        return SemanticFailureLayer.VERIFICATION_FAILED
     if (
         task.path_mode == "discovery_required"
         and not metrics.expected_implementation_acquired
@@ -310,13 +317,8 @@ def classify_semantic_failure(
         return SemanticFailureLayer.PREVIEW_FAILED
     if metrics.mutations == 0:
         return SemanticFailureLayer.TRANSACTION_FAILED
-    verification = metrics.verification_plan_result
-    if verification == "not_run":
-        verification = metrics.verification_result
     if verification not in {"pass", "passed"}:
         return SemanticFailureLayer.VERIFICATION_FAILED
-    if semantic_pass:
-        return SemanticFailureLayer.PASS
     return SemanticFailureLayer.SEMANTIC_ORACLE_FAILED
 
 

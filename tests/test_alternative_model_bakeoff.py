@@ -13,10 +13,16 @@ from forge.evaluation import (
     enumerate_trusted_candidates,
     identify_artifact,
     load_a45_baseline,
+    load_realistic_semantic_run,
+    run_model_load_smoke,
+    run_protocol_smoke,
     summarize_bakeoff_seed,
 )
 from forge.models import (
+    BackendDefinition,
+    BackendRegistry,
     LlamaCppConfig,
+    MockModel,
     ModelCatalog,
     ModelProfile,
     MutationRepresentationPolicy,
@@ -138,6 +144,45 @@ def test_artifact_identity_records_exact_local_file(tmp_path: Path) -> None:
     assert identity.chat_template_source == "GGUF metadata"
 
 
+def test_load_smoke_uses_catalog_and_requires_frozen_context() -> None:
+    registry = BackendRegistry(
+        {
+            "fake": BackendDefinition(
+                lambda model_id, settings: settings,
+                lambda _config: MockModel(("ok",), context_capacity=8192),
+            )
+        }
+    )
+    catalog = ModelCatalog((ModelProfile("candidate", "fake", "id", {}),), registry)
+
+    result = run_model_load_smoke(catalog, "candidate")
+
+    assert result.passed and result.context_created and result.generation_completed
+    assert result.generation_seconds is not None
+
+
+def test_protocol_smoke_uses_production_line_range_schemas() -> None:
+    model = MockModel(
+        (
+            '{"type":"line_range_edit","path":"src/example.py",'
+            '"start_line":1,"end_line":1,"new_text":"value = 2"}',
+            '{"type":"multi_file_line_range_edit","edits":['
+            '{"path":"src/example.py","start_line":1,"end_line":1,'
+            '"new_text":"value = 2"},'
+            '{"path":"tests/test_example.py","start_line":1,"end_line":1,'
+            '"new_text":"value = 2"}]}',
+        ),
+        context_capacity=8192,
+    )
+
+    result = run_protocol_smoke(model)
+
+    assert result.single_file_passed and result.grouped_passed
+    assert result.single_file_class == "line_range_edit"
+    assert result.grouped_class == "multi_file_line_range_edit"
+    assert all(request.generation.max_tokens == 512 for request in model.requests)
+
+
 def test_a45_baselines_are_directly_reusable() -> None:
     large = load_a45_baseline(ROOT / "eval-results/a45-qwen-large.json")
     small = load_a45_baseline(ROOT / "eval-results/a45-qwen-small.json")
@@ -147,6 +192,14 @@ def test_a45_baselines_are_directly_reusable() -> None:
     assert [summary.semantic_passes for summary in large.summaries] == [3, 3]
     assert small.summaries[0].semantic_passes == 4
     assert large.repository_identity == small.repository_identity
+
+
+def test_typed_realistic_result_loader_preserves_source_free_metrics() -> None:
+    run = load_realistic_semantic_run(ROOT / "eval-results/a45-qwen-small.json")
+
+    assert run.model_profile == "qwen-small"
+    assert len(run.results) == 8
+    assert run.aggregates[0].final_semantic_passes == 4
 
 
 def test_incompatible_baseline_is_rejected(tmp_path: Path) -> None:

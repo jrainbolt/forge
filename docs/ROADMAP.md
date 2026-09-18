@@ -1998,3 +1998,28 @@ The results do not justify production planning, retrieval changes, larger contex
 new mutation formats, or more retries. They instead support an A46 alternative
 local coding-model benchmark because the dominant limitation is stable edit/protocol
 quality after successful discovery and source acquisition. A46 was not started.
+
+---
+
+# Milestone A46 — Alternative Local Coding Model Bakeoff v1
+
+**Status:** Implemented and accepted.
+
+`alternative-model-bakeoff-v1` reuses the frozen A45 corpus and immutable qwen
+baselines. Authorized DeepSeek-Coder-V2-Lite-Instruct and Codestral-22B-v0.1
+Q4_K_M artifacts were registered through generic llama.cpp profiles at context
+8192 and output 512. Both load smokes passed. Both protocol smokes passed the
+single-file schema and emitted a grouped action with an incorrect authorized path
+set.
+
+Codestral completed R01–R08 at seeds 42 and 43 with identical outcomes: R04, R05,
+R07, and R08 passed, all eight tasks produced valid mutations, and the other four
+failed verification. Its 4/8 semantic count ties qwen-small while shifting strength
+from single-file to multi-file work and imposing materially higher latency.
+DeepSeek's R01 record was lost at the original all-or-nothing runner boundary and
+was not rerun; its seven remaining unique cells produced no semantic pass.
+
+A46 adds per-cell evaluation checkpoints, a generic trusted llama.cpp `chat_format`
+profile field required by metadata-poor GGUF artifacts, and correct terminal-success
+failure classification. No model-specific branch, default-profile change, benchmark
+change, prompt tuning, or budget increase was introduced. A47 was not started.

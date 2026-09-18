@@ -47,6 +47,7 @@ mutation_representation = "line_range"
 model_path = "{first}"
 context_size = 2048
 gpu_layers = 0
+chat_format = "mistral-instruct"
 
 [models.large]
 backend = "llama.cpp"
@@ -77,6 +78,7 @@ def test_loads_multiple_typed_profiles_without_constructing_models(
         model_id="small-model",
         context_size=2048,
         gpu_layers=0,
+        chat_format="mistral-instruct",
     )
 
 

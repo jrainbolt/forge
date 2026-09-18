@@ -948,15 +948,37 @@ smoke results are represented independently from semantic scores. A45 baseline
 reuse validates suite/schema versions, repository identity, context 8192, output
 512, temperature zero, and canonical safety before aggregation.
 
-The trusted local catalog currently contains only `qwen-large` and `qwen-small`,
-which are the directly comparable A45 baselines. No genuinely new coding/instruct
-profile or artifact is available, and the unrelated embedding artifact is not a
-configured candidate. Consequently no candidate was loaded, no protocol smoke or
-R01–R08 candidate matrix was run, and no model was downloaded. A46 remains blocked
-pending explicit acquisition and trusted configuration of at least one new model;
-two different model families are the strong target. Each should be an
-instruction-tuned coding GGUF that runs through the existing llama.cpp backend,
-supports at least 8192 effective context and 512 output tokens, includes or has a
-trusted generic chat template, and fits the local runtime. Once present, every
-candidate receives unchanged tasks, source authority, LINE_RANGE representation,
-verification, oracle, repair ceiling, context, output, and temperature settings.
+The authorized candidates are DeepSeek-Coder-V2-Lite-Instruct Q4_K_M and
+Codestral-22B-v0.1 Q4_K_M. Their local SHA-256 values are respectively
+`603bd3f8a0281d16571da7c08bd661ee17ff0d1be6fcbd1b42242da257ef0bb8`
+and `003e48ed892850b80994fcddca2bd6b833b092a4ef2db2853c33a3144245e06c`.
+The model repositories report `deepseek-license` and `mnpl`. DeepSeek supplies an
+embedded GGUF chat template. The Codestral GGUF does not, so its trusted profile
+uses llama-cpp-python's existing generic `mistral-instruct` format. Both created an
+8192-token Metal context and passed deterministic generation. Both passed the
+single-file protocol smoke and emitted the grouped action type, but used an
+incorrect grouped path set.
+
+DeepSeek's R01 artifact was lost to the original runner's all-or-nothing process
+boundary and was not rerun. Its non-duplicated R02–R08 evidence contains seven
+valid readiness states, six valid mutations, no semantic passes, four repair
+attempts, and no repair success. Three tasks failed verification, three ended with
+source-acquisition diagnostics after initial source readiness, and R08 failed edit
+construction. It used 27 model calls and 552.90 task-seconds for those seven cells.
+
+Codestral completed the full primary matrix through per-cell checkpoints. At both
+seeds 42 and 43 it passed R04, R05, R07, and R08 and failed verification on R01,
+R02, R03, and R06. Each seed therefore produced 4/8 first-pass semantic passes,
+1/4 single-file success, 3/4 multi-file success, 8/8 valid mutations, two repair
+attempts, and no repair recovery. Seed 42 used 32 model calls and 797.64 task-seconds;
+seed 43 used 32 calls and 668.75 task-seconds. Codestral is stable and highly
+protocol-compatible, but it only ties qwen-small's overall semantic count and is
+substantially slower. It is classified `SIMILAR`, with stronger coordinated-edit
+behavior rather than a clearly stronger overall capability envelope.
+
+The matrix exposed an evaluation-only classification defect: successful verified
+mutations could retain an incidental source-read failure label. Terminal semantic
+and verification success now correctly classifies as `PASS`. It also exposed the
+need for per-cell result durability, so the evaluation runner checkpoints each
+candidate cell without changing production orchestration. No default model,
+benchmark, prompt, budget, repair limit, or production mutation behavior changed.

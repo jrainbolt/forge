@@ -107,6 +107,7 @@ def test_config_requires_existing_model_file(tmp_path: Path) -> None:
         ({"gpu_layers": -2}, "gpu_layers"),
         ({"threads": 0}, "threads"),
         ({"model_id": " "}, "model_id"),
+        ({"chat_format": " "}, "chat_format"),
     ],
 )
 def test_config_rejects_invalid_values(
@@ -166,6 +167,21 @@ def test_model_requires_metadata_chat_template(model_file: Path) -> None:
     with pytest.raises(ModelError, match="does not provide a chat template"):
         LlamaCppModel(LlamaCppConfig(model_file), _llama_factory=Factory(fake))
     assert fake.close_calls == 1
+
+
+def test_trusted_chat_format_supports_artifact_without_template(
+    model_file: Path,
+) -> None:
+    fake = FakeLlama(metadata={})
+    factory = Factory(fake)
+
+    model = LlamaCppModel(
+        LlamaCppConfig(model_file, chat_format="mistral-instruct"),
+        _llama_factory=factory,
+    )
+
+    assert factory.calls[0]["chat_format"] == "mistral-instruct"
+    model.close()
 
 
 def test_model_declares_only_implemented_capabilities(model_file: Path) -> None:

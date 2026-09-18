@@ -32,6 +32,9 @@ from forge.evaluation.alternative_model_bakeoff import (
     enumerate_trusted_candidates,
     identify_artifact,
     load_a45_baseline,
+    load_realistic_semantic_run,
+    run_model_load_smoke,
+    run_protocol_smoke,
     summarize_bakeoff_seed,
     write_alternative_model_bakeoff_json,
 )
@@ -734,6 +737,9 @@ __all__ = [
     "enumerate_trusted_candidates",
     "identify_artifact",
     "load_a45_baseline",
+    "load_realistic_semantic_run",
+    "run_model_load_smoke",
+    "run_protocol_smoke",
     "summarize_bakeoff_seed",
     "write_alternative_model_bakeoff_json",
 ]

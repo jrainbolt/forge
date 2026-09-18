@@ -211,6 +211,20 @@ def test_semantic_oracle_failure_is_distinct_from_verification() -> None:
     )
 
 
+def test_verified_semantic_pass_outranks_incidental_source_failure() -> None:
+    task = realistic_semantic_tasks((42,))[4].metadata
+    raw = _raw_result(
+        task.task_id,
+        required_candidate_count=2,
+        required_sources_ready=2,
+        source_acquisition_failures=1,
+    )
+
+    assert classify_semantic_failure(task, raw, eligible=True) is (
+        SemanticFailureLayer.PASS
+    )
+
+
 def test_aggregation_records_seed_repair_cost_and_failure_counts() -> None:
     task = realistic_semantic_tasks((42,))[0].metadata
     passed = summarize_realistic_result(

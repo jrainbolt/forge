@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
@@ -12,10 +13,23 @@ from forge.evaluation.realistic_semantic import (
     REALISTIC_SEMANTIC_SCHEMA_VERSION,
     REALISTIC_SEMANTIC_SUITE_VERSION,
     REALISTIC_SEMANTIC_V1,
+    RealisticSemanticAggregate,
     RealisticSemanticResult,
     RealisticSemanticRun,
+    SemanticIntegrityResult,
 )
-from forge.models import LlamaCppConfig, ModelCatalog
+from forge.models import (
+    GenerationConfig,
+    LlamaCppConfig,
+    Message,
+    MessageRole,
+    Model,
+    ModelCatalog,
+    ModelRequest,
+    MutationRepresentationPolicy,
+)
+from forge.orchestration import ToolCallOutcome, parse_model_output
+from forge.orchestration.protocol import build_mutation_ready_output
 
 ALTERNATIVE_MODEL_BAKEOFF_V1 = "alternative-model-bakeoff-v1"
 ALTERNATIVE_MODEL_BAKEOFF_SUITE_VERSION = 1
@@ -57,6 +71,7 @@ class ModelArtifactIdentity:
     declared_context: int | None = None
     chat_template: str | None = None
     chat_template_source: str = "GGUF metadata"
+    license_metadata: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +90,10 @@ class ProtocolSmoke:
     grouped_passed: bool
     single_file_failure: str | None = None
     grouped_failure: str | None = None
+    single_file_class: str | None = None
+    grouped_class: str | None = None
+    single_file_seconds: float | None = None
+    grouped_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +226,78 @@ def identify_artifact(
     )
 
 
+def run_model_load_smoke(catalog: ModelCatalog, profile_name: str) -> ModelLoadSmoke:
+    """Load one configured model and perform a tiny deterministic generation."""
+    started = time.perf_counter()
+    try:
+        model = catalog.create(profile_name)
+    except Exception as error:
+        return ModelLoadSmoke(
+            False,
+            False,
+            False,
+            time.perf_counter() - started,
+            None,
+            f"{type(error).__name__}: {error}",
+        )
+    load_seconds = time.perf_counter() - started
+    context_created = model.context_capacity == A46_CONTEXT_CAPACITY
+    if not context_created:
+        model.close()
+        return ModelLoadSmoke(
+            False,
+            False,
+            False,
+            load_seconds,
+            None,
+            f"configured context is {model.context_capacity}, expected 8192",
+        )
+    generation_started = time.perf_counter()
+    try:
+        model.generate(
+            ModelRequest(
+                (Message(MessageRole.USER, 'Reply with exactly: {"ok":true}'),),
+                GenerationConfig(max_tokens=16, temperature=0.0, seed=42),
+            )
+        )
+    except Exception as error:
+        return ModelLoadSmoke(
+            False,
+            True,
+            False,
+            load_seconds,
+            time.perf_counter() - generation_started,
+            f"{type(error).__name__}: {error}",
+        )
+    finally:
+        model.close()
+    return ModelLoadSmoke(
+        True,
+        True,
+        True,
+        load_seconds,
+        time.perf_counter() - generation_started,
+    )
+
+
+def run_protocol_smoke(model: Model) -> ProtocolSmoke:
+    """Exercise unchanged production LINE_RANGE schemas without semantic scoring."""
+    single = _protocol_case(model, ("src/example.py",), grouped=False)
+    grouped = _protocol_case(
+        model, ("src/example.py", "tests/test_example.py"), grouped=True
+    )
+    return ProtocolSmoke(
+        single[0],
+        grouped[0],
+        single[2],
+        grouped[2],
+        single[1],
+        grouped[1],
+        single[3],
+        grouped[3],
+    )
+
+
 def summarize_bakeoff_seed(
     seed: int, results: tuple[RealisticSemanticResult, ...]
 ) -> BakeoffSeedSummary:
@@ -276,6 +367,27 @@ def load_a45_baseline(path: Path) -> BaselineReuse:
     seeds = tuple(dict.fromkeys(_integer(item, "seed") for item in raw_results))
     summaries = tuple(_summarize_serialized_seed(seed, raw_results) for seed in seeds)
     return BaselineReuse(profile, artifact, repository, seeds, summaries)
+
+
+def load_realistic_semantic_run(path: Path) -> RealisticSemanticRun:
+    """Load a source-free realistic semantic artifact into its typed form."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return RealisticSemanticRun(
+        payload["suite"],
+        payload["suite_version"],
+        payload["schema_version"],
+        payload["forge_milestone"],
+        payload["repository_identity"],
+        payload["model_profile"],
+        payload["model_artifact"],
+        payload["context_capacity"],
+        payload["output_budget"],
+        payload["temperature"],
+        tuple(SemanticIntegrityResult(**item) for item in payload["integrity"]),
+        tuple(RealisticSemanticResult(**item) for item in payload["results"]),
+        tuple(RealisticSemanticAggregate(**item) for item in payload["aggregates"]),
+        payload["canonical_unchanged"],
+    )
 
 
 def build_bakeoff_run(
@@ -398,3 +510,56 @@ def _optional_integer(item: object, key: str) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value
+
+
+def _protocol_case(
+    model: Model, paths: tuple[str, ...], *, grouped: bool
+) -> tuple[bool, str, str | None, float]:
+    if grouped:
+        request_text = (
+            "Two authorized files each contain one line: value = 1. Return one "
+            "grouped LINE_RANGE action changing line 1 in both files to value = 2."
+        )
+        expected = ToolCallOutcome.MULTI_FILE_LINE_RANGE_EDIT
+    else:
+        request_text = (
+            "The authorized file src/example.py contains one line: value = 1. "
+            "Return one LINE_RANGE action changing line 1 to value = 2."
+        )
+        expected = ToolCallOutcome.LINE_RANGE_EDIT
+    request = ModelRequest(
+        (
+            Message(
+                MessageRole.SYSTEM,
+                "Return only the JSON action required by the supplied schema.",
+            ),
+            Message(MessageRole.USER, request_text),
+        ),
+        GenerationConfig(max_tokens=A46_OUTPUT_BUDGET, temperature=0.0, seed=42),
+        build_mutation_ready_output(
+            paths, representation=MutationRepresentationPolicy.LINE_RANGE
+        ),
+    )
+    started = time.perf_counter()
+    try:
+        response = model.generate(request)
+        parsed = parse_model_output(response.text)
+    except Exception as error:
+        return (
+            False,
+            "SCHEMA_INVALID",
+            f"{type(error).__name__}: {error}",
+            time.perf_counter() - started,
+        )
+    elapsed = time.perf_counter() - started
+    if parsed.outcome is not expected:
+        return False, parsed.outcome.value, "unexpected action type", elapsed
+    if grouped:
+        assert parsed.multi_file_line_range_edit is not None
+        actual_paths = {str(item["path"]) for item in parsed.multi_file_line_range_edit}
+    else:
+        assert parsed.line_range_edit is not None
+        actual_paths = {str(parsed.line_range_edit["path"])}
+    if actual_paths != set(paths):
+        return False, parsed.outcome.value, "authorized path set mismatch", elapsed
+    return True, parsed.outcome.value, None, elapsed
