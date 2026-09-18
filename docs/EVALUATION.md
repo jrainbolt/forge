@@ -1022,3 +1022,67 @@ materially reduces Codestral structural validity. Under A47's adoption rule this
 weak evidence. Forge retains the bounded immutable history representation and the
 evaluation switch, but the production default remains R0. No repair retry, path,
 permission, model, context, output, tool, or mutation budget changes.
+
+## verification-alignment-v1
+
+A48 measures the unchanged configured verification plan against evaluator-only
+semantic truth. For each frozen R01–R08 task it constructs BASELINE, REFERENCE, and
+WRONG independently from the canonical repository, revalidates oracle FAIL/PASS/FAIL,
+and executes the same configure/build/test plan and isolation policy used by
+`realistic-semantic-v1`. The 24-state run preserved repository identity
+`99e6155e9350711bbcafcb72f6d401a76a58f56ecef1bd30a7f32ece559f37a5`.
+References, wrong mutations, and hidden assertions remain evaluator-only and are
+absent from production prompts, repair evidence, and installed package data.
+
+R01–R04 are `FULLY_DISCRIMINATING`: their defective baseline and plausible wrong
+mutation fail the visible task-relevant test, while the reference passes. R05–R08
+are `BASELINE_ACCEPTING`: each paired task setup introduces the implementation
+defect while replacing the canonical regression assertion with an unrelated passing
+assertion. Consequently the defective baseline passes the full plan. Restoring only
+the canonical visible test creates the WRONG state and exposes the still-defective
+implementation, so all four WRONG states fail. This is a
+`MISSING_BEHAVIOR_ASSERTION` gap in the configured baseline, not an infrastructure,
+configure, build, stale-reference, or unrelated-failure problem. All eight reference
+states pass; there is no verification rejection of a known-good state in the
+deterministic matrix.
+
+The confusion matrix is 8 semantic-correct/verification-pass, 0
+semantic-correct/verification-fail, 4 semantic-wrong/verification-pass, and 12
+semantic-wrong/verification-fail. Thus 12 semantic failures are legitimately
+observable by production verification, while four defective paired baselines are
+invisible. No semantically correct deterministic state would spuriously trigger
+repair. These terms are deliberately phrased as verification acceptance of a
+semantically wrong state and verification rejection of a semantically correct state,
+avoiding ambiguous false-positive/false-negative labels.
+
+The existing-test inventory preselected one visible task-named test before observing
+outcomes: `tests/test_retry.py`, `tests/test_config.py`, `test_parser`, `test_quota`,
+`tests/test_state.py`, `tests/test_headers.py`, `test_window`, and `test_status`.
+Every test exists, directly exercises the source behavior, and is already run by the
+full plan. T1 reproduced T0 for all eight tasks: four fully discriminating and four
+baseline accepting. No subset improved or regressed discrimination, and no hidden or
+generated test was used. The full plan remains authoritative.
+
+The 24 full plans took 30.29 seconds in aggregate: 9.88 seconds for BASELINE, 12.27
+for REFERENCE, and 8.14 for WRONG. The 24 targeted invocations took 0.73 seconds.
+Targeted execution is much cheaper here but supplies no additional semantic
+discrimination, so A48 does not adopt it in production.
+
+Historical executed mutations map to 17 `V_PASS / S_PASS`, 17
+`V_FAIL / S_FAIL`, one `V_FAIL / S_PASS` (qwen-small R06), and one
+`V_PASS / S_FAIL` (DeepSeek R07). The latter is the prominent production-invisible
+semantic bug. Six of A47's seven eligible original failures aligned verification
+failure with semantic failure; qwen-small R06 was the sole potentially harmful
+repair trigger because its mutation was semantically correct. Its source-free A45
+artifact records `project.test` failure but intentionally retains no full log or
+submitted source, so exact failure fingerprint and same-workspace attribution cannot
+be reconstructed. The deterministic A48 R06 reference passes the same full plan,
+which rules out a generally stale canonical expectation but cannot distinguish an
+alternate-correct implementation/test conflict from an unrelated submitted-test
+failure. Repair was therefore not semantically appropriate.
+
+Codestral's original R01 and R06 cells were both `V_FAIL / S_FAIL`, so their A47
+repair triggers correlated with semantic incorrectness. R1 recovered R01 and R0
+recovered R06 to `V_PASS / S_PASS`; these are aligned semantic recoveries even though
+the intervention did not improve aggregate effectiveness. A48 changes no production
+verification, repair prompt, retry, model, budget, benchmark, or mutation behavior.

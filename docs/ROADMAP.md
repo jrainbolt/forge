@@ -2043,3 +2043,26 @@ failure but fails the multi-case, multi-profile production-adoption threshold.
 Accepted mutation history is safely representable for evaluation, while production
 keeps the unchanged R0 default, one repair maximum, existing authority, and all
 budgets. A48 was not started.
+
+---
+
+# Milestone A48 — Verification Signal Alignment & Coverage v1
+
+**Status:** Implemented and accepted.
+
+`verification-alignment-v1` evaluates the unchanged R01–R08 configured
+configure/build/test plan on independent defective BASELINE, known-good REFERENCE,
+and plausible WRONG workspaces. All 24 semantic labels retain the frozen
+FAIL/PASS/FAIL integrity. R01–R04 are fully discriminating; R05–R08 accept their
+defective baseline because the paired setup replaces the relevant visible regression
+assertion. Every reference passes and every wrong mutation fails. The aggregate
+confusion matrix is 8 correct/pass, 0 correct/fail, 4 wrong/pass, and 12 wrong/fail.
+
+Preselected visible task-relevant tests reproduce the full-plan classification for
+all eight tasks and add no discrimination. Historical mapping finds one
+verification-pass/oracle-fail mutation (DeepSeek R07) and one
+verification-fail/oracle-pass mutation (qwen-small R06). Six of seven A47 repair
+triggers align with semantic incorrectness; qwen-small R06 is potentially harmful.
+No hidden oracle entered production, and no verification, repair, benchmark, prompt,
+retry, model, context, output, tool, mutation, or packaging behavior changed. A49 was
+not started.
