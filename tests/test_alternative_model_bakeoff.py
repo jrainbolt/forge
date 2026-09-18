@@ -7,13 +7,16 @@ from pathlib import Path
 from forge.evaluation import (
     ALTERNATIVE_MODEL_BAKEOFF_V1,
     CandidateStatus,
+    RealisticSemanticAggregate,
     RealisticSemanticResult,
+    RealisticSemanticRun,
     alternative_model_bakeoff_to_dict,
     build_bakeoff_run,
     enumerate_trusted_candidates,
     identify_artifact,
     load_a45_baseline,
     load_realistic_semantic_run,
+    realistic_semantic_to_dict,
     run_model_load_smoke,
     run_protocol_smoke,
     summarize_bakeoff_seed,
@@ -28,8 +31,6 @@ from forge.models import (
     MutationRepresentationPolicy,
     default_backend_registry,
 )
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def _profile(name: str, artifact: Path, context: int = 8192) -> ModelProfile:
@@ -87,6 +88,71 @@ def _result(
         context_peak=1000,
         elapsed_seconds=2.5,
     )
+
+
+def _write_a45_fixture(
+    tmp_path: Path,
+    profile: str,
+    *,
+    seeds: tuple[int, ...],
+    semantic_passes: int,
+) -> Path:
+    results = tuple(
+        replace(
+            _result(
+                f"R{task_number:02d}",
+                "single_file" if task_number <= 4 else "multi_file",
+                seed=seed,
+                passed=task_number <= semantic_passes,
+            ),
+            repository_identity="foundation-fixture",
+            model_profile=profile,
+            model_artifact=f"{profile}.gguf:sha256:fixture",
+        )
+        for seed in seeds
+        for task_number in range(1, 9)
+    )
+    aggregates = tuple(
+        RealisticSemanticAggregate(
+            model_profile=profile,
+            seed=seed,
+            tasks=8,
+            first_pass_semantic_passes=semantic_passes,
+            final_semantic_passes=semantic_passes,
+            protocol_failures=0,
+            retrieval_failures=0,
+            verification_failures=8 - semantic_passes,
+            semantic_oracle_failures=0,
+            repairs_attempted=0,
+            repairs_successful=0,
+            tool_calls=24,
+            model_calls=16,
+            input_tokens=800,
+            output_tokens=160,
+            token_measurement_complete=True,
+            elapsed_seconds=20.0,
+        )
+        for seed in seeds
+    )
+    run = RealisticSemanticRun(
+        suite="realistic-semantic-v1",
+        suite_version=1,
+        schema_version=1,
+        forge_milestone="A45",
+        repository_identity="foundation-fixture",
+        model_profile=profile,
+        model_artifact=f"{profile}.gguf:sha256:fixture",
+        context_capacity=8192,
+        output_budget=512,
+        temperature=0.0,
+        integrity=(),
+        results=results,
+        aggregates=aggregates,
+        canonical_unchanged=True,
+    )
+    path = tmp_path / f"a45-{profile}.json"
+    path.write_text(json.dumps(realistic_semantic_to_dict(run)), encoding="utf-8")
+    return path
 
 
 def test_candidate_enumeration_uses_only_trusted_catalog_profiles(
@@ -183,9 +249,13 @@ def test_protocol_smoke_uses_production_line_range_schemas() -> None:
     assert all(request.generation.max_tokens == 512 for request in model.requests)
 
 
-def test_a45_baselines_are_directly_reusable() -> None:
-    large = load_a45_baseline(ROOT / "eval-results/a45-qwen-large.json")
-    small = load_a45_baseline(ROOT / "eval-results/a45-qwen-small.json")
+def test_a45_baselines_are_directly_reusable(tmp_path: Path) -> None:
+    large = load_a45_baseline(
+        _write_a45_fixture(tmp_path, "qwen-large", seeds=(42, 43), semantic_passes=3)
+    )
+    small = load_a45_baseline(
+        _write_a45_fixture(tmp_path, "qwen-small", seeds=(42,), semantic_passes=4)
+    )
 
     assert large.seeds == (42, 43)
     assert small.seeds == (42,)
@@ -194,8 +264,12 @@ def test_a45_baselines_are_directly_reusable() -> None:
     assert large.repository_identity == small.repository_identity
 
 
-def test_typed_realistic_result_loader_preserves_source_free_metrics() -> None:
-    run = load_realistic_semantic_run(ROOT / "eval-results/a45-qwen-small.json")
+def test_typed_realistic_result_loader_preserves_source_free_metrics(
+    tmp_path: Path,
+) -> None:
+    run = load_realistic_semantic_run(
+        _write_a45_fixture(tmp_path, "qwen-small", seeds=(42,), semantic_passes=4)
+    )
 
     assert run.model_profile == "qwen-small"
     assert len(run.results) == 8
@@ -203,9 +277,8 @@ def test_typed_realistic_result_loader_preserves_source_free_metrics() -> None:
 
 
 def test_incompatible_baseline_is_rejected(tmp_path: Path) -> None:
-    payload = json.loads(
-        (ROOT / "eval-results/a45-qwen-small.json").read_text(encoding="utf-8")
-    )
+    fixture = _write_a45_fixture(tmp_path, "qwen-small", seeds=(42,), semantic_passes=4)
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
     payload["context_capacity"] = 16384
     path = tmp_path / "bad.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -253,8 +326,12 @@ def test_seed_comparison_remains_explicit() -> None:
     assert summarize_bakeoff_seed(43, (seed_42, seed_43)).semantic_passes == 0
 
 
-def test_serialization_contains_no_source_or_reference_mutation() -> None:
-    large = load_a45_baseline(ROOT / "eval-results/a45-qwen-large.json")
+def test_serialization_contains_no_source_or_reference_mutation(
+    tmp_path: Path,
+) -> None:
+    large = load_a45_baseline(
+        _write_a45_fixture(tmp_path, "qwen-large", seeds=(42, 43), semantic_passes=3)
+    )
     run = build_bakeoff_run(
         repository_identity=large.repository_identity,
         candidates=(),
@@ -269,8 +346,10 @@ def test_serialization_contains_no_source_or_reference_mutation() -> None:
     assert "reference_mutation" not in rendered
 
 
-def test_bakeoff_rejects_mismatched_baseline_repository() -> None:
-    baseline = load_a45_baseline(ROOT / "eval-results/a45-qwen-small.json")
+def test_bakeoff_rejects_mismatched_baseline_repository(tmp_path: Path) -> None:
+    baseline = load_a45_baseline(
+        _write_a45_fixture(tmp_path, "qwen-small", seeds=(42,), semantic_passes=4)
+    )
     try:
         build_bakeoff_run(
             repository_identity="different",
