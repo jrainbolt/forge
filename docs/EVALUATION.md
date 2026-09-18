@@ -982,3 +982,43 @@ and verification success now correctly classifies as `PASS`. It also exposed the
 need for per-cell result durability, so the evaluation runner checkpoints each
 candidate cell without changing production orchestration. No default model,
 benchmark, prompt, budget, repair limit, or production mutation behavior changed.
+
+## repair-effectiveness-v1
+
+A47 derives a source-free repair-case corpus from the immutable A45 qwen-small and
+A46 Codestral seed-42 artifacts. It contains eight failed executed model cells,
+seven of which retain legitimate production-visible repair eligibility: three
+qwen-small cells and four Codestral cells. The corpus covers Python and C17,
+single-file and grouped mutations, build/compiler and test failures, one
+verification-fail/oracle-pass disagreement, and one ineligible repair-source
+reacquisition failure. Hidden oracle outcomes classify results only after execution;
+they never enter repair evidence or prompts.
+
+The paired evaluation compares R0, the existing current-source repair prompt, with
+R1, which inserts the exact accepted primary `MutationPreview` diff between the
+trusted verification diagnostic and freshly reacquired current source. Diff history
+is immutable, bound to the successful primary generation and authorized primary
+paths, and limited to 4,096 characters with an explicit middle-truncation marker.
+R1 replays each R0 primary response sequence up to repair readiness, so the task,
+mutated workspace, source, seed, representation, verification evidence, output
+budget, and mutation ceiling remain fixed. Both conditions reuse the production
+single/grouped mutation schemas, A41 transaction, A42 source currentness, A36
+attribution, and the complete A37 configure/build/test rerun.
+
+qwen-small completed three paired cases. R0 and R1 each produced 3/3 structurally
+valid executed repairs, zero verification passes, and zero semantic recoveries. R1
+raised mean repair input from 1,316.7 to 1,515.3 tokens and generation latency from
+9.68 to 11.08 seconds without benefit. Codestral completed four paired cases. R0
+produced 3/4 structurally valid repairs and one semantic recovery; R1 produced 2/4
+structurally valid repairs and one semantic recovery. R1 recovered R01, which R0
+did not, but regressed the already-recoverable R06 and made R02 structurally invalid;
+R03 became structurally valid but still failed verification. Mean Codestral repair
+input rose from 1,162.8 to 1,418.3 tokens and generation latency from 22.82 to 26.95
+seconds.
+
+The accepted-diff intervention therefore changes which Codestral case recovers but
+does not increase aggregate recovery, does not reproduce across qwen-small, and
+materially reduces Codestral structural validity. Under A47's adoption rule this is
+weak evidence. Forge retains the bounded immutable history representation and the
+evaluation switch, but the production default remains R0. No repair retry, path,
+permission, model, context, output, tool, or mutation budget changes.

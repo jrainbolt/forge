@@ -349,6 +349,7 @@ class RealWorldEvaluationRunner:
             MutationRepresentationPolicy.EXACT_TEXT
         ),
         verification_baseline: bool = False,
+        include_repair_mutation_history: bool = False,
     ) -> None:
         self._profile = model_profile
         self._model = model
@@ -356,6 +357,7 @@ class RealWorldEvaluationRunner:
         self._embedding_model = embedding_model
         self._mutation_representation = mutation_representation
         self._verification_baseline = verification_baseline
+        self._include_repair_mutation_history = include_repair_mutation_history
 
     def run(
         self, tasks: Iterable[RealWorldTask], repository: RepositorySnapshot
@@ -436,6 +438,7 @@ class RealWorldEvaluationRunner:
                 verification_plan=commands.verification_plan,
                 minimum_source_files=max(1, len(task.expected_changed_paths)),
                 required_candidate_paths=task.required_candidate_paths,
+                include_repair_mutation_history=(self._include_repair_mutation_history),
             )
             response = None
             coding_result = None

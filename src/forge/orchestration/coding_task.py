@@ -111,12 +111,26 @@ class MutationRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class PrimaryMutationEvidence:
+    """Bounded factual history for the accepted primary workspace mutation."""
+
+    paths: tuple[str, ...]
+    changed_ranges: tuple[tuple[str, int | None, int | None], ...]
+    diff: str
+    diff_truncated: bool
+    generation: int
+    mutation_index: int = 1
+
+
+@dataclass(frozen=True, slots=True)
 class RepairEvidence:
     verification_observation_id: str
     source_observation_id: str
     path: str
     generation: int
     mutation_index: int
+    authorized_paths: tuple[str, ...] = ()
+    primary_mutation: PrimaryMutationEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,6 +364,8 @@ class CodingTaskState:
         self._pending_mutation_range: tuple[int, int] | None = None
         self._pending_mutation_ranges: tuple[tuple[str, int, int], ...] = ()
         self._repair_diagnostic_id: str | None = None
+        self._pending_primary_mutation: PrimaryMutationEvidence | None = None
+        self._primary_mutation: PrimaryMutationEvidence | None = None
         self._mutation_ready_correction_used = False
         self._structured_edit_correction_used = False
         self._structured_edit_awaiting_correction = False
@@ -847,6 +863,36 @@ class CodingTaskState:
             write_approvals=self.transition_metrics.write_approvals + 1,
         )
 
+    def note_accepted_mutation_preview(
+        self,
+        *,
+        paths: tuple[str, ...],
+        diff: str,
+        diff_truncated: bool,
+    ) -> None:
+        """Retain an approved primary preview until its mutation succeeds."""
+        if self.mutation_count != 0 or self.terminal:
+            return
+        ranges = (
+            tuple(
+                (path, start, end) for path, start, end in self._pending_mutation_ranges
+            )
+            if self._pending_mutation_ranges
+            else tuple(
+                (path, *self._pending_mutation_range)
+                if self._pending_mutation_range is not None
+                else (path, None, None)
+                for path in paths
+            )
+        )
+        self._pending_primary_mutation = PrimaryMutationEvidence(
+            paths,
+            ranges,
+            diff,
+            diff_truncated,
+            self.generation + 1,
+        )
+
     def mutation_failed(self) -> None:
         if self.terminal:
             return
@@ -919,6 +965,11 @@ class CodingTaskState:
                 tuple(child_files),
             )
         )
+        if self.mutation_count == 1 and self._pending_primary_mutation is not None:
+            self._primary_mutation = replace(
+                self._pending_primary_mutation, generation=generation
+            )
+        self._pending_primary_mutation = None
         self._pending_mutation_range = None
         self._pending_mutation_ranges = ()
         if child_files:
@@ -988,6 +1039,8 @@ class CodingTaskState:
             path,
             generation,
             self.mutation_count,
+            tuple(self.changed_files),
+            self._primary_mutation,
         )
         # Primary and repair proposals each receive one bounded structured-edit
         # recovery opportunity; a primary correction cannot consume the repair one.

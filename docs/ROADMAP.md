@@ -2023,3 +2023,23 @@ A46 adds per-cell evaluation checkpoints, a generic trusted llama.cpp `chat_form
 profile field required by metadata-poor GGUF artifacts, and correct terminal-success
 failure classification. No model-specific branch, default-profile change, benchmark
 change, prompt tuning, or budget increase was introduced. A47 was not started.
+
+---
+
+# Milestone A47 — Verification-Grounded Repair Effectiveness v1
+
+**Status:** Implemented and accepted.
+
+`repair-effectiveness-v1` identifies seven eligible failed-primary model cells from
+the frozen qwen-small and Codestral evidence and replays each accepted primary state
+under R0 current repair context and R1 context augmented by bounded accepted-mutation
+history. The matrix covers Python/C17, single/grouped edits, compiler/build and test
+failures, and semantic/verification disagreement without exposing evaluator oracles.
+
+qwen-small recovered 0/3 cases under both conditions. Codestral recovered 1/4 under
+both: R1 newly recovered R01 but regressed R06, reduced structural validity from
+3/4 to 2/4, and increased tokens and latency. The result explains part of the repair
+failure but fails the multi-case, multi-profile production-adoption threshold.
+Accepted mutation history is safely representable for evaluation, while production
+keeps the unchanged R0 default, one repair maximum, existing authority, and all
+budgets. A48 was not started.

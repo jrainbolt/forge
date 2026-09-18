@@ -65,6 +65,7 @@ from forge.orchestration.coding_task import (
     CodingTaskState,
     CodingTaskStatus,
     MutationCandidate,
+    RepairEvidence,
     VerificationDecision,
 )
 from forge.orchestration.protocol import (
@@ -142,6 +143,7 @@ DEFAULT_MAX_REPAIR_MODEL_CALLS = 24
 DEFAULT_MAX_REPAIR_TOOL_EXECUTIONS = 18
 DEFAULT_MAX_NO_PROGRESS_CYCLES = 3
 DEFAULT_MAX_REPEATED_CALLS = 2
+MAX_REPAIR_MUTATION_DIFF_CHARS = 4096
 DEFAULT_MINIMUM_SOURCE_FILES = 1
 EVIDENCE_STOP_WORDS = frozenset(
     {
@@ -486,6 +488,7 @@ class RepositoryChatSession:
         mutation_representation: MutationRepresentationPolicy = (
             MutationRepresentationPolicy.EXACT_TEXT
         ),
+        include_repair_mutation_history: bool = False,
     ) -> None:
         if not isinstance(model, Model):
             raise TypeError("model must implement Model")
@@ -565,7 +568,10 @@ class RepositoryChatSession:
             raise TypeError(
                 "mutation_representation must be a MutationRepresentationPolicy"
             )
+        if not isinstance(include_repair_mutation_history, bool):
+            raise TypeError("include_repair_mutation_history must be a Boolean")
         self._profile_name = profile_name
+        self._include_repair_mutation_history = include_repair_mutation_history
         self._model = model
         self._generation = generation or GenerationConfig(
             max_tokens=256, temperature=0.4
@@ -1501,6 +1507,7 @@ class RepositoryChatSession:
                     else None
                 )
                 trusted_group: list[Message] = []
+                history_added = False
                 for candidate in candidates:
                     source_observation_id = (
                         repair_evidence.source_observation_id
@@ -1521,10 +1528,32 @@ class RepositoryChatSession:
                         trusted_messages = self._numbered_mutation_messages(
                             trusted_messages, candidate
                         )
+                    history_messages: tuple[Message, ...] = ()
+                    source_message_count = (
+                        1
+                        if self._mutation_representation
+                        is MutationRepresentationPolicy.LINE_RANGE
+                        else 2
+                    )
+                    if (
+                        repair
+                        and repair_evidence is not None
+                        and self._include_repair_mutation_history
+                        and not history_added
+                    ):
+                        history_messages = (
+                            Message(
+                                MessageRole.USER,
+                                _render_primary_mutation_evidence(repair_evidence),
+                            ),
+                        )
+                        history_added = True
                     trusted_group.extend(
                         (
                             Message(MessageRole.USER, f"PATH: {candidate.path}"),
-                            *trusted_messages,
+                            *trusted_messages[:-source_message_count],
+                            *history_messages,
+                            *trusted_messages[-source_message_count:],
                             Message(MessageRole.USER, f"END FILE: {candidate.path}"),
                         )
                     )
@@ -3172,6 +3201,17 @@ class RepositoryChatSession:
             self._active_coding_task.note_materialized_preview(approved=approved)
         if not approved:
             return result
+        if self._active_coding_task is not None:
+            bounded_diff, diff_truncated = _bound_repair_mutation_diff(preview.diff)
+            self._active_coding_task.note_accepted_mutation_preview(
+                paths=(
+                    preview.paths
+                    if isinstance(preview, MultiFileMutationPreview)
+                    else (preview.path,)
+                ),
+                diff=bounded_diff,
+                diff_truncated=diff_truncated,
+            )
         return self._executor.execute(
             invocation,
             self._context,
@@ -3278,6 +3318,37 @@ class RepositoryChatSession:
 
     def __exit__(self, *_args: object) -> None:
         self.close()
+
+
+def _bound_repair_mutation_diff(diff: str) -> tuple[str, bool]:
+    if len(diff) <= MAX_REPAIR_MUTATION_DIFF_CHARS:
+        return diff, False
+    marker = "\n... accepted mutation diff truncated by Forge ...\n"
+    available = MAX_REPAIR_MUTATION_DIFF_CHARS - len(marker)
+    prefix = available // 2
+    return diff[:prefix] + marker + diff[-(available - prefix) :], True
+
+
+def _render_primary_mutation_evidence(evidence: RepairEvidence) -> str:
+    mutation = evidence.primary_mutation
+    if mutation is None:
+        return "Accepted first mutation history is unavailable."
+    ranges = "\n".join(
+        f"- {path}: lines {start}-{end}"
+        if start is not None and end is not None
+        else f"- {path}: exact accepted patch"
+        for path, start, end in mutation.changed_ranges
+    )
+    truncation = "yes" if mutation.diff_truncated else "no"
+    return (
+        "Accepted first mutation that produced the current workspace:\n"
+        f"generation: {mutation.generation}\n"
+        f"authorized paths: {', '.join(evidence.authorized_paths)}\n"
+        f"changed ranges:\n{ranges}\n"
+        f"diff truncated: {truncation}\n"
+        "bounded accepted diff:\n"
+        f"{mutation.diff}"
+    )
 
 
 def _repository_system_prompt(

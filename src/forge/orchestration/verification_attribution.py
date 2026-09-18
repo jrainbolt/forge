@@ -21,6 +21,7 @@ _FAILURE_LINE = re.compile(
 )
 _MAX_LINES = 128
 _MAX_LINE_CHARS = 240
+MAX_REPAIR_FAILURE_LINES = 32
 
 
 class AttributionResult(Enum):
@@ -88,6 +89,36 @@ class VerificationAttribution:
     result: AttributionResult = AttributionResult.NO_BASELINE
     fingerprint_equal: bool | None = None
     post_duration_seconds: float = 0.0
+
+
+def bounded_failure_lines(
+    output: Mapping[str, object], *, maximum: int = MAX_REPAIR_FAILURE_LINES
+) -> tuple[str, ...]:
+    """Select useful failure markers and adjacent context from bounded tool output."""
+    if isinstance(maximum, bool) or not isinstance(maximum, int) or maximum <= 0:
+        raise ValueError("maximum must be a positive integer")
+    selected: list[str] = []
+    for stream in ("stdout", "stderr"):
+        raw = output.get(stream)
+        if not isinstance(raw, str):
+            continue
+        lines = _ANSI.sub("", raw).splitlines()
+        indexes = {
+            nearby
+            for index, line in enumerate(lines)
+            if _SUMMARY_CASE.fullmatch(line.strip()) or _FAILURE_LINE.search(line)
+            for nearby in range(max(0, index - 1), min(len(lines), index + 2))
+        }
+        for index in sorted(indexes):
+            line = lines[index].strip()
+            if not line:
+                continue
+            clipped = line[:_MAX_LINE_CHARS]
+            if clipped not in selected:
+                selected.append(clipped)
+            if len(selected) >= maximum:
+                return tuple(selected)
+    return tuple(selected)
 
 
 def command_identity(prepared: PreparedProjectCommand) -> str:

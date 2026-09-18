@@ -161,6 +161,7 @@ def run_realistic_semantic_v1(
     *,
     model_artifact: str,
     mutation_representation: MutationRepresentationPolicy,
+    include_repair_mutation_history: bool = False,
 ) -> RealisticSemanticRun:
     """Run the frozen task set through unchanged production orchestration."""
     eligibility = {item.task_id: item for item in integrity}
@@ -174,6 +175,7 @@ def run_realistic_semantic_v1(
         model,
         repository,
         mutation_representation=mutation_representation,
+        include_repair_mutation_history=include_repair_mutation_history,
     ).run(production, snapshot)
     metadata = {task.task_id: task for task in tasks}
     results = tuple(
