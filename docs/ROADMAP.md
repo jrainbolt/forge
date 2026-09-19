@@ -2117,3 +2117,18 @@ available patch/test pairings. The qualified qwen-small R05 test rejected its ow
 wrong patch and accepted Codestral's correct patch and an alternative-correct
 implementation. That is useful behavioral generalization, but seven other tests
 failed qualification and no systematic same-model preference was established.
+
+---
+
+# Milestone A51 — Human-Gated Ephemeral Acceptance Verification v1
+
+**Status:** Implemented; architecture review pending before acceptance.
+
+`human-gated-acceptance-v1` adds an experimental, default-off human semantic
+review boundary for one ephemeral generated Python assertion per task. It cannot
+auto-approve, grant WRITE authority, create repository tests, feed repair, or
+replace full configured verification. A50 R05 replay controls demonstrate the
+approved check accepting correct and Codestral mutations and rejecting a wrong
+mutation; R06–R08 unqualified candidates remain rejected by evaluator-only
+simulated policy. Broader adoption awaits architecture review and stronger
+sandboxing/semantic evidence. A52 has not begun.

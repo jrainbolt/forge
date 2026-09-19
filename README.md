@@ -548,3 +548,9 @@ For grouped edits, Forge can deterministically acquire current source for
 already-established required candidates before asking the model for a mutation.
 These reads retain normal permission, confinement, and tool-budget enforcement;
 discovery and search results alone never become source or write authority.
+
+Experimental opt-in: coding tasks can request a human-reviewed, ephemeral Python
+acceptance check with `--ephemeral-acceptance optional|required`, two to four
+`--acceptance-context-file` paths, and `--acceptance-import-root`. It is off by
+default. Approval authorizes one exact generated check, not its semantic truth or
+any source mutation; the normal project verification plan is still mandatory.

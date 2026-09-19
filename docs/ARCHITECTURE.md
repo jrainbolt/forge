@@ -1415,3 +1415,31 @@ contains no semantic hint, range, replacement, or benchmark-specific path. A sec
 invalid response terminates normally. A35 single-file behavior, A42 acquisition,
 and A41 validation, approval, atomic application, rollback, and integrity-failure
 semantics are unchanged.
+
+## Human-gated ephemeral acceptance tests
+
+A51 adds an experimental, default-off `--ephemeral-acceptance optional|required`
+coding-task option. It requires 2–4 explicitly selected visible context files and a
+trusted Python import root. Read-only tasks do not synthesize tests; repair mode is
+excluded in v1 so generated-test failures cannot steer another mutation. A single
+generation attempt consumes the existing model-call and iteration budgets. The
+candidate must pass narrow structural/safety checks and fail a pre-mutation
+assertion before human review. Baseline failure is necessary, never proof of
+semantic correctness: a test can fail for the wrong reason.
+
+The reviewer sees the complete exact generated source, task, execution plan,
+baseline failure, and warning. Explicit approval binds task, candidate bytes/SHA,
+language, execution configuration, workspace, generation, relevant source hashes,
+and baseline-result identity. This is distinct from WRITE or TEST permission and
+cannot be auto-approved by an autonomy profile. Drift invalidates approval. A
+rejected or unavailable candidate continues only in optional mode; required mode
+blocks. Approval is memory-only and expires on task end or process restart.
+
+After an authorized mutation, Forge executes the same test from a temporary path,
+never a repository test file. Failure blocks verified completion and does not enter
+repair context. Passing it is only additional evidence: the entire configured
+verification plan must still pass. No generated source enters generic events or
+metrics. Direct subprocess, network, HOME, and file-operation syntax is rejected,
+but Python project imports may themselves have side effects; this is an
+experimental trusted-execution feature requiring informed human review, not a
+sandbox or a mathematically validated specification.

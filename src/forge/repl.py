@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from forge.ephemeral_acceptance import (
+    EphemeralAcceptanceMode,
+    EphemeralAcceptancePreview,
+)
 from forge.models import ModelError
 from forge.orchestration import (
     AgentCancelled,
@@ -70,6 +74,10 @@ def run_repl(
                     cancel_on_interrupt=info.agent_mode,
                 )
             )
+            if session.ephemeral_acceptance_mode is not EphemeralAcceptanceMode.OFF:
+                session.set_ephemeral_review_callback(
+                    _ephemeral_review_prompt(input_fn=input_fn, output_fn=output_fn)
+                )
     output_fn("Type /help for commands.")
     while True:
         try:
@@ -251,3 +259,26 @@ def _approval_prompt(
         return False
 
     return approve
+
+
+def _ephemeral_review_prompt(
+    *, input_fn: InputFunction, output_fn: OutputFunction
+) -> Callable[[EphemeralAcceptancePreview], bool]:
+    def review(preview: EphemeralAcceptancePreview) -> bool:
+        output_fn("GENERATED ACCEPTANCE TEST APPROVAL — separate from source writes")
+        output_fn(f"Task: {preview.task}")
+        output_fn(f"Candidate: {preview.test_name} ({preview.language})")
+        output_fn("Exact generated test source:")
+        output_fn(preview.test_source)
+        output_fn(f"Execution: {preview.execution_description}")
+        output_fn(f"Baseline: {preview.baseline_result}")
+        output_fn(f"Baseline failure output:\n{preview.baseline_failure_output}")
+        output_fn(f"Context files: {', '.join(preview.context_files)}")
+        output_fn(preview.warning)
+        try:
+            answer = input_fn("Approve this exact ephemeral test? [y/N] ")
+        except (EOFError, KeyboardInterrupt):
+            return False
+        return answer.strip().casefold() in {"y", "yes"}
+
+    return review

@@ -11,6 +11,7 @@ from pathlib import Path
 from forge import __version__
 from forge.config import ForgeConfig
 from forge.embedding_config import load_embedding_profile
+from forge.ephemeral_acceptance import EphemeralAcceptanceMode
 from forge.evaluation import (
     SUITE_VERSION,
     EvaluationRunner,
@@ -118,6 +119,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow one approval-gated repair after qualifying verification failure",
     )
+    chat.add_argument(
+        "--ephemeral-acceptance",
+        choices=tuple(mode.value for mode in EphemeralAcceptanceMode),
+        default="off",
+        help="experimental human-reviewed Python acceptance check (default: off)",
+    )
+    chat.add_argument(
+        "--acceptance-context-file",
+        action="append",
+        default=[],
+        help="trusted relevant source or visible test path; supply 2-4",
+    )
+    chat.add_argument(
+        "--acceptance-import-root",
+        default="",
+        help="trusted Python package root allowed in generated assertions",
+    )
     autonomy.add_argument(
         "--agent",
         action="store_true",
@@ -211,6 +229,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         try:
             mode = _resolve_chat_mode(args)
+            ephemeral_mode = EphemeralAcceptanceMode(args.ephemeral_acceptance)
+            if ephemeral_mode is not EphemeralAcceptanceMode.OFF and (
+                not mode.coding_mode
+                or not 2 <= len(args.acceptance_context_file) <= 4
+                or not args.acceptance_import_root.isidentifier()
+            ):
+                raise ValueError(
+                    "ephemeral acceptance requires coding mode, 2-4 context files, "
+                    "and a Python import root"
+                )
             interaction = resolve_interaction_policy(mode, args.permissions)
             if args.workspace is not None and args.no_system:
                 raise ValueError("--no-system cannot be used with repository chat")
@@ -294,6 +322,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "verification_plan",
                         None,
                     ),
+                    ephemeral_acceptance_mode=ephemeral_mode,
+                    ephemeral_acceptance_paths=tuple(args.acceptance_context_file),
+                    ephemeral_acceptance_import_root=args.acceptance_import_root,
                 )
             with model, session:
                 result = run_repl(session)

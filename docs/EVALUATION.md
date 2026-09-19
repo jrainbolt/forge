@@ -1200,3 +1200,20 @@ or unexecutable rather than behavioral rejections. No wrong patch was accepted b
 an executable candidate. The single qualified test shows cross-model behavioral
 generalization on R05, not systematic same-model preference. Seven other tests did
 not qualify, so the production trust gap remains decisive.
+
+## human-gated-acceptance-v1
+
+A51 adds H01–H16 model-free trust-boundary checks and a replay-backed evaluator
+runner, `scripts/run_human_gated_acceptance_v1.py`. It reads the A50 qwen-small
+R05 test from local replay and creates only disposable benchmark copies. An
+explicit simulated review is followed by a correct paired mutation, a wrong
+patch, and the independent Codestral patch. The approved test passes both
+correct states and rejects the wrong state; both correct states also pass the
+unchanged configure/build/test plan. For R06–R08, the evaluator-only ideal
+policy rejects every unqualified A50 candidate. That qualification is not
+imported into production and cannot auto-approve a test.
+
+H01–H16 cover reviewability, exact preview and approval, invalidation,
+capability separation, optional rejection, postmutation gating, full-plan
+authority, headless/autonomy denial, and repair isolation. The suite demonstrates
+a guarded lifecycle, not general semantic reliability for generated tests.

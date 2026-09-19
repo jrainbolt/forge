@@ -22,6 +22,12 @@ from forge.conversation import (
     Conversation,
     RequestPlan,
 )
+from forge.ephemeral_acceptance import (
+    EphemeralAcceptanceGate,
+    EphemeralAcceptanceMode,
+    EphemeralAcceptancePreview,
+    EphemeralAcceptanceState,
+)
 from forge.evidence_coverage import (
     EvidenceCoverageState,
     EvidenceGoalResult,
@@ -489,6 +495,14 @@ class RepositoryChatSession:
             MutationRepresentationPolicy.EXACT_TEXT
         ),
         include_repair_mutation_history: bool = False,
+        ephemeral_acceptance_mode: EphemeralAcceptanceMode = (
+            EphemeralAcceptanceMode.OFF
+        ),
+        ephemeral_acceptance_paths: tuple[str, ...] = (),
+        ephemeral_acceptance_import_root: str = "",
+        ephemeral_review_callback: (
+            Callable[[EphemeralAcceptancePreview], bool] | None
+        ) = None,
     ) -> None:
         if not isinstance(model, Model):
             raise TypeError("model must implement Model")
@@ -570,8 +584,16 @@ class RepositoryChatSession:
             )
         if not isinstance(include_repair_mutation_history, bool):
             raise TypeError("include_repair_mutation_history must be a Boolean")
+        ephemeral_acceptance_mode = EphemeralAcceptanceMode(ephemeral_acceptance_mode)
         self._profile_name = profile_name
         self._include_repair_mutation_history = include_repair_mutation_history
+        self._ephemeral_mode = ephemeral_acceptance_mode
+        self._ephemeral_paths = tuple(ephemeral_acceptance_paths)
+        self._ephemeral_import_root = ephemeral_acceptance_import_root
+        self._ephemeral_review_callback = ephemeral_review_callback
+        self._ephemeral_gate: EphemeralAcceptanceGate | None = None
+        self._ephemeral_generation_calls = 0
+        self._ephemeral_task_text = ""
         self._model = model
         self._generation = generation or GenerationConfig(
             max_tokens=256, temperature=0.4
@@ -604,6 +626,16 @@ class RepositoryChatSession:
         )
         self._mode = derived_mode
         self._assist_mode = derived_mode.coding_mode
+        if (
+            self._ephemeral_mode is not EphemeralAcceptanceMode.OFF
+            and not self._assist_mode
+        ):
+            raise ValueError("ephemeral acceptance requires a coding mode")
+        if (
+            self._ephemeral_mode is not EphemeralAcceptanceMode.OFF
+            and derived_mode is AutonomyMode.REPAIR
+        ):
+            raise ValueError("ephemeral acceptance does not authorize repair mode")
         if self._assist_mode and verification_plan is not None:
             for step in verification_plan.steps:
                 if not _project_configured(self._registry, step):
@@ -752,6 +784,21 @@ class RepositoryChatSession:
         """Attach interactive approval at the application composition boundary."""
         self._approval_callback = callback
 
+    def set_ephemeral_review_callback(
+        self, callback: Callable[[EphemeralAcceptancePreview], bool] | None
+    ) -> None:
+        """Attach the distinct, non-automatable semantic-test review channel."""
+        self._ephemeral_review_callback = callback
+
+    @property
+    def last_ephemeral_events(self) -> tuple[str, ...]:
+        gate = self._ephemeral_gate
+        return tuple(gate.events) if gate is not None else ()
+
+    @property
+    def ephemeral_acceptance_mode(self) -> EphemeralAcceptanceMode:
+        return self._ephemeral_mode
+
     def ask(self, user_text: str) -> RepositoryResponse:
         """Run one bounded transaction and commit only its final answer."""
         if self._agent_mode:
@@ -809,15 +856,62 @@ class RepositoryChatSession:
                 self._required_candidate_paths
             )
         self._last_coding_task = None
+        self._ephemeral_task_text = user_text
+        self._ephemeral_generation_calls = 0
+        self._ephemeral_gate = EphemeralAcceptanceGate(
+            self._ephemeral_mode,
+            context_paths=self._ephemeral_paths,
+            import_root=self._ephemeral_import_root,
+        )
         try:
+            if self._ephemeral_mode is not EphemeralAcceptanceMode.OFF:
+                configured = (
+                    not self._skip_verification
+                    and _has_configured_verification(self._registry)
+                )
+                if not configured or self._max_model_calls <= 1 or self._max_steps <= 1:
+                    if self._ephemeral_mode is EphemeralAcceptanceMode.REQUIRED:
+                        raise RepositoryOrchestrationError(
+                            "required ephemeral acceptance lacks verification "
+                            "or model budget"
+                        )
+                else:
+                    state = self._ephemeral_gate.generate(
+                        self._model,
+                        user_text,
+                        self._context.workspace,
+                        self._mutation_generation,
+                        self._generation,
+                        self._ephemeral_review_callback,
+                    )
+                    self._ephemeral_generation_calls = (
+                        self._ephemeral_gate.metrics.generation_calls
+                    )
+                    if (
+                        self._ephemeral_generation_calls
+                        and self._active_agent_task is not None
+                    ):
+                        self._active_agent_task.model_called()
+                    if (
+                        self._ephemeral_mode is EphemeralAcceptanceMode.REQUIRED
+                        and state is not EphemeralAcceptanceState.APPROVED
+                    ):
+                        raise RepositoryOrchestrationError(
+                            f"required ephemeral acceptance unavailable: {state.value}"
+                        )
+            self._active_coding_task.ephemeral_acceptance_metrics = (
+                self._ephemeral_gate.metrics
+            )
             response = self._ask(user_text)
         except Exception:
             self._active_coding_task.fail_after_mutation()
             self._last_coding_task = self._active_coding_task.finish(
                 "Coding task orchestration failed."
             )
+            self._ephemeral_gate.discard_source()
             raise
         self._last_coding_task = response.coding_task
+        self._ephemeral_gate.discard_source()
         return response
 
     def _mutation_ready_guidance(self, *, grouped: bool = False) -> str:
@@ -1152,7 +1246,7 @@ class RepositoryChatSession:
                     self._verification_plan.steps,
                     tuple(plan_baseline_steps),
                 )
-        for _step in range(self._max_steps):
+        for _step in range(self._ephemeral_generation_calls, self._max_steps):
             acquire_required_sources()
             if agent_task is not None:
                 if agent_task.model_calls >= self._max_model_calls:
@@ -2092,7 +2186,7 @@ class RepositoryChatSession:
                     answer_response,
                     tuple(activities),
                     protocol_corrections,
-                    len(response_usages),
+                    len(response_usages) + self._ephemeral_generation_calls,
                     _aggregate_usage(response_usages),
                     task_result,
                     verification_corrections,
@@ -2279,6 +2373,27 @@ class RepositoryChatSession:
                 "repository.write_file",
                 "repository.apply_patch",
             }:
+                gate = self._ephemeral_gate
+                ephemeral_blocked = False
+                if (
+                    gate is not None
+                    and gate.approved
+                    and self._ephemeral_mode is EphemeralAcceptanceMode.REQUIRED
+                    and not gate.before_mutation(
+                        self._ephemeral_task_text,
+                        self._context.workspace,
+                        self._mutation_generation,
+                    )
+                ):
+                    ephemeral_blocked = True
+                    if coding_task is not None:
+                        coding_task.fail_after_mutation()
+                elif gate is not None and gate.approved:
+                    gate.before_mutation(
+                        self._ephemeral_task_text,
+                        self._context.workspace,
+                        self._mutation_generation,
+                    )
                 legacy_create = (
                     coding_task is not None
                     and coding_task.transition_required
@@ -2293,7 +2408,11 @@ class RepositoryChatSession:
                     and coding_task.inspecting
                     and not legacy_create
                 )
-                if provenance_only:
+                if ephemeral_blocked:
+                    result = _state_policy_failure(
+                        result, "required ephemeral acceptance approval invalidated"
+                    )
+                elif provenance_only:
                     result = self._execute_mutation_proposal(
                         invocation,
                         call.arguments,
@@ -2613,12 +2732,22 @@ class RepositoryChatSession:
                     coding_task.mutation_succeeded(
                         call.tool_name, result.output, self._mutation_generation
                     )
+                    gate = self._ephemeral_gate
+                    if gate is not None and gate.approved:
+                        acceptance = gate.postmutation(
+                            self._context.workspace, self._mutation_generation
+                        )
+                        coding_task.ephemeral_acceptance_metrics = gate.metrics
+                        if acceptance is not EphemeralAcceptanceState.POSTMUTATION_PASS:
+                            coding_task.ephemeral_acceptance_failed(gate.metrics)
                     verification_operation = (
                         self._verification_plan.steps[0].removeprefix("project.")
                         if self._verification_plan is not None
                         else _configured_verification_operation(self._registry)
                     )
-                    if self._skip_verification:
+                    if coding_task.terminal:
+                        LOGGER.info("ephemeral_acceptance_blocked_full_verification")
+                    elif self._skip_verification:
                         coding_task.verification_skipped()
                         LOGGER.debug("verification_skipped reason=caller")
                     elif verification_operation is not None:

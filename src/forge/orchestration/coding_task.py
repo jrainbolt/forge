@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 
+from forge.ephemeral_acceptance import EphemeralAcceptanceMetrics
 from forge.orchestration.verification_attribution import (
     AttributionResult,
     VerificationAttribution,
@@ -48,6 +49,7 @@ class CodingTaskStatus(Enum):
     REPAIR_VERIFICATION_FAILED = "repair_verification_failed"
     REPAIR_FAILED = "repair_failed"
     WORKSPACE_INTEGRITY_FAILED = "workspace_integrity_failed"
+    EPHEMERAL_ACCEPTANCE_FAILED = "ephemeral_acceptance_failed"
 
 
 class VerificationDecision(Enum):
@@ -285,6 +287,9 @@ class CodingTaskResult:
     configure_attempts: tuple[VerificationRecord, ...] = ()
     required_candidates: tuple[RequiredSourceCandidate, ...] = ()
     source_acquisition_metrics: SourceAcquisitionMetrics = SourceAcquisitionMetrics()
+    ephemeral_acceptance_metrics: EphemeralAcceptanceMetrics = (
+        EphemeralAcceptanceMetrics()
+    )
 
     @property
     def footer(self) -> str:
@@ -351,6 +356,7 @@ class CodingTaskState:
             mutation_representation=mutation_representation
         )
         self.verification_gate_metrics = VerificationGateMetrics()
+        self.ephemeral_acceptance_metrics = EphemeralAcceptanceMetrics()
         self.repair_evidence: RepairEvidence | None = None
         self.repair_grounding_metrics = RepairGroundingMetrics()
         self.verification_baseline: VerificationBaselineEvidence | None = None
@@ -1315,6 +1321,13 @@ class CodingTaskState:
             else CodingTaskStatus.FAILED_BEFORE_MUTATION
         )
 
+    def ephemeral_acceptance_failed(self, metrics: EphemeralAcceptanceMetrics) -> None:
+        """Stop before full verification; generated evidence never triggers repair."""
+        self.ephemeral_acceptance_metrics = metrics
+        self.repair_eligible = False
+        self.phase = CodingTaskPhase.FAILED
+        self._terminal_status = CodingTaskStatus.EPHEMERAL_ACCEPTANCE_FAILED
+
     def decline_verification(self) -> None:
         if self.verification_decision is VerificationDecision.NOT_DECIDED:
             self.verification_decision = VerificationDecision.DECLINED
@@ -1384,6 +1397,7 @@ class CodingTaskState:
             tuple(self.configure_attempts),
             tuple(self.required_candidates),
             self.source_acquisition_metrics,
+            self.ephemeral_acceptance_metrics,
         )
 
     def _verification(self, operation: str) -> VerificationRecord:
