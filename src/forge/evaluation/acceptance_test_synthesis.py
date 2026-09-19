@@ -621,7 +621,7 @@ def execute_alternative_correct(
     task: RealisticSemanticTask,
     candidate: GeneratedAcceptanceTest,
 ) -> str:
-    """Exercise two evaluator-owned behaviorally equivalent implementations."""
+    """Exercise predeclared evaluator-owned equivalent implementations."""
     replacements: dict[str, SetupReplacement] = {
         "R05": SetupReplacement(
             "pyservice/state.py",
@@ -643,6 +643,32 @@ def execute_alternative_correct(
             "    )\n"
             "    if not candidate or not allowed:\n"
             '        raise ValueError("invalid header name")',
+        ),
+        "R07": SetupReplacement(
+            "cengine/window.c",
+            "return limit > 0 && events < limit;",
+            "if (limit == 0) {\n        return false;\n    }\n"
+            "    return events < limit;",
+        ),
+        "R08": SetupReplacement(
+            "cengine/status.c",
+            "if (status == ENGINE_RETRY) {\n"
+            "        return ENGINE_RETRY;\n"
+            "    }\n"
+            "    if (status == ENGINE_OK || status == ENGINE_INVALID || "
+            "status == ENGINE_IO_ERROR) {\n"
+            "        return status;\n"
+            "    }\n"
+            "    return ENGINE_INVALID;",
+            "switch (status) {\n"
+            "    case ENGINE_OK:\n"
+            "    case ENGINE_RETRY:\n"
+            "    case ENGINE_INVALID:\n"
+            "    case ENGINE_IO_ERROR:\n"
+            "        return status;\n"
+            "    default:\n"
+            "        return ENGINE_INVALID;\n"
+            "    }",
         ),
     }
     replacement = replacements.get(task.task_id)

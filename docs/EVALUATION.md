@@ -1152,3 +1152,51 @@ post-mutation pass, and full regression verification could form a conservative
 future gate, but no automated trustworthy replacement for evaluator qualification
 was established. A49 therefore makes no production adoption, repair integration,
 test-file creation, verification-plan, prompt, retry, model, or budget change.
+
+## evaluation-replay-v1
+
+A50 separates source-free standard evaluation results from local replay bundles.
+Standard JSON contains only bounded identities, classifications, hashes, timings,
+usage, verification/oracle outcomes, and replay artifact IDs. Raw mutation text and
+generated test bodies exist only beneath the operator-selected
+`eval-results/replay/` location, which is ignored, outside package source, and never
+emitted through normal production telemetry.
+
+Replay bundles are evaluator-owned JSON with an explicit version, canonical payload
+SHA-256, frozen benchmark/repository identity, task version, defective source-state
+identity, model profile, seed, and one bounded type: `MUTATION_PROPOSAL` or
+`GENERATED_ACCEPTANCE_TEST`. Mutation replay validates every group member before any
+write and rejects stale hashes/ranges and path or symlink escape. Generated tests
+are rechecked by the current A49 structural and safety validator before trusted
+execution. Replay only materializes disposable frozen-benchmark workspaces, creates
+no production `ToolExecutor` authority, and cannot target user repositories.
+
+Artifacts and the payload-free manifest use same-directory temporary files and
+atomic replacement. A committed, hash-valid manifest entry is skipped on resume. A
+cell that returns no artifact gets an atomic unavailable checkpoint and is also
+skipped, preventing success-seeking retries. An interrupted cell without either
+commit may run once again as the same planned execution. Local bundles are retained
+manually and carry `LOCAL EVALUATOR DATA — MAY CONTAIN MODEL-GENERATED SOURCE.` They
+must not be uploaded or packaged automatically.
+
+The fixed seed-42 R05–R08 matrix generates fresh qwen-small and Codestral patches
+through unchanged production orchestration and fresh grounded C1 tests. Available
+tests run independently on BASELINE/REFERENCE/WRONG, while hidden semantic truth is
+computed separately for patches before all same-model and cross-model pairings. The
+standard result links both artifact IDs and hashes without source. Predeclared
+equivalent implementations for R05–R08 distinguish behavioral generalization from
+reference-shape matching. Positive replay evidence still cannot close production's
+missing-reference gap, so A50 does not adopt generated tests.
+
+The fresh A50 seed-42 run committed 15 replay bundles: seven accepted patch states
+and eight generated test bodies. qwen-small yielded semantically wrong R05/R06
+patches, a correct R07 patch, and no accepted R08 patch; Codestral yielded four
+semantically correct patches. One of eight tests qualified independently: the
+qwen-small R05 C1 test. It rejected qwen-small's own wrong R05 patch, accepted
+Codestral's correct R05 patch, and accepted the predeclared alternative-correct R05
+implementation. Of 14 available test/patch pairings, one accepted a correct patch,
+two rejected correct patches, and three rejected wrong patches; the rest were unsafe
+or unexecutable rather than behavioral rejections. No wrong patch was accepted by
+an executable candidate. The single qualified test shows cross-model behavioral
+generalization on R05, not systematic same-model preference. Seven other tests did
+not qualify, so the production trust gap remains decisive.

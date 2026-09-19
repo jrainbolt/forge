@@ -44,6 +44,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
+pythonpath = [".", "src"]
 norecursedirs = ["tests/fixtures"]
 markers = [
     "integration: requires an explicitly configured local model",

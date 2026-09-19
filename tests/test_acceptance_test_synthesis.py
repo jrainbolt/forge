@@ -229,6 +229,17 @@ def test_behavioral_candidates_accept_two_alternative_correct_implementations(
         "else:\n"
         "    raise AssertionError('underscore accepted')\n",
     )
+    window = GeneratedAcceptanceTest(
+        "exclusive_limit",
+        '#include "cengine/window.h"\n#include <assert.h>\n'
+        "int main(void) { assert(!window_accepts(3, 3)); return 0; }\n",
+    )
+    status = GeneratedAcceptanceTest(
+        "preserve_io",
+        '#include "cengine/status.h"\n#include <assert.h>\n'
+        "int main(void) { assert(normalize_dependency_status(ENGINE_IO_ERROR) == "
+        "ENGINE_IO_ERROR); return 0; }\n",
+    )
     assert (
         execute_alternative_correct(
             tmp_path, REPOSITORY, _definition("R05").metadata, state
@@ -238,6 +249,18 @@ def test_behavioral_candidates_accept_two_alternative_correct_implementations(
     assert (
         execute_alternative_correct(
             tmp_path, REPOSITORY, _definition("R06").metadata, headers
+        )
+        == "pass"
+    )
+    assert (
+        execute_alternative_correct(
+            tmp_path, REPOSITORY, _definition("R07").metadata, window
+        )
+        == "pass"
+    )
+    assert (
+        execute_alternative_correct(
+            tmp_path, REPOSITORY, _definition("R08").metadata, status
         )
         == "pass"
     )

@@ -2089,3 +2089,31 @@ reference/wrong states, so baseline-fail plus post-mutation-pass cannot exclude 
 mutually wrong patch/test pair. No generated test entered production verification,
 no repository-creation authority or repair integration was added, and A50 was not
 started.
+
+---
+
+# Milestone A50 — Durable Evaluation Replay & Cross-Model Generalization v1
+
+**Status:** Implemented and accepted as evaluation infrastructure; no production
+adoption.
+
+`evaluation-replay-v1` adds evaluator-only local replay bundles for exact accepted
+mutation proposals and exact generated acceptance tests. Version, payload SHA-256,
+frozen repository/source and task identities, bounded payloads, and workspace
+confinement fail closed. Grouped replay validates all edits before any write, and
+generated tests pass current A49 validation before trusted evaluator execution.
+Atomic artifacts, a payload-free manifest, and durable unavailable checkpoints give
+planned cells exactly-once resume semantics without success-seeking reruns.
+
+Standard results remain source-free; raw replay data is ignored, non-packaged local
+evaluator data and creates no production mutation authority. The fixed R05–R08,
+seed-42 qwen-small/Codestral experiment evaluates B/R/W qualification, same-model
+and cross-model patch/test agreement, independent semantic truth, and predeclared
+alternative-correct implementations. Generated tests remain evaluation-only because
+production still has no trusted reference/wrong states. No benchmark, prompt,
+budget, model profile, production verification, or orchestration policy changed.
+The fresh matrix produced 15 raw replay bundles, one qualified test, and 14
+available patch/test pairings. The qualified qwen-small R05 test rejected its own
+wrong patch and accepted Codestral's correct patch and an alternative-correct
+implementation. That is useful behavioral generalization, but seven other tests
+failed qualification and no systematic same-model preference was established.

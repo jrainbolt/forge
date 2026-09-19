@@ -350,6 +350,8 @@ class RealWorldEvaluationRunner:
         ),
         verification_baseline: bool = False,
         include_repair_mutation_history: bool = False,
+        result_callback: Callable[[RealWorldTask, Path, RealWorldTaskResult], None]
+        | None = None,
     ) -> None:
         self._profile = model_profile
         self._model = model
@@ -358,6 +360,7 @@ class RealWorldEvaluationRunner:
         self._mutation_representation = mutation_representation
         self._verification_baseline = verification_baseline
         self._include_repair_mutation_history = include_repair_mutation_history
+        self._result_callback = result_callback
 
     def run(
         self, tasks: Iterable[RealWorldTask], repository: RepositorySnapshot
@@ -456,7 +459,7 @@ class RealWorldEvaluationRunner:
             changed = changed_paths(before, after)
             unexpected = tuple(sorted(set(changed) - set(task.allowed_paths)))
             oracle = run_oracle(workspace, task.oracle_commands)
-            return score_task_result(
+            result = score_task_result(
                 task,
                 seed,
                 response,
@@ -473,6 +476,9 @@ class RealWorldEvaluationRunner:
                 lexical_index,
                 coding_result,
             )
+            if self._result_callback is not None:
+                self._result_callback(task, workspace, result)
+            return result
 
 
 class ExpectedApproval:
