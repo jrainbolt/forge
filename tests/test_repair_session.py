@@ -355,10 +355,10 @@ def test_timeout_grants_repair_but_missing_command_does_not(workspace: Path) -> 
                 sys.executable,
                 "-c",
                 "from pathlib import Path; import time; "
-                "time.sleep(0.2) if 'BAD' in "
+                "time.sleep(3) if 'BAD' in "
                 "Path('src/value.py').read_text() else None",
             ),
-            0.05,
+            1.0,
         ),
     ).run_agent_task("Repair after timeout")
     assert timeout.agent_task.status == "completed_repaired_verified"
