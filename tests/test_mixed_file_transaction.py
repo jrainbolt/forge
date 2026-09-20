@@ -543,6 +543,8 @@ def test_partial_mixed_group_gets_one_generic_correction(tmp_path: Path) -> None
     assert not (tmp_path / "b.py").exists()
     assert len(model.requests) == 2
     assert any(
-        "exactly every authorized" in message.content
+        "exactly 2 operations" in message.content
+        and "MODIFY paths: a.py" in message.content
+        and "CREATE paths: b.py" in message.content
         for message in model.requests[1].messages
     )

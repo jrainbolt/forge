@@ -1541,6 +1541,14 @@ four operations, at most two creates; duplicate, surprise, cross-authority, or
 partial groups are rejected. Creation-only and edit-only schemas remain available
 in their historical phases.
 
+The A55 mixed-ready anchor now names both the existing MODIFY candidates and the
+absent CREATE candidates, rather than labeling only the edit subset as authorized
+mutation targets. Its correction text restates the trusted operation count and
+binds each authorized path to its MODIFY or CREATE role and schema child type. It
+forbids duplicate or extra children and supplies no implementation content. The
+same role-explicit wording is used at mixed readiness; authority, schema, single
+correction limit, transaction validation, and approval behavior are unchanged.
+
 Forge normalizes the response into immutable typed edit/create operations, validates
 and materializes every child before touching source paths, then presents one
 canonically ordered MODIFY/CREATE preview. The exact approval binds the invocation,

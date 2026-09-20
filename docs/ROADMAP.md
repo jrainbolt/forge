@@ -2178,3 +2178,25 @@ Packaging correction: A8's TinyQueue `eval_repo` is a documented installed
 remain package data; wheel/sdist checks reject all other evaluator fixtures and
 generated artifacts. This preserves A8/A16 installed behavior without a broad
 fixture glob.
+
+# Milestone A55 — Mixed Operation Protocol Compatibility v1
+
+**Status:** Implemented; architecture review pending.
+
+`mixed-operation-protocol-v1` separates trusted MODIFY/CREATE intent, independent
+children, minimal mixed composition, the exact production schema, and full Forge
+execution. Six evaluator-only Python/C tasks require both operations and have
+discriminating paired semantic references. qwen-small, qwen-large, and Codestral
+all recognized the roles on seven cases (including unchanged A54-R1) and emitted
+valid production-schema pairs on all seven M4 cases. Semantic quality varied;
+two minimal-schema outputs used unauthorized leading-slash paths.
+
+The audit found a generic mixed-readiness contradiction: the production anchor
+named only the edit candidate as an authorized target, while CREATE was also
+required. Mixed readiness/correction now explicitly binds the exact operation
+count, both role/path sets, and child types without changing authority or the
+transaction. In the single valid post-fix A54-R1 production run, qwen-large
+previewed and applied the pair and passed verification plus oracle; Codestral
+previewed and applied the pair but failed semantically. qwen-small's run returned
+but its result could not be serialized by the evaluator, so that M5 outcome is
+unscored rather than inferred or repeatedly rerun. No A56 work was started.

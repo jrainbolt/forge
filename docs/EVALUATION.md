@@ -1279,3 +1279,62 @@ single authorized new path, then repeated that shape after one generic correctio
 The complete-group validator rejected both before preview, approval, mutation, or
 verification. This is a model proposal/path-set failure, not a transaction
 failure; the disposable baseline/reference oracle remained FAIL/PASS.
+
+## mixed-operation-protocol-v1
+
+A55 isolates mixed-operation reasoning from production orchestration. The
+evaluator-only corpus in `scripts/mixed_operation_protocol_v1.py` has six cases:
+four Python caller/registry/parser/package tasks and two C dispatcher/unit tasks.
+For every case, the unchanged baseline and both one-operation-only reference
+states fail, while the paired MODIFY+CREATE reference passes. The unchanged A54
+task is an external A54-R1 case. Reference code is never placed in model input.
+No A55 fixture or result is a wheel/sdist runtime resource.
+
+`scripts/run_mixed_operation_protocol_v1.py` runs M1 bounded intent roles, M2
+independent LINE_RANGE and create actions, M3 a minimal heterogeneous schema,
+and M4 the live `build_mutation_ready_output` schema plus `parse_model_output`.
+All valid pairs are validated and applied through the A54 transaction in a
+disposable workspace before the independent semantic oracle. M5 invokes the
+actual repository session separately. Seed 42, temperature 0, 8192 context,
+512 output tokens, and LINE_RANGE are held fixed; no planning or extra retry is
+introduced. Metrics retain child types/paths, counts, tokens, latency, and
+truncation, never generated source content.
+
+Across X01–X06 and A54-R1, all three required models passed M1 role/path
+classification on 7/7 cases and emitted valid independent M2 child shapes on
+7/7. Semantic M2 passes were qwen-small 1/7, qwen-large 4/7, and Codestral
+2/7. M3 structural pairs were 7/7, 6/7, and 6/7 respectively; the two losses
+were unauthorized leading-slash paths, not duplicate operations. M4 emitted
+the exact two authorized child roles and paths on 7/7 for each model. M4
+semantic passes were 1/7, 4/7, and 3/7 respectively. No M1–M4 output reached
+the 512-token ceiling (largest reported output: 144 tokens), and no M4 bounded
+correction was needed. The first general model limitation in this corpus is
+semantic child construction, not conceptual role recognition or mixed schema
+compatibility.
+
+On A54-R1 specifically, qwen-small passed M1, produced structurally valid M2
+and M4 pairs with failing semantics, and passed the M3 semantic oracle.
+qwen-large passed all four layers. Codestral passed M1, M2, and M4 including
+their semantic oracles, but its M3 code failed semantics. Thus the historical
+duplicate-CREATE production result does not reproduce in isolated M4 and is
+attributable to full-session framing/continuity, not inability to express the
+production schema. The production audit found that the mixed anchor listed only
+existing edit candidates under “authorized mutation targets” and that generic
+correction text omitted exact role/path bindings. A generic correction now
+names both roles and paths, exact operation count, one child per path, and
+LINE_RANGE/CREATE child types; the anchor includes both paths. Schema,
+authority, budgets, correction count, and transaction mechanics are unchanged.
+
+The one valid post-fix A54-R1 M5 attempt per model used LINE_RANGE. qwen-large
+produced MODIFY app.py plus CREATE helper.py, reached preview and transaction,
+and passed configured verification and the independent oracle. Codestral
+produced the same valid pair and reached preview and transaction, but failed
+verification and oracle (semantic quality). qwen-small's production session
+returned, but the evaluator failed serializing its enum status before writing
+the result; that run is not scored and was not repeated under the one-run
+limit. Two earlier Qwen probes accidentally used the session's EXACT_TEXT
+default rather than the A55 LINE_RANGE control; both duplicated CREATE and
+are excluded from M4–M5 comparison. The evaluator serializer and representation
+setting were corrected; the invalid probes are retained only as an explicit
+instrumentation deviation. A55 makes no claim of universal qwen-small M5
+success or broad semantic coding reliability.
