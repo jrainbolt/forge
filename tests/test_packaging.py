@@ -7,6 +7,7 @@ from pathlib import Path
 
 import forge
 from forge.evaluation import fixture_workspace
+from scripts.verify_wheel import RUNTIME_EVAL_RESOURCE_FILES
 
 
 def test_src_layout_discovery_and_extras_are_explicit() -> None:
@@ -24,6 +25,10 @@ def test_src_layout_discovery_and_extras_are_explicit() -> None:
         item.startswith("llama-cpp-python")
         for item in config["project"]["optional-dependencies"]["llama"]
     )
+    assert {
+        "forge/evaluation/" + path
+        for path in config["tool"]["setuptools"]["package-data"]["forge.evaluation"]
+    } == RUNTIME_EVAL_RESOURCE_FILES
 
 
 def test_packaged_evaluation_fixture_is_a_package_resource() -> None:

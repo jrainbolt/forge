@@ -2163,7 +2163,7 @@ ephemeral-test persistence authority is added.
 
 # Milestone A54 — Unified Bounded File-Operation Transaction v1
 
-**Status:** Implemented; architecture review pending before acceptance.
+**Status:** Implemented; packaging exception classified for acceptance review.
 
 An explicit mixed task combines one or more current authorized existing-file edits
 with one or two exact new-text-file create candidates, bounded to four operations
@@ -2172,3 +2172,9 @@ increment, and verification cycle cover the complete group. A9 direct absent-tar
 creation is no longer available to coding orchestration; direct low-level helper
 compatibility remains. No delete, rename, directory creation, executable, or binary
 operation is added.
+
+Packaging correction: A8's TinyQueue `eval_repo` is a documented installed
+`forge eval` runtime resource, not accidental package data. Its nine exact files
+remain package data; wheel/sdist checks reject all other evaluator fixtures and
+generated artifacts. This preserves A8/A16 installed behavior without a broad
+fixture glob.

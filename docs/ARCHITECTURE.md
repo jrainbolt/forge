@@ -13,11 +13,18 @@ version metadata is derived from `forge.__version__`, which is also used by the 
 Neither the console script nor `python -m forge` changes `sys.path` or the process
 working directory.
 
-The controlled TinyQueue evaluation workspace is deliberate package data under
-`forge.evaluation`. Runtime lookup uses `importlib.resources`, so installed evaluation
-suites do not depend on the repository's `tests/` tree, README, scripts, or invocation
-directory. User-selected `--workspace .` and relative configuration paths retain their
-ordinary current-working-directory semantics.
+The controlled TinyQueue evaluation workspace is deliberate installed runtime data
+under `forge.evaluation`, not an incidental test fixture. The documented `forge eval`
+command defaults to it when `--workspace` is absent; `fixture_workspace()` is
+exported, and the clean-wheel smoke verifies it. Runtime lookup uses
+`importlib.resources`, so that installed command does not depend on the repository's
+`tests/` tree, README, scripts, or invocation directory. This is a narrow exception
+to the no-evaluator-fixtures package policy: only the nine exact TinyQueue resource
+files are allowed. `pyproject.toml` enumerates them, and distribution checks reject
+any other evaluator fixture, benchmark repository, replay data, generated test,
+transaction staging, evaluation result, or model weight in both wheel and sdist.
+User-selected `--workspace .` and relative configuration paths retain their ordinary
+current-working-directory semantics.
 
 Base Forge has no runtime dependencies and importing it does not import llama.cpp.
 Pytest, Ruff, and the standards-based build frontend belong only to the `dev` extra;

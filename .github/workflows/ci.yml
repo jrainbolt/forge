@@ -45,8 +45,8 @@ jobs:
       - name: Build wheel and source distribution
         run: python -m build
 
-      - name: Inspect wheel contents
-        run: python scripts/verify_wheel.py dist/*.whl
+      - name: Inspect wheel and source distribution contents
+        run: python scripts/verify_wheel.py dist/*.whl dist/*.tar.gz
 
       - name: Install wheel in a clean environment
         run: |

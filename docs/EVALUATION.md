@@ -3,8 +3,10 @@
 ## coding-v1
 
 `coding-v1` is Forge's first controlled, read-only coding benchmark. It runs
-eight independent questions against the packaged TinyQueue fixture under
-`forge.evaluation`. The suite covers symbol and implementation
+eight independent questions against the explicitly packaged TinyQueue runtime
+resource under `forge.evaluation`. This resource is required by the documented
+installed `forge eval` default and exported `fixture_workspace()` lookup; no other
+evaluator fixture is permitted in the wheel or sdist. The suite covers symbol and implementation
 localization, implementation explanation, multi-file tracing, defect discovery
 and consequence analysis, test coverage, and an architecture boundary.
 

@@ -39,7 +39,17 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-"forge.evaluation" = ["fixtures/**/*"]
+"forge.evaluation" = [
+    "fixtures/eval_repo/README.md",
+    "fixtures/eval_repo/src/tinyqueue/__init__.py",
+    "fixtures/eval_repo/src/tinyqueue/models.py",
+    "fixtures/eval_repo/src/tinyqueue/retry.py",
+    "fixtures/eval_repo/src/tinyqueue/service.py",
+    "fixtures/eval_repo/src/tinyqueue/storage.py",
+    "fixtures/eval_repo/tests/test_retry.py",
+    "fixtures/eval_repo/tests/test_service.py",
+    "fixtures/eval_repo/tests/test_storage.py",
+]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
