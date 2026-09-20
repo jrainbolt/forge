@@ -221,7 +221,7 @@ def test_external_change_after_preview_causes_precondition_failure(
     assert (workspace / "src/value.py").read_bytes() == b"HUMAN = 3\n"
 
 
-def test_new_file_requires_inspected_parent_then_can_be_approved(
+def test_legacy_create_cannot_bypass_candidate_authority_after_parent_inspection(
     workspace: Path,
 ) -> None:
     arguments = {"path": "src/new.py", "content": "NEW = 1\n", "mode": "create"}
@@ -232,11 +232,11 @@ def test_new_file_requires_inspected_parent_then_can_be_approved(
             final("The new file was created; it was not tested."),
         )
     )
-    response = assist_session(model, workspace, approve=lambda *_args: True).ask(
-        "Create a source file"
-    )
-    assert (workspace / "src/new.py").read_text() == "NEW = 1\n"
-    assert response.tool_activity[-1].evidence == "write_success"
+    with pytest.raises(RepositoryOrchestrationError, match="CREATE_READY"):
+        assist_session(model, workspace, approve=lambda *_args: True).ask(
+            "Create a source file"
+        )
+    assert not (workspace / "src/new.py").exists()
 
 
 def test_new_file_without_context_is_rejected(workspace: Path) -> None:
@@ -251,10 +251,10 @@ def test_new_file_without_context_is_rejected(workspace: Path) -> None:
             final("Creation was rejected."),
         )
     )
-    response = assist_session(model, workspace, approve=lambda *_args: True).ask(
-        "Create a source file"
-    )
-    assert response.tool_activity[0].status == "failure"
+    with pytest.raises(RepositoryOrchestrationError, match="CREATE_READY"):
+        assist_session(model, workspace, approve=lambda *_args: True).ask(
+            "Create a source file"
+        )
     assert not (workspace / "src/new.py").exists()
 
 

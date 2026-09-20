@@ -155,6 +155,26 @@ MULTI_FILE_CREATE_SCHEMA = {
     "required": ["type", "creates"],
     "additionalProperties": False,
 }
+MULTI_FILE_CHANGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"const": "multi_file_change"},
+        "operations": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 4,
+            "items": {
+                "oneOf": [
+                    LINE_RANGE_EDIT_SCHEMA,
+                    STRUCTURED_EDIT_SCHEMA,
+                    CREATE_FILE_SCHEMA,
+                ]
+            },
+        },
+    },
+    "required": ["type", "operations"],
+    "additionalProperties": False,
+}
 REPOSITORY_RESPONSE_SCHEMA = {
     "oneOf": [
         TOOL_CALL_SCHEMA,
@@ -362,6 +382,8 @@ def _json_schema_type(argument_type: ArgumentType) -> str:
         return "array"
     if argument_type is ArgumentType.TEXT_FILE_CREATES:
         return "array"
+    if argument_type is ArgumentType.FILE_OPERATIONS:
+        return "array"
     raise TypeError("unsupported argument type")
 
 
@@ -378,6 +400,7 @@ class ToolCallOutcome(Enum):
     MULTI_FILE_LINE_RANGE_EDIT = "multi_file_line_range_edit"
     CREATE_FILE = "create_file"
     MULTI_FILE_CREATE = "multi_file_create"
+    MULTI_FILE_CHANGE = "multi_file_change"
 
 
 @dataclass(frozen=True, slots=True)
@@ -410,6 +433,7 @@ class ParsedModelOutput:
     multi_file_structured_edit: tuple[Mapping[str, str], ...] | None = None
     multi_file_line_range_edit: tuple[Mapping[str, object], ...] | None = None
     creates: tuple[Mapping[str, str], ...] | None = None
+    operations: tuple[Mapping[str, object], ...] | None = None
 
     def __post_init__(self) -> None:
         if self.outcome is ToolCallOutcome.FINAL:
@@ -451,6 +475,9 @@ class ParsedModelOutput:
         }:
             if self.creates is None:
                 raise ValueError("create output requires files")
+        elif self.outcome is ToolCallOutcome.MULTI_FILE_CHANGE:
+            if self.operations is None:
+                raise ValueError("mixed output requires operations")
         else:
             raise TypeError("outcome must be a ToolCallOutcome")
 
@@ -522,6 +549,44 @@ def parse_model_output(text: str) -> ParsedModelOutput:
         return ParsedModelOutput(
             ToolCallOutcome.MULTI_FILE_CREATE,
             creates=tuple(MappingProxyType(item) for item in creates),
+        )
+    if response_type == "multi_file_change":
+        if (
+            set(payload) != {"type", "operations"}
+            or not isinstance(payload["operations"], list)
+            or not 2 <= len(payload["operations"]) <= 4
+        ):
+            raise ProtocolError("mixed change requires two to four operations")
+        operations = payload["operations"]
+        for item in operations:
+            if not isinstance(item, dict):
+                raise ProtocolError("mixed child must be an object")
+            kind = item.get("type")
+            fields = (
+                {"type", "path", "content"}
+                if kind == "create_file"
+                else {"type", "path", "start_line", "end_line", "new_text"}
+                if kind == "line_range_edit"
+                else {"type", "path", "old_text", "new_text"}
+                if kind == "structured_edit"
+                else set()
+            )
+            if not fields or set(item) != fields or not isinstance(item["path"], str):
+                raise ProtocolError("mixed child fields are invalid")
+            if kind == "line_range_edit":
+                if any(
+                    type(item[key]) is not int for key in ("start_line", "end_line")
+                ):
+                    raise ProtocolError("mixed line bounds must be integers")
+                if not isinstance(item["new_text"], str):
+                    raise ProtocolError("mixed new_text must be text")
+            elif any(
+                not isinstance(item[key], str) for key in fields - {"type", "path"}
+            ):
+                raise ProtocolError("mixed content must be text")
+        return ParsedModelOutput(
+            ToolCallOutcome.MULTI_FILE_CHANGE,
+            operations=tuple(MappingProxyType(item) for item in operations),
         )
     if response_type == "structured_edit":
         if set(payload) != {"type", "path", "old_text", "new_text"}:
@@ -622,6 +687,23 @@ def build_mutation_ready_output(
     allow_single_file_subset: bool = False,
 ) -> OutputSpecification:
     """Require one candidate-bound configured mutation representation."""
+    if create_paths and candidate_paths:
+        mixed = json.loads(json.dumps(MULTI_FILE_CHANGE_SCHEMA))
+        children = mixed["properties"]["operations"]["items"]["oneOf"]
+        edit_schema = (
+            LINE_RANGE_EDIT_SCHEMA
+            if representation is MutationRepresentationPolicy.LINE_RANGE
+            else STRUCTURED_EDIT_SCHEMA
+        )
+        children[:] = [
+            json.loads(json.dumps(edit_schema)),
+            json.loads(json.dumps(CREATE_FILE_SCHEMA)),
+        ]
+        children[0]["properties"]["path"]["enum"] = sorted(candidate_paths)
+        children[1]["properties"]["path"]["enum"] = sorted(create_paths)
+        return OutputSpecification(
+            ResponseFormat.JSON, {"oneOf": [mixed, FINAL_SCHEMA]}
+        )
     if create_paths:
         source = (
             CREATE_FILE_SCHEMA if len(create_paths) == 1 else MULTI_FILE_CREATE_SCHEMA

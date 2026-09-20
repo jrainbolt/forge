@@ -1516,7 +1516,40 @@ paths or delete files. A51/A52 generated tests remain ephemeral and are not
 persisted through creation authority. A53 adds no deletion, rename, directory
 creation, executable mode, or general-purpose filesystem tool.
 
-Compatibility boundary: the preexisting A9 `repository.write_file` create mode
-remains available in legacy assist flows after its existing inspected-parent and
-approval checks. When A53 `--create-path` authority is active, that legacy route
-is rejected for the task; creation must use the typed candidate-bound protocol.
+Historical A53 compatibility boundary: the preexisting A9 `repository.write_file`
+create mode was still available in legacy assist flows after inspected-parent and
+approval checks, but was rejected when `--create-path` authority was active. A54
+supersedes this production behavior below.
+
+## Unified bounded file-operation transaction
+
+A54 adds an explicit mixed task mode: trusted setup supplies existing edit paths
+(`--edit-path`) separately from exact absent create paths (`--create-path`). The
+current source hash, generation, and authorized range remain mandatory for edits;
+the A53 absent path, existing parent device/inode, generation, and protected-path
+policy remain mandatory for creates. One `multi_file_change` model response contains
+the complete required path set, with existing edits in the selected exact-text or
+line-range representation and creates as complete UTF-8 text. The total is two to
+four operations, at most two creates; duplicate, surprise, cross-authority, or
+partial groups are rejected. Creation-only and edit-only schemas remain available
+in their historical phases.
+
+Forge normalizes the response into immutable typed edit/create operations, validates
+and materializes every child before touching source paths, then presents one
+canonically ordered MODIFY/CREATE preview. The exact approval binds the invocation,
+group identity, operation types, paths, edit precondition hashes, create parent
+identities, new bytes and hashes, workspace and generation. Immediately before
+application it rechecks every edit hash and every create absence/parent identity.
+Existing files use staged replacement; new files use exclusive no-follow creation.
+An explicit journal records each completed child. Handled failure reverses the
+journal, restoring exact edit bytes and removing only transaction-owned created
+files. Unsafe or incomplete rollback is terminal `workspace_integrity_failed`.
+This is not crash atomicity.
+
+Success increments generation once and invalidates indexes for all child paths.
+Repair may freshly acquire and edit any primary path, including a created file,
+but may not create another file. A51/A52 ephemeral tests grant no create authority.
+The A9 `write_file` implementation retains its low-level helper API, but normal
+coding sessions reject its absent-target create mode even after directory inspection.
+There is still no delete, rename, directory creation, binary, or executable-file
+authority.

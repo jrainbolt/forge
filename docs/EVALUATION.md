@@ -1252,3 +1252,28 @@ safety. The qwen-small host run reached CREATE_READY, proposed the authorized
 new module, displayed and approved its CREATE preview, applied the transaction,
 passed configured project testing, and passed the independent oracle. The
 fixture is not production guidance and does not enter the wheel.
+
+## mixed-file-transaction-v1
+
+A54 adds deterministic M01–M18 cases in `tests/test_mixed_file_transaction.py`.
+They cover mixed success and four-child bounds, canonical ordering, exact edit and
+create authority, duplicate paths, all-before-write stale/appearance checks,
+missing/protected parents, reverse-order rollback, terminal integrity failures,
+one-generation/one-mutation accounting, fresh repair of a created file, legacy A9
+bypass closure, and ephemeral-test non-authority. A41 edit-only and A53 create-only
+tests remain separate compatibility checks.
+
+`scripts/run_mixed_file_transaction_v1.py` creates a disposable Python application
+where the baseline behavioral oracle fails and an evaluator-held two-file reference
+passes. Its optional qwen-small attempt uses seed 42, temperature 0, 8192-token
+profile context, and 512 output tokens. The task authorizes one existing-file edit
+and one new module path through trusted setup; evaluator reference text never grants
+runtime authority. Model semantic failure is reported separately from transaction
+mechanics. No benchmark fixture or model artifact enters the package.
+
+The real qwen-small attempt outside the Metal-restricted sandbox loaded normally
+and reached mixed readiness. It emitted four duplicate CREATE children for the
+single authorized new path, then repeated that shape after one generic correction.
+The complete-group validator rejected both before preview, approval, mutation, or
+verification. This is a model proposal/path-set failure, not a transaction
+failure; the disposable baseline/reference oracle remained FAIL/PASS.

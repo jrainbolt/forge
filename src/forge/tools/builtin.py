@@ -13,6 +13,7 @@ from forge.project_config import ProjectCommands
 from forge.tools.controlled_creation import CreateTextFilesTool
 from forge.tools.git import GitDiffTool, GitStatusTool
 from forge.tools.lexical import LexicalSearchTool
+from forge.tools.mixed_transaction import MixedFileTransactionTool
 from forge.tools.permissions import RuleBasedPolicy
 from forge.tools.project import ProjectCommandTool
 from forge.tools.registry import ToolRegistry
@@ -44,6 +45,7 @@ READ_ONLY_TOOL_NAMES = (
 )
 SEMANTIC_TOOL_NAME = "repository.semantic_search"
 WRITE_TOOL_NAMES = (
+    "repository.apply_file_operations",
     "repository.create_text_files",
     "repository.apply_multi_patch",
     "repository.apply_patch",
@@ -117,6 +119,7 @@ def create_assist_repository_registry(
     ]
     if include_creation:
         candidates.append(CreateTextFilesTool())
+        candidates.append(MixedFileTransactionTool())
     if semantic_index is not None:
         candidates.append(SemanticSearchTool(semantic_index))
     if lexical_index is not None:
@@ -166,6 +169,7 @@ def create_repository_registry(
     ]
     if include_creation:
         candidates.append(CreateTextFilesTool())
+        candidates.append(MixedFileTransactionTool())
     if semantic_index is not None:
         candidates.append(SemanticSearchTool(semantic_index))
     if lexical_index is not None:

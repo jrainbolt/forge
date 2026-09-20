@@ -25,6 +25,7 @@ class ArgumentType(Enum):
     TEXT_EDITS = "text_edits"
     MULTI_FILE_PATCHES = "multi_file_patches"
     TEXT_FILE_CREATES = "text_file_creates"
+    FILE_OPERATIONS = "file_operations"
 
 
 class ToolResultStatus(Enum):
@@ -211,6 +212,7 @@ class ExecutionContext:
     workspace: Path
     prepared_project_command: object | None = None
     create_candidates: tuple[CreateCandidate, ...] = ()
+    edit_candidates: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.workspace, Path):
@@ -326,6 +328,22 @@ def _matches_type(value: object, value_type: ArgumentType) -> bool:
             and isinstance(item["content"], str)
             for item in value
         )
+    if value_type is ArgumentType.FILE_OPERATIONS:
+        return isinstance(value, (list, tuple)) and all(
+            isinstance(item, Mapping)
+            and (
+                set(item) == {"type", "path", "expected_sha256", "edits"}
+                and item["type"] == "edit"
+                and isinstance(item["path"], str)
+                and isinstance(item["expected_sha256"], str)
+                and _matches_type(item["edits"], ArgumentType.TEXT_EDITS)
+                or set(item) == {"type", "path", "content"}
+                and item["type"] == "create"
+                and isinstance(item["path"], str)
+                and isinstance(item["content"], str)
+            )
+            for item in value
+        )
     return False
 
 
@@ -337,6 +355,9 @@ def _freeze_argument(value: object, value_type: ArgumentType) -> object:
         assert isinstance(value, (list, tuple))
         return tuple(freeze_structured_value(patch) for patch in value)
     if value_type is ArgumentType.TEXT_FILE_CREATES:
+        assert isinstance(value, (list, tuple))
+        return tuple(freeze_structured_value(item) for item in value)
+    if value_type is ArgumentType.FILE_OPERATIONS:
         assert isinstance(value, (list, tuple))
         return tuple(freeze_structured_value(item) for item in value)
     return value

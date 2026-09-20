@@ -141,6 +141,7 @@ from forge.tools.controlled_creation import (
     create_group_id,
     preview_create_text_files,
 )
+from forge.tools.mixed_transaction import mixed_group_id, preview_mixed_file_transaction
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_MAX_ORCHESTRATION_STEPS = 12
@@ -226,6 +227,12 @@ CREATE_READY_GUIDANCE = (
     "and each target is absent. Return complete UTF-8 file content using create_file "
     "or multi_file_create. No directory creation, deletion, executable mode, or "
     "surprise path is permitted. Forge will preview and require exact approval."
+)
+MIXED_READY_GUIDANCE = (
+    "Return one multi_file_change containing exactly every authorized existing edit "
+    "path and every authorized new create path. Use the configured edit representation "
+    "for edit children and complete UTF-8 content for create children. No surprise "
+    "paths or partial group. Forge will preview and require one exact approval."
 )
 MUTATION_READY_SYSTEM_PROMPT = (
     "You are Forge performing one coding mutation in a local repository. "
@@ -482,6 +489,7 @@ class RepositoryChatSession:
         minimum_source_files: int | None = None,
         required_candidate_paths: tuple[str, ...] = (),
         create_candidate_paths: tuple[str, ...] = (),
+        mixed_file_operations: bool = False,
         require_relevant_source: bool = True,
         require_mutation_relevance: bool | None = None,
         skip_verification: bool = False,
@@ -578,6 +586,14 @@ class RepositoryChatSession:
             )
         if not isinstance(require_relevant_source, bool):
             raise TypeError("require_relevant_source must be a Boolean")
+        if not isinstance(mixed_file_operations, bool):
+            raise TypeError("mixed_file_operations must be a Boolean")
+        if mixed_file_operations and not required_candidate_paths:
+            raise ValueError("mixed transaction requires explicit edit candidate paths")
+        if mixed_file_operations and not create_candidate_paths:
+            raise ValueError(
+                "mixed transaction requires explicit create candidate paths"
+            )
         if require_mutation_relevance is not None and not isinstance(
             require_mutation_relevance, bool
         ):
@@ -689,6 +705,10 @@ class RepositoryChatSession:
             create_candidate_paths
         ):
             raise ValueError("at most two unique create candidates are allowed")
+        if len(required_candidate_paths) + len(create_candidate_paths) > 4:
+            raise ValueError("at most four edit and create operations are allowed")
+        if set(required_candidate_paths) & set(create_candidate_paths):
+            raise ValueError("edit and create authority paths must be disjoint")
         create_candidates = tuple(
             authorize_create_candidate(
                 selected_workspace, path, 0, "explicit_task_path"
@@ -699,7 +719,17 @@ class RepositoryChatSession:
             metadata.name for metadata in self._registry.metadata
         }:
             raise ValueError("create tool is unavailable under this registry")
+        if mixed_file_operations and "repository.apply_file_operations" not in {
+            metadata.name for metadata in self._registry.metadata
+        }:
+            raise ValueError(
+                "mixed transaction tool is unavailable under this registry"
+            )
         self._create_paths = tuple(item.path for item in create_candidates)
+        self._mixed_required = mixed_file_operations
+        self._mixed_edit_paths = (
+            required_candidate_paths if mixed_file_operations else ()
+        )
         self._context = ExecutionContext(
             selected_workspace, create_candidates=create_candidates
         )
@@ -746,6 +776,7 @@ class RepositoryChatSession:
         self._agent_stop_hint: AgentStopReason | None = None
         self._model_invocation_ids: set[str] = set()
         self._authorized_create_invocation: ToolInvocation | None = None
+        self._authorized_mixed_invocation: ToolInvocation | None = None
         LOGGER.info(
             "Repository session policy mode=%s permissions=%s tools=%d",
             self._mode.value,
@@ -875,6 +906,7 @@ class RepositoryChatSession:
                 "coding tasks require explicit assist mode"
             )
         self._authorized_create_invocation = None
+        self._authorized_mixed_invocation = None
         self._active_coding_task = CodingTaskState(
             self._mutation_generation,
             repair_enabled=self._repair_enabled,
@@ -1475,6 +1507,15 @@ class RepositoryChatSession:
             )
             mutation_candidate_ranges: dict[str, tuple[int, int]] = {}
             if structured_edit_ready:
+                assert coding_task is not None
+                self._context = replace(
+                    self._context,
+                    edit_candidates=(
+                        self._mixed_edit_paths
+                        if self._mixed_required and not coding_task.repair_ready
+                        else coding_task.mutation_candidate_paths
+                    ),
+                )
                 routed_candidate_files = set(coding_task.mutation_candidate_paths)
                 reread_candidates = [
                     candidate
@@ -1486,6 +1527,7 @@ class RepositoryChatSession:
                 routed_tools = {
                     "repository.apply_patch",
                     "repository.apply_multi_patch",
+                    "repository.apply_file_operations",
                     "repository.create_text_files",
                 }
                 if reread_candidates:
@@ -1548,7 +1590,13 @@ class RepositoryChatSession:
                     None,
                 )
                 output_specification = build_mutation_ready_output(
-                    coding_task.mutation_candidate_paths,
+                    (
+                        self._mixed_edit_paths
+                        if self._mixed_required and not coding_task.repair_ready
+                        else coding_task.mutation_candidate_paths
+                        if not self._create_paths or coding_task.repair_ready
+                        else ()
+                    ),
                     create_paths=(
                         self._create_paths if not coding_task.repair_ready else ()
                     ),
@@ -1629,7 +1677,16 @@ class RepositoryChatSession:
             mutation_messages: tuple[Message, ...] = ()
             if structured_edit_ready and coding_task is not None:
                 candidates = tuple(
-                    sorted(coding_task.mutation_candidates, key=lambda item: item.path)
+                    sorted(
+                        (
+                            candidate
+                            for candidate in coding_task.mutation_candidates
+                            if not self._mixed_required
+                            or coding_task.repair_ready
+                            or candidate.path in self._mixed_edit_paths
+                        ),
+                        key=lambda item: item.path,
+                    )
                 )
                 repair = coding_task.repair_ready
                 repair_evidence = coding_task.repair_evidence if repair else None
@@ -1712,7 +1769,13 @@ class RepositoryChatSession:
                 )
                 if self._create_paths and not repair:
                     guidance = (
-                        CREATE_READY_GUIDANCE
+                        MIXED_READY_GUIDANCE
+                        + " Authorized edit paths: "
+                        + ", ".join(self._mixed_edit_paths)
+                        + "; authorized new paths: "
+                        + ", ".join(self._create_paths)
+                        if self._mixed_required
+                        else CREATE_READY_GUIDANCE
                         + " Authorized new paths: "
                         + ", ".join(self._create_paths)
                     )
@@ -1803,7 +1866,11 @@ class RepositoryChatSession:
                 if coding_task is not None and coding_task.structured_edit_ready:
                     grouped_ready = len(coding_task.mutation_candidates) > 1
                     mutation_correction = (
-                        GROUPED_MUTATION_PROTOCOL_CORRECTION
+                        MIXED_READY_GUIDANCE
+                        if self._mixed_required and not coding_task.repair_ready
+                        else CREATE_READY_GUIDANCE
+                        if self._create_paths and not coding_task.repair_ready
+                        else GROUPED_MUTATION_PROTOCOL_CORRECTION
                         if grouped_ready
                         and self._mutation_representation
                         is MutationRepresentationPolicy.LINE_RANGE
@@ -1902,6 +1969,152 @@ class RepositoryChatSession:
                     )
                 )
                 continue
+            if parsed.outcome is ToolCallOutcome.MULTI_FILE_CHANGE:
+                if (
+                    coding_task is None
+                    or not coding_task.structured_edit_ready
+                    or coding_task.repair_ready
+                    or not self._create_paths
+                    or not self._mixed_required
+                    or parsed.operations is None
+                ):
+                    raise RepositoryOrchestrationError(
+                        "mixed change requires primary edit and create authority"
+                    )
+                raw = parsed.operations
+                edit_paths = set(self._mixed_edit_paths)
+                create_paths = set(self._create_paths)
+                paths = [item["path"] for item in raw]
+                expected_kind = (
+                    "line_range_edit"
+                    if self._mutation_representation
+                    is MutationRepresentationPolicy.LINE_RANGE
+                    else "structured_edit"
+                )
+                valid_set = (
+                    len(raw) <= 4
+                    and len(paths) == len(set(paths))
+                    and set(paths) == edit_paths | create_paths
+                    and all(
+                        item["type"]
+                        == (
+                            "create_file"
+                            if item["path"] in create_paths
+                            else expected_kind
+                        )
+                        for item in raw
+                    )
+                )
+                normalized: list[dict[str, object]] = []
+                ranges: list[tuple[str, int, int]] = []
+                if valid_set:
+                    for item in sorted(raw, key=lambda child: str(child["path"])):
+                        path = str(item["path"])
+                        if path in create_paths:
+                            normalized.append(
+                                {
+                                    "type": "create",
+                                    "path": path,
+                                    "content": item["content"],
+                                }
+                            )
+                            continue
+                        validation = (
+                            validate_line_range_edit(
+                                LineRangeEditProposal(
+                                    **{
+                                        key: item[key]
+                                        for key in (
+                                            "path",
+                                            "start_line",
+                                            "end_line",
+                                            "new_text",
+                                        )
+                                    }
+                                ),  # type: ignore[arg-type]
+                                tuple(coding_task.mutation_candidates),
+                                self._context.workspace,
+                                self._mutation_generation,
+                            )
+                            if expected_kind == "line_range_edit"
+                            else validate_structured_edit(
+                                StructuredEditProposal(
+                                    **{
+                                        key: item[key]
+                                        for key in ("path", "old_text", "new_text")
+                                    }
+                                ),  # type: ignore[arg-type]
+                                tuple(coding_task.mutation_candidates),
+                                self._context.workspace,
+                                self._mutation_generation,
+                            )
+                        )
+                        if not validation.valid:
+                            valid_set = False
+                            break
+                        assert validation.arguments is not None
+                        assert (
+                            validation.start_line is not None
+                            and validation.end_line is not None
+                        )
+                        normalized.append({"type": "edit", **validation.arguments})
+                        ranges.append(
+                            (path, validation.start_line, validation.end_line)
+                        )
+                if not valid_set:
+                    if coding_task.note_structured_edit("invalid_mixed_group"):
+                        mutation_correction = MIXED_READY_GUIDANCE
+                        continue
+                    coding_task.fail_after_mutation()
+                    raise RepositoryOrchestrationError("invalid mixed group repeated")
+                try:
+                    operation_tuple = tuple(normalized)
+                    group_id = mixed_group_id(
+                        operation_tuple,
+                        self._context.create_candidates,
+                        self._mutation_generation,
+                        self._context.workspace,
+                    )
+                    mixed_arguments = {
+                        "group_id": group_id,
+                        "workspace_generation": self._mutation_generation,
+                        "operations": operation_tuple,
+                    }
+                    preview_mixed_file_transaction(mixed_arguments, self._context)
+                except (ToolError, UnicodeEncodeError):
+                    if coding_task.note_structured_edit("invalid_mixed_group"):
+                        mutation_correction = MIXED_READY_GUIDANCE
+                        continue
+                    coding_task.fail_after_mutation()
+                    raise RepositoryOrchestrationError(
+                        "invalid mixed group repeated"
+                    ) from None
+                coding_task.note_structured_edit(
+                    None,
+                    representation=(
+                        "line_range"
+                        if expected_kind == "line_range_edit"
+                        else "exact_text"
+                    ),
+                )
+                coding_task.note_group_validation(
+                    result="passed", file_count=len(raw), group_id=group_id
+                )
+                coding_task.set_pending_mutation_ranges(tuple(ranges))
+                invocation_id = "structured-edit-mixed-" + str(
+                    coding_task.structured_mutation_metrics.attempts
+                )
+                self._authorized_mixed_invocation = ToolInvocation(
+                    invocation_id, "repository.apply_file_operations", mixed_arguments
+                )
+                parsed = ParsedModelOutput(
+                    ToolCallOutcome.TOOL_CALL,
+                    tool_call=ToolCall(
+                        invocation_id,
+                        "repository.apply_file_operations",
+                        mixed_arguments,
+                    ),
+                )
             if parsed.outcome in {
                 ToolCallOutcome.CREATE_FILE,
                 ToolCallOutcome.MULTI_FILE_CREATE,
@@ -1911,6 +2124,7 @@ class RepositoryChatSession:
                     or not coding_task.structured_edit_ready
                     or coding_task.repair_ready
                     or not self._create_paths
+                    or self._mixed_required
                     or parsed.creates is None
                 ):
                     raise RepositoryOrchestrationError(
@@ -1979,7 +2193,7 @@ class RepositoryChatSession:
                     )
                 if self._create_paths and not coding_task.repair_ready:
                     raise RepositoryOrchestrationError(
-                        "existing-file edits are not authorized in creation-only v1"
+                        "complete mixed operation group is required"
                     )
                 line_range = parsed.outcome in {
                     ToolCallOutcome.LINE_RANGE_EDIT,
@@ -2184,7 +2398,9 @@ class RepositoryChatSession:
                 if coding_task is not None and coding_task.structured_edit_ready:
                     if coding_task.note_premature_final():
                         mutation_correction = (
-                            CREATE_READY_GUIDANCE
+                            MIXED_READY_GUIDANCE
+                            if self._mixed_required and not coding_task.repair_ready
+                            else CREATE_READY_GUIDANCE
                             if self._create_paths and not coding_task.repair_ready
                             else GROUPED_LINE_RANGE_MUTATION_REQUIRED_CORRECTION
                             if len(coding_task.mutation_candidates) > 1
@@ -2324,7 +2540,6 @@ class RepositoryChatSession:
             assert call is not None
             if (
                 coding_task is not None
-                and (self._create_paths or coding_task.mutation_count > 0)
                 and call.tool_name == "repository.write_file"
                 and call.arguments.get("mode") == "create"
             ):
@@ -2339,6 +2554,7 @@ class RepositoryChatSession:
                 in {
                     "repository.apply_patch",
                     "repository.apply_multi_patch",
+                    "repository.apply_file_operations",
                     "repository.create_text_files",
                 }
                 and not call.invocation_id.startswith("structured-edit-")
@@ -2454,6 +2670,7 @@ class RepositoryChatSession:
                     "repository.apply_patch",
                     "repository.write_file",
                     "repository.create_text_files",
+                    "repository.apply_file_operations",
                 }
                 and len(activities) + 1 + len(self._verification_plan.steps) + 1
                 > self._max_tool_executions
@@ -2503,6 +2720,7 @@ class RepositoryChatSession:
                 "repository.write_file",
                 "repository.apply_patch",
                 "repository.create_text_files",
+                "repository.apply_file_operations",
             }:
                 gate = self._ephemeral_gate
                 ephemeral_blocked = False
@@ -2577,7 +2795,11 @@ class RepositoryChatSession:
                 if (
                     coding_task is not None
                     and call.tool_name
-                    in {"repository.apply_multi_patch", "repository.create_text_files"}
+                    in {
+                        "repository.apply_multi_patch",
+                        "repository.create_text_files",
+                        "repository.apply_file_operations",
+                    }
                     and result.status is ToolResultStatus.FAILURE
                     and isinstance(result.output, Mapping)
                     and "mutation_group_apply_result" in result.output
@@ -2834,7 +3056,10 @@ class RepositoryChatSession:
                                 "Lexical index invalidation failed", exc_info=True
                             )
                 self._mutation_generation += 1
-                if call.tool_name == "repository.create_text_files":
+                if call.tool_name in {
+                    "repository.create_text_files",
+                    "repository.apply_file_operations",
+                }:
                     # One task-scoped create grant never rolls into a later turn.
                     self._create_paths = ()
                     self._context = replace(self._context, create_candidates=())
@@ -3438,7 +3663,24 @@ class RepositoryChatSession:
         observed_hashes: Mapping[str, str],
         observed_directories: set[str],
     ) -> ToolResult:
-        if invocation.tool_name == "repository.create_text_files":
+        if invocation.tool_name == "repository.apply_file_operations":
+            authorized = self._authorized_mixed_invocation
+            self._authorized_mixed_invocation = None
+            if (
+                authorized is None
+                or invocation != authorized
+                or self._active_coding_task is None
+                or self._active_coding_task.phase
+                is not CodingTaskPhase.AWAITING_MUTATION_APPROVAL
+                or self._active_coding_task.mutation_count != 0
+                or not self._create_paths
+            ):
+                return _provenance_failure(
+                    result,
+                    "mixed operation requires primary FILE_CHANGE_READY authority",
+                )
+            provenance_error = None
+        elif invocation.tool_name == "repository.create_text_files":
             authorized = self._authorized_create_invocation
             self._authorized_create_invocation = None
             if (
@@ -3464,7 +3706,9 @@ class RepositoryChatSession:
             return result
         try:
             preview = (
-                preview_create_text_files(arguments, self._context)
+                preview_mixed_file_transaction(arguments, self._context)
+                if invocation.tool_name == "repository.apply_file_operations"
+                else preview_create_text_files(arguments, self._context)
                 if invocation.tool_name == "repository.create_text_files"
                 else preview_multi_file_mutation(arguments, self._context)
                 if invocation.tool_name == "repository.apply_multi_patch"

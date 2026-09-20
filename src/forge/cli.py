@@ -142,6 +142,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="explicitly authorize one absent new text-file path (maximum two)",
     )
+    chat.add_argument(
+        "--edit-path",
+        action="append",
+        default=[],
+        help=(
+            "require one current existing-file edit candidate "
+            "(maximum four combined with creates)"
+        ),
+    )
     autonomy.add_argument(
         "--agent",
         action="store_true",
@@ -333,6 +342,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ephemeral_acceptance_paths=tuple(args.acceptance_context_file),
                     ephemeral_acceptance_import_root=args.acceptance_import_root,
                     create_candidate_paths=tuple(args.create_path),
+                    required_candidate_paths=tuple(args.edit_path),
+                    mixed_file_operations=bool(args.edit_path and args.create_path),
                 )
             with model, session:
                 result = run_repl(session)

@@ -2160,3 +2160,15 @@ and the target must remain absent. A53 v1 supports one or two new UTF-8 regular
 files in one approval-gated creation-only transaction; mixed edit/create groups
 remain deferred. No deletion, rename, directory creation, executable file, or
 ephemeral-test persistence authority is added.
+
+# Milestone A54 — Unified Bounded File-Operation Transaction v1
+
+**Status:** Implemented; architecture review pending before acceptance.
+
+An explicit mixed task combines one or more current authorized existing-file edits
+with one or two exact new-text-file create candidates, bounded to four operations
+total. One typed proposal, preview, approval, handled-failure transaction, generation
+increment, and verification cycle cover the complete group. A9 direct absent-target
+creation is no longer available to coding orchestration; direct low-level helper
+compatibility remains. No delete, rename, directory creation, executable, or binary
+operation is added.
