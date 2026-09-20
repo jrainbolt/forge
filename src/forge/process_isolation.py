@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 import os
 import platform
+import signal
 import stat
 import subprocess
+import sys
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -71,6 +74,19 @@ class ExecutionSandbox(Protocol):
     def available(self) -> bool: ...
 
     def wrap(self, argv: tuple[str, ...], workspace: Path) -> tuple[str, ...]: ...
+
+
+class EphemeralTestSandbox(Protocol):
+    """Strict adapter for generated assertions; independent of toolchain writes."""
+
+    @property
+    def identity(self) -> str: ...
+
+    def available(self) -> bool: ...
+
+    def wrap(
+        self, argv: tuple[str, ...], workspace: Path, temporary: Path
+    ) -> tuple[str, ...]: ...
 
 
 class UnavailableSandbox:
@@ -142,6 +158,124 @@ def platform_sandbox() -> ExecutionSandbox:
     if platform.system() == "Darwin":
         return MacOSSandboxExec()
     return UnavailableSandbox()
+
+
+EPHEMERAL_TEMP_POLICY_ID = "forge-private-ephemeral-temp-v1"
+EPHEMERAL_ENVIRONMENT_POLICY_ID = "forge-ephemeral-env-v1"
+
+
+class MacOSEphemeralTestSandbox:
+    """Seatbelt profile: project reads, private temp writes, no network/fork."""
+
+    identity = "macos-sandbox-exec-ephemeral-test-v1"
+
+    def available(self) -> bool:
+        return MacOSSandboxExec().available()
+
+    def wrap(
+        self, argv: tuple[str, ...], workspace: Path, temporary: Path
+    ) -> tuple[str, ...]:
+        root = workspace.resolve(strict=True)
+        scratch = temporary.resolve(strict=True)
+        if not root.is_dir() or not scratch.is_dir() or scratch.is_symlink():
+            raise ValueError("ephemeral sandbox roots must be real directories")
+        interpreter = Path(argv[0]).resolve(strict=True)
+        if interpreter != Path(sys.executable).resolve(strict=True):
+            raise ValueError("ephemeral sandbox requires the trusted interpreter")
+        runtime = Path(sys.base_prefix).resolve(strict=True)
+        framework_app = runtime / "Resources/Python.app/Contents/MacOS/Python"
+        if not framework_app.is_file():
+            raise ValueError("trusted macOS Python framework launcher is unavailable")
+
+        def quoted(path: Path) -> str:
+            return json.dumps(str(path), ensure_ascii=True)
+
+        parents = {
+            str(parent)
+            for selected in (root, scratch, runtime)
+            for parent in selected.parents
+        }
+        parents.update({"/var", "/etc"})
+        metadata_reads = "".join(
+            f" (literal {json.dumps(path)})" for path in sorted(parents)
+        )
+
+        profile = (
+            "(version 1)"
+            "(deny default)"
+            "(allow process-info*)"
+            f"(allow process-exec (literal {quoted(interpreter)}))"
+            f"(allow process-exec (literal {quoted(framework_app)}))"
+            "(allow file-read*"
+            f" (subpath {quoted(root)})"
+            f" (subpath {quoted(scratch)})"
+            f" (subpath {quoted(runtime)})"
+            ' (subpath "/System")'
+            ' (subpath "/usr")'
+            ' (subpath "/Library/Frameworks")'
+            ' (subpath "/private/etc")'
+            ' (literal "/")'
+            ' (literal "/dev/null"))'
+            f"(allow file-read-metadata{metadata_reads})"
+            f"(allow file-write* (subpath {quoted(scratch)}))"
+            '(allow sysctl-read (sysctl-name "hw.pagesize_compat"))'
+        )
+        return (str(MacOSSandboxExec.executable), "-p", profile, *argv)
+
+
+def platform_ephemeral_test_sandbox() -> EphemeralTestSandbox:
+    if platform.system() == "Darwin":
+        return MacOSEphemeralTestSandbox()
+    return UnavailableEphemeralTestSandbox()
+
+
+class UnavailableEphemeralTestSandbox:
+    identity = "ephemeral-strict-unavailable"
+
+    def available(self) -> bool:
+        return False
+
+    def wrap(
+        self, argv: tuple[str, ...], workspace: Path, temporary: Path
+    ) -> tuple[str, ...]:
+        raise RuntimeError("strict ephemeral sandbox is unavailable")
+
+
+def ephemeral_test_environment(workspace: Path, temporary: Path) -> dict[str, str]:
+    """Fixed no-ambient-secret environment for generated Python assertions."""
+    root = workspace.resolve(strict=True)
+    scratch = temporary.resolve(strict=True)
+    if scratch.is_symlink() or not scratch.is_dir():
+        raise ValueError("ephemeral temporary root must be a real directory")
+    return {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(scratch),
+        "TMPDIR": str(scratch),
+        "TMP": str(scratch),
+        "TEMP": str(scratch),
+        "PYTHONPATH": str(root),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUNBUFFERED": "1",
+        "LANG": "C",
+        "CI": "1",
+    }
+
+
+def terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    """A39 process-group timeout cleanup shared by project and acceptance runs."""
+    if process.poll() is not None:
+        return
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=1)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+    process.wait()
 
 
 def execution_directories(workspace: Path) -> tuple[Path, Path]:

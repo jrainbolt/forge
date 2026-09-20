@@ -1443,3 +1443,41 @@ metrics. Direct subprocess, network, HOME, and file-operation syntax is rejected
 but Python project imports may themselves have side effects; this is an
 experimental trusted-execution feature requiring informed human review, not a
 sandbox or a mathematically validated specification.
+
+## Ephemeral acceptance execution isolation
+
+A52 makes strict OS containment a separate prerequisite for both baseline and
+postmutation execution. Static Python screening remains an early filter, not a
+safety proof: imported project code can perform operations absent from the
+candidate source. Production asks the shared process-isolation layer for the
+versioned `macos-sandbox-exec-ephemeral-test-v1` profile. Unsupported hosts or
+failed Seatbelt setup report isolation unavailable; neither phase falls back to
+controlled environment or unsandboxed execution. The A40 toolchain profile and
+normal project verification policy are unchanged.
+
+The ephemeral profile permits selected-workspace reads, exact Python runtime and
+system reads, and writes only beneath a fresh Forge-owned temporary directory.
+The environment is built without ambient credentials, substitutes synthetic HOME,
+TMPDIR/TMP/TEMP, restricts PYTHONPATH to the workspace, and disables bytecode
+writes. Network is not granted. Process execution is limited to the trusted
+interpreter and its observed macOS Python.framework launcher; external executables
+and same-interpreter subprocess probes are denied. Exact ancestor metadata reads
+are needed for macOS path resolution, but sibling and real-HOME file contents
+remain unreadable. Symlink escape through the writable temp is denied by Seatbelt.
+
+Approval binds the adapter/policy version, effective environment template,
+workspace, interpreter, and temporary-root policy. Changed identity invalidates
+approval. Bound context files are hashed around baseline execution; those files
+plus the mutation paths are hashed around postmutation execution. Unexpected
+changes block completion. Bounded pipes, a ten-second timeout, and A39 process-
+group cleanup prevent unbounded output or lingering descendants. Assertion failure,
+pass, sandbox violation, execution error, timeout, workspace modification, and
+isolation unavailable remain distinct execution classifications. Only an assertion
+failure can reach human review. A postmutation outcome other than PASS blocks full
+verification and cannot trigger repair.
+
+Seatbelt is a host-dependent macOS facility, not formal proof that arbitrary Python
+is safe. In particular, imported code can catch denied operations, and native
+extension compatibility is not guaranteed. The feature remains experimental and
+OFF by default; `sandbox-exec` availability and the exact host policy must be
+validated on deployment hosts.

@@ -2122,7 +2122,7 @@ failed qualification and no systematic same-model preference was established.
 
 # Milestone A51 — Human-Gated Ephemeral Acceptance Verification v1
 
-**Status:** Implemented; architecture review pending before acceptance.
+**Status:** Accepted (per A52 milestone brief); experimental and OFF by default.
 
 `human-gated-acceptance-v1` adds an experimental, default-off human semantic
 review boundary for one ephemeral generated Python assertion per task. It cannot
@@ -2130,5 +2130,22 @@ auto-approve, grant WRITE authority, create repository tests, feed repair, or
 replace full configured verification. A50 R05 replay controls demonstrate the
 approved check accepting correct and Codestral mutations and rejecting a wrong
 mutation; R06–R08 unqualified candidates remain rejected by evaluator-only
-simulated policy. Broader adoption awaits architecture review and stronger
-sandboxing/semantic evidence. A52 has not begun.
+simulated policy. Broader adoption still requires stronger sandboxing and semantic
+evidence.
+
+---
+
+# Milestone A52 — Ephemeral Acceptance Execution Isolation v1
+
+**Status:** Implemented; architecture review pending before acceptance.
+
+`ephemeral-acceptance-isolation-v1` requires a distinct strict macOS Seatbelt
+profile for both candidate baseline and approved postmutation execution. The
+workspace is read-only to the generated process, Forge-owned temporary space is
+writable, ambient secrets and real HOME are hidden, and network plus arbitrary
+subprocess authority are denied. Unsupported or failing strict isolation blocks
+execution without fallback. Approval binds policy and environment identity;
+source-integrity checks and distinct execution classifications prevent sandbox
+denial from masquerading as a semantic assertion failure. Real host probes and
+isolated A50 R05 replay support this boundary, but it is not a formal Python
+sandbox proof. A53 has not begun.

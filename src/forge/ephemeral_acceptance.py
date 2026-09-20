@@ -9,13 +9,13 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
-import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
@@ -27,6 +27,14 @@ from forge.models import (
     ModelRequest,
     OutputSpecification,
     ResponseFormat,
+)
+from forge.process_isolation import (
+    EPHEMERAL_ENVIRONMENT_POLICY_ID,
+    EPHEMERAL_TEMP_POLICY_ID,
+    EphemeralTestSandbox,
+    ephemeral_test_environment,
+    platform_ephemeral_test_sandbox,
+    terminate_process_group,
 )
 
 MAX_TEST_SOURCE_CHARS = 6000
@@ -52,6 +60,20 @@ class EphemeralAcceptanceState(StrEnum):
     POSTMUTATION_PASS = "postmutation_pass"
     POSTMUTATION_FAIL = "postmutation_fail"
     POSTMUTATION_ERROR = "postmutation_error"
+    ISOLATION_UNAVAILABLE = "ephemeral_acceptance_isolation_unavailable"
+    SANDBOX_VIOLATION = "ephemeral_acceptance_sandbox_violation"
+    WORKSPACE_MODIFIED = "ephemeral_acceptance_workspace_modified"
+    TIMEOUT = "ephemeral_acceptance_timeout"
+
+
+class EphemeralExecutionClass(StrEnum):
+    PASS = "EPHEMERAL_PASS"
+    ASSERTION_FAIL = "EPHEMERAL_ASSERTION_FAIL"
+    SANDBOX_VIOLATION = "EPHEMERAL_SANDBOX_VIOLATION"
+    EXECUTION_ERROR = "EPHEMERAL_EXECUTION_ERROR"
+    TIMEOUT = "EPHEMERAL_TIMEOUT"
+    WORKSPACE_MODIFIED = "EPHEMERAL_WORKSPACE_MODIFIED"
+    ISOLATION_UNAVAILABLE = "EPHEMERAL_ISOLATION_UNAVAILABLE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +98,11 @@ class EphemeralAcceptancePreview:
     baseline_failure_output: str
     context_files: tuple[str, ...]
     candidate_sha256: str
+    isolation_description: str = "strict OS sandbox"
+    writable_location: str = "Forge-owned ephemeral temporary directory only"
+    network_description: str = "denied"
+    project_writes_description: str = "denied"
+    real_home_description: str = "not exposed"
     warning: str = (
         "MODEL-GENERATED, SEMANTICALLY UNVERIFIED. Approval authorizes only this "
         "exact ephemeral check for this task and source state; full project "
@@ -92,6 +119,7 @@ class EphemeralAcceptanceApproval:
     task_sha256: str
     workspace: str
     generation: int
+    isolation_identity: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +134,12 @@ class EphemeralAcceptanceMetrics:
     baseline_latency_seconds: float = 0.0
     postmutation_latency_seconds: float = 0.0
     generation_calls: int = 0
+    isolation_policy_id: str = "not_used"
+    sandbox_outcome: str = "not_run"
+    source_integrity_checked: bool = False
+    sandbox_preparation_seconds: float = 0.0
+    baseline_execution_class: str = "not_run"
+    postmutation_execution_class: str = "not_run"
 
 
 def _confined_source(workspace: Path, relative: str) -> Path:
@@ -253,53 +287,151 @@ def _candidate_valid(candidate: EphemeralAcceptanceCandidate, import_root: str) 
     return True
 
 
+@dataclass(frozen=True, slots=True)
+class EphemeralExecution:
+    classification: EphemeralExecutionClass
+    output: str = ""
+    duration_seconds: float = 0.0
+    preparation_seconds: float = 0.0
+    source_integrity_checked: bool = False
+    exit_code: int | None = None
+    pid: int | None = None
+
+
+def _isolation_identity(sandbox: EphemeralTestSandbox, workspace: Path) -> str:
+    """Bind exact adapter, environment template, interpreter and temp policy."""
+    template = ephemeral_test_environment(workspace, workspace)
+    for key in ("HOME", "TMPDIR", "TMP", "TEMP"):
+        template[key] = "<FORGE_PRIVATE_TEMP>"
+    material = (
+        sandbox.identity,
+        EPHEMERAL_ENVIRONMENT_POLICY_ID,
+        EPHEMERAL_TEMP_POLICY_ID,
+        str(workspace.resolve(strict=True)),
+        str(Path(sys.executable).resolve(strict=True)),
+        tuple(sorted(template.items())),
+    )
+    return hashlib.sha256(json.dumps(material).encode()).hexdigest()
+
+
+def _drain_bounded(stream: object, sink: bytearray) -> None:
+    while chunk := stream.read(16 * 1024):  # type: ignore[attr-defined]
+        sink.extend(chunk)
+        if len(sink) > MAX_FAILURE_OUTPUT:
+            del sink[:-MAX_FAILURE_OUTPUT]
+
+
 def _execute_python_candidate(
-    candidate: EphemeralAcceptanceCandidate, workspace: Path
-) -> tuple[str, str, float]:
-    """Run a revalidated test from a temporary location, never project source."""
+    candidate: EphemeralAcceptanceCandidate,
+    workspace: Path,
+    sandbox: EphemeralTestSandbox,
+    source_paths: tuple[str, ...],
+) -> EphemeralExecution:
+    """Execute one exact assertion under strict isolation; never fall back."""
     started = time.perf_counter()
+    if not sandbox.available():
+        return EphemeralExecution(EphemeralExecutionClass.ISOLATION_UNAVAILABLE)
+    try:
+        before = _context_hashes(workspace, source_paths)
+    except (OSError, ValueError):
+        return EphemeralExecution(EphemeralExecutionClass.EXECUTION_ERROR)
+    preparation_started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="forge-ephemeral-acceptance-") as name:
-        temporary = Path(name)
+        temporary = Path(name).resolve(strict=True)
         script = temporary / "candidate.py"
         script.write_text(candidate.test_source, encoding="utf-8")
-        environment = {
-            "PATH": os.pathsep.join(("/usr/bin", "/bin", "/usr/sbin", "/sbin")),
-            "PYTHONPATH": str(workspace.resolve(strict=True)),
-            "PYTHONDONTWRITEBYTECODE": "1",
-            "PYTHONNOUSERSITE": "1",
-            "HOME": str(temporary),
-            "TMPDIR": str(temporary),
-            "LANG": "C",
-        }
         try:
-            completed = subprocess.run(
-                (sys.executable, "-B", str(script)),
+            environment = ephemeral_test_environment(workspace, temporary)
+            argv = sandbox.wrap(
+                (
+                    str(Path(sys.executable).resolve(strict=True)),
+                    "-S",
+                    "-B",
+                    str(script),
+                ),
+                workspace,
+                temporary,
+            )
+        except (OSError, RuntimeError, ValueError):
+            return EphemeralExecution(
+                EphemeralExecutionClass.ISOLATION_UNAVAILABLE,
+                duration_seconds=time.perf_counter() - started,
+            )
+        preparation = time.perf_counter() - preparation_started
+        try:
+            process = subprocess.Popen(
+                argv,
                 cwd=workspace,
                 env=environment,
                 stdin=subprocess.DEVNULL,
-                capture_output=True,
-                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 shell=False,
-                timeout=TEST_TIMEOUT_SECONDS,
+                start_new_session=True,
             )
-        except (OSError, subprocess.TimeoutExpired):
-            return (
-                "error",
-                "execution unavailable or timed out",
-                time.perf_counter() - started,
+        except (OSError, ValueError):
+            return EphemeralExecution(
+                EphemeralExecutionClass.ISOLATION_UNAVAILABLE,
+                duration_seconds=time.perf_counter() - started,
+                preparation_seconds=preparation,
             )
-        output = (completed.stderr or completed.stdout).decode(
-            "utf-8", errors="replace"
+        stdout = bytearray()
+        stderr = bytearray()
+        assert process.stdout is not None and process.stderr is not None
+        readers = (
+            threading.Thread(
+                target=_drain_bounded, args=(process.stdout, stdout), daemon=True
+            ),
+            threading.Thread(
+                target=_drain_bounded, args=(process.stderr, stderr), daemon=True
+            ),
         )
-        return (
-            "pass"
-            if completed.returncode == 0
-            else "fail"
-            if completed.returncode == 1 and "AssertionError" in output
-            else "error",
-            output[:MAX_FAILURE_OUTPUT],
-            time.perf_counter() - started,
-        )
+        for reader in readers:
+            reader.start()
+        timed_out = False
+        try:
+            process.wait(timeout=TEST_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            terminate_process_group(process)
+        finally:
+            for reader in readers:
+                reader.join(timeout=5)
+            if process.poll() is None:
+                terminate_process_group(process)
+        output = (stderr or stdout).decode("utf-8", errors="replace")
+    try:
+        unchanged = before == _context_hashes(workspace, source_paths)
+    except (OSError, ValueError):
+        unchanged = False
+    if not unchanged:
+        classification = EphemeralExecutionClass.WORKSPACE_MODIFIED
+    elif timed_out:
+        classification = EphemeralExecutionClass.TIMEOUT
+    elif output.startswith("sandbox-exec: sandbox_apply:"):
+        classification = EphemeralExecutionClass.ISOLATION_UNAVAILABLE
+    elif process.returncode == 0:
+        classification = EphemeralExecutionClass.PASS
+    elif (
+        output.startswith("sandbox-exec:")
+        or "deny(" in output
+        or "Operation not permitted" in output
+        or "Permission denied" in output
+    ):
+        classification = EphemeralExecutionClass.SANDBOX_VIOLATION
+    elif process.returncode == 1 and "AssertionError" in output:
+        classification = EphemeralExecutionClass.ASSERTION_FAIL
+    else:
+        classification = EphemeralExecutionClass.EXECUTION_ERROR
+    return EphemeralExecution(
+        classification,
+        output,
+        time.perf_counter() - started,
+        preparation,
+        source_integrity_checked=True,
+        exit_code=process.returncode,
+        pid=process.pid,
+    )
 
 
 def _approval_identity(
@@ -310,6 +442,7 @@ def _approval_identity(
     hashes: tuple[tuple[str, str], ...],
     baseline_output: str,
     execution_description: str,
+    isolation_identity: str,
 ) -> str:
     material = (
         task,
@@ -323,6 +456,7 @@ def _approval_identity(
         "fail",
         hashlib.sha256(baseline_output.encode()).hexdigest(),
         execution_description,
+        isolation_identity,
     )
     return hashlib.sha256(
         json.dumps(material, ensure_ascii=False, separators=(",", ":")).encode()
@@ -338,10 +472,12 @@ class EphemeralAcceptanceGate:
         *,
         context_paths: tuple[str, ...] = (),
         import_root: str = "",
+        sandbox: EphemeralTestSandbox | None = None,
     ) -> None:
         self.mode = EphemeralAcceptanceMode(mode)
         self.context_paths = tuple(context_paths)
         self.import_root = import_root
+        self._sandbox = sandbox or platform_ephemeral_test_sandbox()
         if self.mode is not EphemeralAcceptanceMode.OFF and (
             len(self.context_paths) < 2
             or len(self.context_paths) > 4
@@ -384,6 +520,15 @@ class EphemeralAcceptanceGate:
         self._attempted = True
         if review is None:
             self.state = EphemeralAcceptanceState.UNAVAILABLE
+            return self.state
+        if not self._sandbox.available():
+            self.state = EphemeralAcceptanceState.ISOLATION_UNAVAILABLE
+            self.events.append("ephemeral_test_isolation_unavailable")
+            self.metrics = replace(
+                self.metrics,
+                isolation_policy_id=self._sandbox.identity,
+                sandbox_outcome=EphemeralExecutionClass.ISOLATION_UNAVAILABLE.value,
+            )
             return self.state
         try:
             sources = []
@@ -473,30 +618,60 @@ class EphemeralAcceptanceGate:
         if review is None or not _candidate_valid(candidate, self.import_root):
             self.state = EphemeralAcceptanceState.UNAVAILABLE
             return self.state
-        hashes = _context_hashes(workspace, self.context_paths)
-        baseline, output, duration = _execute_python_candidate(candidate, workspace)
-        self.metrics = EphemeralAcceptanceMetrics(
+        try:
+            hashes = _context_hashes(workspace, self.context_paths)
+        except (OSError, ValueError):
+            self.state = EphemeralAcceptanceState.UNAVAILABLE
+            return self.state
+        baseline = _execute_python_candidate(
+            candidate, workspace, self._sandbox, self.context_paths
+        )
+        outcome = baseline.classification
+        self.metrics = replace(
+            self.metrics,
             candidate_sha256=candidate.sha256,
             candidate_size=len(candidate.test_source.encode()),
-            baseline_outcome=baseline,
-            generation_latency_seconds=self.metrics.generation_latency_seconds,
-            baseline_latency_seconds=duration,
-            generation_calls=self.metrics.generation_calls,
+            baseline_outcome=(
+                "fail"
+                if outcome is EphemeralExecutionClass.ASSERTION_FAIL
+                else "pass"
+                if outcome is EphemeralExecutionClass.PASS
+                else outcome.value
+            ),
+            baseline_latency_seconds=baseline.duration_seconds,
+            isolation_policy_id=self._sandbox.identity,
+            sandbox_outcome=outcome.value,
+            source_integrity_checked=baseline.source_integrity_checked,
+            sandbox_preparation_seconds=baseline.preparation_seconds,
+            baseline_execution_class=outcome.value,
         )
+        if outcome is EphemeralExecutionClass.WORKSPACE_MODIFIED:
+            self.state = EphemeralAcceptanceState.WORKSPACE_MODIFIED
+            self.events.append("ephemeral_test_workspace_modified")
+            return self.state
+        if outcome is EphemeralExecutionClass.ISOLATION_UNAVAILABLE:
+            self.state = EphemeralAcceptanceState.ISOLATION_UNAVAILABLE
+            self.events.append("ephemeral_test_isolation_unavailable")
+            return self.state
+        if outcome is EphemeralExecutionClass.SANDBOX_VIOLATION:
+            self.state = EphemeralAcceptanceState.SANDBOX_VIOLATION
+            self.events.append("ephemeral_test_sandbox_violation")
+            return self.state
         if _context_hashes(workspace, self.context_paths) != hashes:
             self.state = EphemeralAcceptanceState.INVALIDATED
             self.events.append("ephemeral_test_invalidated")
             return self.state
-        if baseline != "fail":
+        if outcome is not EphemeralExecutionClass.ASSERTION_FAIL:
             self.state = (
                 EphemeralAcceptanceState.BASELINE_NOT_DETECTED
-                if baseline == "pass"
+                if outcome is EphemeralExecutionClass.PASS
                 else EphemeralAcceptanceState.UNAVAILABLE
             )
             return self.state
         self.events.append("ephemeral_test_baseline_failed")
         description = (
-            "Python assertion script, trusted interpreter, -B, 10-second timeout"
+            "Python assertion script, strict OS sandbox, trusted interpreter, "
+            "-S -B, 10-second timeout"
         )
         preview = EphemeralAcceptancePreview(
             task,
@@ -505,7 +680,7 @@ class EphemeralAcceptanceGate:
             candidate.language,
             description,
             "FAIL",
-            output,
+            baseline.output,
             self.context_paths,
             candidate.sha256,
         )
@@ -518,18 +693,20 @@ class EphemeralAcceptanceGate:
         if not approved:
             self.state = EphemeralAcceptanceState.REJECTED
             self.events.append("ephemeral_test_rejected")
-            self.metrics = EphemeralAcceptanceMetrics(
-                candidate_sha256=candidate.sha256,
-                candidate_size=self.metrics.candidate_size,
-                baseline_outcome="fail",
+            self.metrics = replace(
+                self.metrics,
                 approval_outcome="rejected",
-                generation_latency_seconds=self.metrics.generation_latency_seconds,
-                baseline_latency_seconds=duration,
-                generation_calls=self.metrics.generation_calls,
             )
             return self.state
         identity = _approval_identity(
-            task, candidate, workspace, generation, hashes, output, description
+            task,
+            candidate,
+            workspace,
+            generation,
+            hashes,
+            baseline.output,
+            description,
+            _isolation_identity(self._sandbox, workspace),
         )
         self._approval = EphemeralAcceptanceApproval(
             identity,
@@ -537,18 +714,14 @@ class EphemeralAcceptanceGate:
             hashlib.sha256(task.encode()).hexdigest(),
             str(workspace.resolve(strict=True)),
             generation,
+            _isolation_identity(self._sandbox, workspace),
         )
         self.state = EphemeralAcceptanceState.APPROVED
         self.events.append("ephemeral_test_approved")
-        self.metrics = EphemeralAcceptanceMetrics(
+        self.metrics = replace(
+            self.metrics,
             used=True,
-            candidate_sha256=candidate.sha256,
-            candidate_size=self.metrics.candidate_size,
-            baseline_outcome="fail",
             approval_outcome="approved",
-            generation_latency_seconds=self.metrics.generation_latency_seconds,
-            baseline_latency_seconds=duration,
-            generation_calls=self.metrics.generation_calls,
         )
         return self.state
 
@@ -567,6 +740,8 @@ class EphemeralAcceptanceGate:
             or approval.candidate_sha256 != candidate.sha256
             or approval.workspace != str(workspace.resolve(strict=True))
             or approval.generation != generation
+            or approval.isolation_identity
+            != _isolation_identity(self._sandbox, workspace)
             or hashes != self._hashes
         ):
             self.state = EphemeralAcceptanceState.INVALIDATED
@@ -575,7 +750,11 @@ class EphemeralAcceptanceGate:
         return True
 
     def postmutation(
-        self, workspace: Path, generation: int
+        self,
+        workspace: Path,
+        generation: int,
+        *,
+        mutation_paths: tuple[str, ...] = (),
     ) -> EphemeralAcceptanceState:
         candidate = self._candidate
         approval = self._approval
@@ -586,33 +765,74 @@ class EphemeralAcceptanceGate:
             or approval.generation + 1 != generation
             or approval.workspace != str(workspace.resolve(strict=True))
             or approval.candidate_sha256 != candidate.sha256
+            or approval.isolation_identity
+            != _isolation_identity(self._sandbox, workspace)
             or not _candidate_valid(candidate, self.import_root)
         ):
             self.state = EphemeralAcceptanceState.INVALIDATED
             self.events.append("ephemeral_test_invalidated")
             return self.state
-        outcome, _output, duration = _execute_python_candidate(candidate, workspace)
+        source_paths = tuple(dict.fromkeys((*self.context_paths, *mutation_paths)))
+        execution = _execute_python_candidate(
+            candidate, workspace, self._sandbox, source_paths
+        )
+        outcome = execution.classification
         self.state = {
-            "pass": EphemeralAcceptanceState.POSTMUTATION_PASS,
-            "fail": EphemeralAcceptanceState.POSTMUTATION_FAIL,
-            "error": EphemeralAcceptanceState.POSTMUTATION_ERROR,
+            EphemeralExecutionClass.PASS: EphemeralAcceptanceState.POSTMUTATION_PASS,
+            EphemeralExecutionClass.ASSERTION_FAIL: (
+                EphemeralAcceptanceState.POSTMUTATION_FAIL
+            ),
+            EphemeralExecutionClass.SANDBOX_VIOLATION: (
+                EphemeralAcceptanceState.SANDBOX_VIOLATION
+            ),
+            EphemeralExecutionClass.WORKSPACE_MODIFIED: (
+                EphemeralAcceptanceState.WORKSPACE_MODIFIED
+            ),
+            EphemeralExecutionClass.ISOLATION_UNAVAILABLE: (
+                EphemeralAcceptanceState.ISOLATION_UNAVAILABLE
+            ),
+            EphemeralExecutionClass.TIMEOUT: EphemeralAcceptanceState.TIMEOUT,
+            EphemeralExecutionClass.EXECUTION_ERROR: (
+                EphemeralAcceptanceState.POSTMUTATION_ERROR
+            ),
         }[outcome]
         self.events.append(
-            "ephemeral_test_postmutation_passed"
-            if outcome == "pass"
-            else "ephemeral_test_postmutation_failed"
+            {
+                EphemeralExecutionClass.PASS: "ephemeral_test_postmutation_passed",
+                EphemeralExecutionClass.ASSERTION_FAIL: (
+                    "ephemeral_test_postmutation_failed"
+                ),
+                EphemeralExecutionClass.SANDBOX_VIOLATION: (
+                    "ephemeral_test_sandbox_violation"
+                ),
+                EphemeralExecutionClass.WORKSPACE_MODIFIED: (
+                    "ephemeral_test_workspace_modified"
+                ),
+                EphemeralExecutionClass.ISOLATION_UNAVAILABLE: (
+                    "ephemeral_test_isolation_unavailable"
+                ),
+                EphemeralExecutionClass.TIMEOUT: "ephemeral_test_postmutation_timeout",
+                EphemeralExecutionClass.EXECUTION_ERROR: (
+                    "ephemeral_test_postmutation_error"
+                ),
+            }[outcome]
         )
-        self.metrics = EphemeralAcceptanceMetrics(
-            used=True,
-            candidate_sha256=candidate.sha256,
-            candidate_size=self.metrics.candidate_size,
-            baseline_outcome="fail",
-            approval_outcome="approved",
-            postmutation_outcome=outcome,
-            generation_latency_seconds=self.metrics.generation_latency_seconds,
-            baseline_latency_seconds=self.metrics.baseline_latency_seconds,
-            postmutation_latency_seconds=duration,
-            generation_calls=self.metrics.generation_calls,
+        self.metrics = replace(
+            self.metrics,
+            postmutation_outcome=(
+                "pass"
+                if outcome is EphemeralExecutionClass.PASS
+                else "fail"
+                if outcome is EphemeralExecutionClass.ASSERTION_FAIL
+                else outcome.value
+            ),
+            postmutation_latency_seconds=execution.duration_seconds,
+            sandbox_outcome=outcome.value,
+            source_integrity_checked=execution.source_integrity_checked,
+            sandbox_preparation_seconds=(
+                self.metrics.sandbox_preparation_seconds + execution.preparation_seconds
+            ),
+            postmutation_execution_class=outcome.value,
         )
         return self.state
 

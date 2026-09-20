@@ -2735,7 +2735,9 @@ class RepositoryChatSession:
                     gate = self._ephemeral_gate
                     if gate is not None and gate.approved:
                         acceptance = gate.postmutation(
-                            self._context.workspace, self._mutation_generation
+                            self._context.workspace,
+                            self._mutation_generation,
+                            mutation_paths=tuple(mutation_paths),
                         )
                         coding_task.ephemeral_acceptance_metrics = gate.metrics
                         if acceptance is not EphemeralAcceptanceState.POSTMUTATION_PASS:

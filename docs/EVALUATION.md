@@ -1217,3 +1217,19 @@ H01–H16 cover reviewability, exact preview and approval, invalidation,
 capability separation, optional rejection, postmutation gating, full-plan
 authority, headless/autonomy denial, and repair isolation. The suite demonstrates
 a guarded lifecycle, not general semantic reliability for generated tests.
+
+## ephemeral-acceptance-isolation-v1
+
+A52 adds I01–I18 model-free contract cases and
+`scripts/probe_ephemeral_isolation_v1.py` for explicit real macOS acceptance.
+Deterministic fake adapters test lifecycle, policy identity, failure taxonomy,
+and source-integrity contracts; they are not presented as OS-containment proof.
+The real Seatbelt probe uses disposable workspaces and verified: ordinary Python
+and project imports PASS; private temp writes PASS; project and sibling writes,
+real-HOME read/write-open, loopback socket bind, external and same-interpreter
+subprocesses, and symlink escape are denied. A known existing README was opened
+read-only or write-open only to test authority; no real HOME file content was
+modified. The A50 qualified R05 test was replayed under the new strict profile:
+baseline assertion FAIL, correct and Codestral states PASS with full
+configure/build/test PASS, and the wrong state FAIL before full verification.
+No new model generation or evaluator qualification rule was introduced.

@@ -554,3 +554,6 @@ acceptance check with `--ephemeral-acceptance optional|required`, two to four
 `--acceptance-context-file` paths, and `--acceptance-import-root`. It is off by
 default. Approval authorizes one exact generated check, not its semantic truth or
 any source mutation; the normal project verification plan is still mandatory.
+On supported macOS hosts, both executions require a separate strict Seatbelt
+profile with read-only project source and Forge-owned temporary writes. Elsewhere
+the opt-in check fails closed; it never falls back to unrestricted execution.

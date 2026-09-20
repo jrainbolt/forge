@@ -5,12 +5,10 @@ from __future__ import annotations
 import logging
 import os
 import re
-import signal
 import subprocess
 import threading
 import time
 from collections.abc import Mapping
-from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,6 +22,7 @@ from forge.process_isolation import (
     create_execution_directories,
     execution_directories,
     platform_sandbox,
+    terminate_process_group,
 )
 from forge.project_config import ProjectCommand
 from forge.tools.tool import Tool, ToolError
@@ -245,12 +244,12 @@ def execute_prepared_project_command(
         process.wait(timeout=prepared.timeout_seconds)
     except subprocess.TimeoutExpired:
         timed_out = True
-        _terminate_process_group(process)
+        terminate_process_group(process)
     finally:
         for reader in readers:
             reader.join(timeout=5)
         if process.poll() is None:
-            _terminate_process_group(process)
+            terminate_process_group(process)
 
     output = _execution_result(
         prepared.operation,
@@ -323,21 +322,6 @@ def _drain(stream: object, capture: _TailCapture) -> None:
         if not chunk:
             return
         capture.add(chunk)
-
-
-def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
-    with suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGTERM)
-    try:
-        process.wait(timeout=1)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-    with suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGKILL)
-    process.wait()
 
 
 def _execution_result(

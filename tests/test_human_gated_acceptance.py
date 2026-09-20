@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import forge.ephemeral_acceptance as acceptance_module
 from forge.ephemeral_acceptance import (
     EphemeralAcceptanceCandidate,
     EphemeralAcceptanceGate,
@@ -34,6 +35,29 @@ TASK = "In pkg/state.py, make FAILED terminal and add a regression test."
 BAD = "def can_transition(state: str) -> bool:\n    return True\n"
 GOOD = "def can_transition(state: str) -> bool:\n    return False\n"
 SOURCE = "from pkg.state import can_transition\nassert not can_transition('FAILED')\n"
+
+
+class _DeterministicTestSandbox:
+    """Contract-only adapter; never used by production composition."""
+
+    identity = "test-only-strict-adapter-v1"
+
+    def available(self) -> bool:
+        return True
+
+    def wrap(
+        self, argv: tuple[str, ...], workspace: Path, temporary: Path
+    ) -> tuple[str, ...]:
+        return argv
+
+
+@pytest.fixture(autouse=True)
+def _test_only_isolation_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        acceptance_module,
+        "platform_ephemeral_test_sandbox",
+        _DeterministicTestSandbox,
+    )
 
 
 def _workspace(root: Path) -> Path:
@@ -122,7 +146,7 @@ def test_runtime_import_failure_is_not_a_reviewable_baseline_failure(
         lambda preview: seen.append(preview) or True,
     )
     assert outcome is EphemeralAcceptanceState.UNAVAILABLE
-    assert gate.metrics.baseline_outcome == "error"
+    assert gate.metrics.baseline_outcome == "EPHEMERAL_EXECUTION_ERROR"
     assert not seen
 
 
