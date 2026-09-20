@@ -2137,7 +2137,7 @@ evidence.
 
 # Milestone A52 — Ephemeral Acceptance Execution Isolation v1
 
-**Status:** Implemented; architecture review pending before acceptance.
+**Status:** Accepted (per A53 milestone brief).
 
 `ephemeral-acceptance-isolation-v1` requires a distinct strict macOS Seatbelt
 profile for both candidate baseline and approved postmutation execution. The
@@ -2148,4 +2148,15 @@ execution without fallback. Approval binds policy and environment identity;
 source-integrity checks and distinct execution classifications prevent sandbox
 denial from masquerading as a semantic assertion failure. Real host probes and
 isolated A50 R05 replay support this boundary, but it is not a formal Python
-sandbox proof. A53 has not begun.
+sandbox proof.
+
+# Milestone A53 — Controlled File Creation v1
+
+**Status:** Implemented; architecture review pending before acceptance.
+
+Creation authority is distinct from observed-source edit authority. An exact
+new path must be provided by trusted task setup, its parent must already exist,
+and the target must remain absent. A53 v1 supports one or two new UTF-8 regular
+files in one approval-gated creation-only transaction; mixed edit/create groups
+remain deferred. No deletion, rename, directory creation, executable file, or
+ephemeral-test persistence authority is added.

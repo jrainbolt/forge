@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from forge.repository_index import RepositoryIndex
     from forge.semantic_index import SemanticIndex
 from forge.project_config import ProjectCommands
+from forge.tools.controlled_creation import CreateTextFilesTool
 from forge.tools.git import GitDiffTool, GitStatusTool
 from forge.tools.lexical import LexicalSearchTool
 from forge.tools.permissions import RuleBasedPolicy
@@ -43,6 +44,7 @@ READ_ONLY_TOOL_NAMES = (
 )
 SEMANTIC_TOOL_NAME = "repository.semantic_search"
 WRITE_TOOL_NAMES = (
+    "repository.create_text_files",
     "repository.apply_multi_patch",
     "repository.apply_patch",
     "repository.write_file",
@@ -89,6 +91,8 @@ def create_assist_repository_registry(
     index: RepositoryIndex | None = None,
     semantic_index: SemanticIndex | None = None,
     lexical_index: RepositoryLexicalIndex | None = None,
+    *,
+    include_creation: bool = False,
 ) -> ToolRegistry:
     """Create the explicit A6 read plus A9 controlled-write registry."""
     configured = commands or ProjectCommands()
@@ -111,6 +115,8 @@ def create_assist_repository_registry(
         ProjectCommandTool("build", configured.build, configured.execution_isolation),
         ProjectCommandTool("test", configured.test, configured.execution_isolation),
     ]
+    if include_creation:
+        candidates.append(CreateTextFilesTool())
     if semantic_index is not None:
         candidates.append(SemanticSearchTool(semantic_index))
     if lexical_index is not None:
@@ -134,6 +140,8 @@ def create_repository_registry(
     index: RepositoryIndex | None = None,
     semantic_index: SemanticIndex | None = None,
     lexical_index: RepositoryLexicalIndex | None = None,
+    *,
+    include_creation: bool = False,
 ) -> ToolRegistry:
     """Create one fixed registry under autonomy ceiling and permanent DENYs."""
     configured = commands or ProjectCommands()
@@ -156,6 +164,8 @@ def create_repository_registry(
         ProjectCommandTool("build", configured.build, configured.execution_isolation),
         ProjectCommandTool("test", configured.test, configured.execution_isolation),
     ]
+    if include_creation:
+        candidates.append(CreateTextFilesTool())
     if semantic_index is not None:
         candidates.append(SemanticSearchTool(semantic_index))
     if lexical_index is not None:

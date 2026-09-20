@@ -136,6 +136,11 @@ from forge.tools import (
     preview_multi_file_mutation,
     preview_repository_mutation,
 )
+from forge.tools.controlled_creation import (
+    authorize_create_candidate,
+    create_group_id,
+    preview_create_text_files,
+)
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_MAX_ORCHESTRATION_STEPS = 12
@@ -215,6 +220,12 @@ GROUPED_STRUCTURED_MUTATION_READY_GUIDANCE = (
     "Return one multi_file_structured_edit containing every authorized path, with "
     "one exact changed old_text/new_text replacement per file. Do not return "
     "unchanged text or continue repository discovery."
+)
+CREATE_READY_GUIDANCE = (
+    "Create only the exact authorized new path or paths. Each parent already exists "
+    "and each target is absent. Return complete UTF-8 file content using create_file "
+    "or multi_file_create. No directory creation, deletion, executable mode, or "
+    "surprise path is permitted. Forge will preview and require exact approval."
 )
 MUTATION_READY_SYSTEM_PROMPT = (
     "You are Forge performing one coding mutation in a local repository. "
@@ -470,6 +481,7 @@ class RepositoryChatSession:
         max_no_progress: int = DEFAULT_MAX_NO_PROGRESS_CYCLES,
         minimum_source_files: int | None = None,
         required_candidate_paths: tuple[str, ...] = (),
+        create_candidate_paths: tuple[str, ...] = (),
         require_relevant_source: bool = True,
         require_mutation_relevance: bool | None = None,
         skip_verification: bool = False,
@@ -670,7 +682,27 @@ class RepositoryChatSession:
             if interaction_policy is not None
             else create_readonly_repository_policy(),
         )
-        self._context = ExecutionContext(_resolve_selected_workspace(workspace))
+        selected_workspace = _resolve_selected_workspace(workspace)
+        if create_candidate_paths and not self._assist_mode:
+            raise ValueError("create candidates require coding mode")
+        if len(create_candidate_paths) > 2 or len(set(create_candidate_paths)) != len(
+            create_candidate_paths
+        ):
+            raise ValueError("at most two unique create candidates are allowed")
+        create_candidates = tuple(
+            authorize_create_candidate(
+                selected_workspace, path, 0, "explicit_task_path"
+            )
+            for path in sorted(create_candidate_paths)
+        )
+        if create_candidates and "repository.create_text_files" not in {
+            metadata.name for metadata in self._registry.metadata
+        }:
+            raise ValueError("create tool is unavailable under this registry")
+        self._create_paths = tuple(item.path for item in create_candidates)
+        self._context = ExecutionContext(
+            selected_workspace, create_candidates=create_candidates
+        )
         self._conversation = Conversation(
             system_message=_repository_system_prompt(
                 self._registry,
@@ -713,6 +745,7 @@ class RepositoryChatSession:
         self._last_agent_task: AgentTaskResult | None = None
         self._agent_stop_hint: AgentStopReason | None = None
         self._model_invocation_ids: set[str] = set()
+        self._authorized_create_invocation: ToolInvocation | None = None
         LOGGER.info(
             "Repository session policy mode=%s permissions=%s tools=%d",
             self._mode.value,
@@ -841,6 +874,7 @@ class RepositoryChatSession:
             raise RepositoryOrchestrationError(
                 "coding tasks require explicit assist mode"
             )
+        self._authorized_create_invocation = None
         self._active_coding_task = CodingTaskState(
             self._mutation_generation,
             repair_enabled=self._repair_enabled,
@@ -1452,6 +1486,7 @@ class RepositoryChatSession:
                 routed_tools = {
                     "repository.apply_patch",
                     "repository.apply_multi_patch",
+                    "repository.create_text_files",
                 }
                 if reread_candidates:
                     routed_tools.add("repository.read_range")
@@ -1514,6 +1549,9 @@ class RepositoryChatSession:
                 )
                 output_specification = build_mutation_ready_output(
                     coding_task.mutation_candidate_paths,
+                    create_paths=(
+                        self._create_paths if not coding_task.repair_ready else ()
+                    ),
                     representation=self._mutation_representation,
                     allow_targeted_reread=reread_schema is not None,
                     reread_schema=reread_schema,
@@ -1672,8 +1710,15 @@ class RepositoryChatSession:
                     if coding_task.repair_enabled
                     else self._mutation_ready_guidance(grouped=len(candidates) > 1)
                 )
+                if self._create_paths and not repair:
+                    guidance = (
+                        CREATE_READY_GUIDANCE
+                        + " Authorized new paths: "
+                        + ", ".join(self._create_paths)
+                    )
                 if (
                     len(candidates) > 1
+                    and not self._create_paths
                     and MULTI_FILE_MUTATION_READY_GUIDANCE not in guidance
                 ):
                     guidance = guidance + " " + MULTI_FILE_MUTATION_READY_GUIDANCE
@@ -1858,6 +1903,71 @@ class RepositoryChatSession:
                 )
                 continue
             if parsed.outcome in {
+                ToolCallOutcome.CREATE_FILE,
+                ToolCallOutcome.MULTI_FILE_CREATE,
+            }:
+                if (
+                    coding_task is None
+                    or not coding_task.structured_edit_ready
+                    or coding_task.repair_ready
+                    or not self._create_paths
+                    or parsed.creates is None
+                ):
+                    raise RepositoryOrchestrationError(
+                        "creation is only valid with explicit primary create authority"
+                    )
+                creates = tuple(
+                    dict(item)
+                    for item in sorted(parsed.creates, key=lambda item: item["path"])
+                )
+                if tuple(item["path"] for item in creates) != self._create_paths:
+                    if coding_task.note_structured_edit("unauthorized_create"):
+                        mutation_correction = CREATE_READY_GUIDANCE
+                        continue
+                    coding_task.fail_after_mutation()
+                    raise RepositoryOrchestrationError(
+                        "unauthorized create path repeated"
+                    )
+                authority = tuple(
+                    candidate
+                    for candidate in self._context.create_candidates
+                    if candidate.path in self._create_paths
+                )
+                try:
+                    group_id = create_group_id(
+                        creates, authority, self._mutation_generation
+                    )
+                except ToolError:
+                    if coding_task.note_structured_edit("invalid_create_content"):
+                        mutation_correction = CREATE_READY_GUIDANCE
+                        continue
+                    coding_task.fail_after_mutation()
+                    raise RepositoryOrchestrationError(
+                        "invalid create content repeated"
+                    ) from None
+                create_arguments = {
+                    "group_id": group_id,
+                    "workspace_generation": self._mutation_generation,
+                    "creates": creates,
+                }
+                coding_task.note_structured_edit(None, representation="create_text")
+                create_invocation_id = "structured-edit-create-" + str(
+                    coding_task.structured_mutation_metrics.attempts
+                )
+                self._authorized_create_invocation = ToolInvocation(
+                    create_invocation_id,
+                    "repository.create_text_files",
+                    create_arguments,
+                )
+                parsed = ParsedModelOutput(
+                    ToolCallOutcome.TOOL_CALL,
+                    tool_call=ToolCall(
+                        create_invocation_id,
+                        "repository.create_text_files",
+                        create_arguments,
+                    ),
+                )
+            if parsed.outcome in {
                 ToolCallOutcome.STRUCTURED_EDIT,
                 ToolCallOutcome.LINE_RANGE_EDIT,
                 ToolCallOutcome.MULTI_FILE_STRUCTURED_EDIT,
@@ -1866,6 +1976,10 @@ class RepositoryChatSession:
                 if coding_task is None or not coding_task.structured_edit_ready:
                     raise RepositoryOrchestrationError(
                         "structured edit is only valid in mutation-ready state"
+                    )
+                if self._create_paths and not coding_task.repair_ready:
+                    raise RepositoryOrchestrationError(
+                        "existing-file edits are not authorized in creation-only v1"
                     )
                 line_range = parsed.outcome in {
                     ToolCallOutcome.LINE_RANGE_EDIT,
@@ -2070,7 +2184,9 @@ class RepositoryChatSession:
                 if coding_task is not None and coding_task.structured_edit_ready:
                     if coding_task.note_premature_final():
                         mutation_correction = (
-                            GROUPED_LINE_RANGE_MUTATION_REQUIRED_CORRECTION
+                            CREATE_READY_GUIDANCE
+                            if self._create_paths and not coding_task.repair_ready
+                            else GROUPED_LINE_RANGE_MUTATION_REQUIRED_CORRECTION
                             if len(coding_task.mutation_candidates) > 1
                             and self._mutation_representation
                             is MutationRepresentationPolicy.LINE_RANGE
@@ -2208,10 +2324,23 @@ class RepositoryChatSession:
             assert call is not None
             if (
                 coding_task is not None
+                and (self._create_paths or coding_task.mutation_count > 0)
+                and call.tool_name == "repository.write_file"
+                and call.arguments.get("mode") == "create"
+            ):
+                raise RepositoryOrchestrationError(
+                    "coding-task creation requires explicit CREATE_READY authority"
+                )
+            if (
+                coding_task is not None
                 and coding_task.structured_edit_ready
                 and not self._agent_mode
                 and call.tool_name
-                in {"repository.apply_patch", "repository.apply_multi_patch"}
+                in {
+                    "repository.apply_patch",
+                    "repository.apply_multi_patch",
+                    "repository.create_text_files",
+                }
                 and not call.invocation_id.startswith("structured-edit-")
             ):
                 correction_available = coding_task.note_structured_edit(
@@ -2324,6 +2453,7 @@ class RepositoryChatSession:
                     "repository.apply_multi_patch",
                     "repository.apply_patch",
                     "repository.write_file",
+                    "repository.create_text_files",
                 }
                 and len(activities) + 1 + len(self._verification_plan.steps) + 1
                 > self._max_tool_executions
@@ -2372,6 +2502,7 @@ class RepositoryChatSession:
                 "repository.apply_multi_patch",
                 "repository.write_file",
                 "repository.apply_patch",
+                "repository.create_text_files",
             }:
                 gate = self._ephemeral_gate
                 ephemeral_blocked = False
@@ -2445,7 +2576,8 @@ class RepositoryChatSession:
                     )
                 if (
                     coding_task is not None
-                    and call.tool_name == "repository.apply_multi_patch"
+                    and call.tool_name
+                    in {"repository.apply_multi_patch", "repository.create_text_files"}
                     and result.status is ToolResultStatus.FAILURE
                     and isinstance(result.output, Mapping)
                     and "mutation_group_apply_result" in result.output
@@ -2702,6 +2834,10 @@ class RepositoryChatSession:
                                 "Lexical index invalidation failed", exc_info=True
                             )
                 self._mutation_generation += 1
+                if call.tool_name == "repository.create_text_files":
+                    # One task-scoped create grant never rolls into a later turn.
+                    self._create_paths = ()
+                    self._context = replace(self._context, create_candidates=())
                 # Explicit A22 plans require generation-current source coverage.
                 # The implicit compatibility goal preserves the pre-A22 coding
                 # workflow, whose verification state already guards mutations.
@@ -3302,16 +3438,35 @@ class RepositoryChatSession:
         observed_hashes: Mapping[str, str],
         observed_directories: set[str],
     ) -> ToolResult:
-        provenance_error = _mutation_provenance_error(
-            invocation, observed_hashes, observed_directories
-        )
+        if invocation.tool_name == "repository.create_text_files":
+            authorized = self._authorized_create_invocation
+            self._authorized_create_invocation = None
+            if (
+                authorized is None
+                or invocation != authorized
+                or self._active_coding_task is None
+                or self._active_coding_task.phase
+                is not CodingTaskPhase.AWAITING_MUTATION_APPROVAL
+                or self._active_coding_task.mutation_count != 0
+                or not self._create_paths
+            ):
+                return _provenance_failure(
+                    result, "creation requires primary CREATE_READY authority"
+                )
+            provenance_error = None
+        else:
+            provenance_error = _mutation_provenance_error(
+                invocation, observed_hashes, observed_directories
+            )
         if provenance_error is not None:
             return _provenance_failure(result, provenance_error)
         if result.status is not ToolResultStatus.APPROVAL_REQUIRED:
             return result
         try:
             preview = (
-                preview_multi_file_mutation(arguments, self._context)
+                preview_create_text_files(arguments, self._context)
+                if invocation.tool_name == "repository.create_text_files"
+                else preview_multi_file_mutation(arguments, self._context)
                 if invocation.tool_name == "repository.apply_multi_patch"
                 else preview_repository_mutation(
                     invocation.tool_name, arguments, self._context

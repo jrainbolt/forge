@@ -1233,3 +1233,22 @@ modified. The A50 qualified R05 test was replayed under the new strict profile:
 baseline assertion FAIL, correct and Codestral states PASS with full
 configure/build/test PASS, and the wrong state FAIL before full verification.
 No new model generation or evaluator qualification rule was introduced.
+
+## controlled-file-creation-v1
+
+A53 adds C01–C16 deterministic checks for exact new-path authority, preview and
+approval binding, one/two-file creation, protected paths, content and parent
+validation, no-overwrite prechecks, owned-file rollback, and one-generation
+accounting. C03 explicitly rejects mixed edit/create because v1 retains the
+existing A41 edit transaction unchanged. Tests use disposable directories and
+injected later-child/rollback failures; they do not imply crash atomicity.
+
+The realistic A53 create task uses a disposable Python package with an absent
+module required by an existing caller. The baseline behavioral oracle fails,
+and an evaluator-held reference file passes. Real-model acceptance, when run,
+uses qwen-small at seed 42, temperature 0, 8192 context, and 512 output tokens;
+the milestone does not depend on semantic oracle success to prove transaction
+safety. The qwen-small host run reached CREATE_READY, proposed the authorized
+new module, displayed and approved its CREATE preview, applied the transaction,
+passed configured project testing, and passed the independent oracle. The
+fixture is not production guidance and does not enter the wheel.

@@ -136,6 +136,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="trusted Python package root allowed in generated assertions",
     )
+    chat.add_argument(
+        "--create-path",
+        action="append",
+        default=[],
+        help="explicitly authorize one absent new text-file path (maximum two)",
+    )
     autonomy.add_argument(
         "--agent",
         action="store_true",
@@ -304,6 +310,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             repository_index,
                             semantic_index,
                             lexical_index,
+                            include_creation=bool(args.create_path),
                         )
                     ),
                     policy=interaction,
@@ -325,6 +332,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ephemeral_acceptance_mode=ephemeral_mode,
                     ephemeral_acceptance_paths=tuple(args.acceptance_context_file),
                     ephemeral_acceptance_import_root=args.acceptance_import_root,
+                    create_candidate_paths=tuple(args.create_path),
                 )
             with model, session:
                 result = run_repl(session)

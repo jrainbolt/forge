@@ -123,6 +123,38 @@ MULTI_FILE_LINE_RANGE_EDIT_SCHEMA = {
     "required": ["type", "edits"],
     "additionalProperties": False,
 }
+CREATE_FILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"const": "create_file"},
+        "path": {"type": "string"},
+        "content": {"type": "string"},
+    },
+    "required": ["type", "path", "content"],
+    "additionalProperties": False,
+}
+MULTI_FILE_CREATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"const": "multi_file_create"},
+        "creates": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["type", "creates"],
+    "additionalProperties": False,
+}
 REPOSITORY_RESPONSE_SCHEMA = {
     "oneOf": [
         TOOL_CALL_SCHEMA,
@@ -153,6 +185,9 @@ def build_repository_output(
     branches: list[dict[str, object]] = []
     hashes = observed_hashes or {}
     for metadata in registry.metadata:
+        if metadata.name == "repository.create_text_files":
+            # Creation is available only through the candidate-bound ready schema.
+            continue
         if allowed_tool_names is not None and metadata.name not in allowed_tool_names:
             continue
         if (
@@ -325,6 +360,8 @@ def _json_schema_type(argument_type: ArgumentType) -> str:
         return "array"
     if argument_type is ArgumentType.MULTI_FILE_PATCHES:
         return "array"
+    if argument_type is ArgumentType.TEXT_FILE_CREATES:
+        return "array"
     raise TypeError("unsupported argument type")
 
 
@@ -339,6 +376,8 @@ class ToolCallOutcome(Enum):
     LINE_RANGE_EDIT = "line_range_edit"
     MULTI_FILE_STRUCTURED_EDIT = "multi_file_structured_edit"
     MULTI_FILE_LINE_RANGE_EDIT = "multi_file_line_range_edit"
+    CREATE_FILE = "create_file"
+    MULTI_FILE_CREATE = "multi_file_create"
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,6 +409,7 @@ class ParsedModelOutput:
     line_range_edit: Mapping[str, object] | None = None
     multi_file_structured_edit: tuple[Mapping[str, str], ...] | None = None
     multi_file_line_range_edit: tuple[Mapping[str, object], ...] | None = None
+    creates: tuple[Mapping[str, str], ...] | None = None
 
     def __post_init__(self) -> None:
         if self.outcome is ToolCallOutcome.FINAL:
@@ -405,6 +445,12 @@ class ParsedModelOutput:
         elif self.outcome is ToolCallOutcome.MULTI_FILE_LINE_RANGE_EDIT:
             if self.multi_file_line_range_edit is None:
                 raise ValueError("multi-file line-range output requires edits")
+        elif self.outcome in {
+            ToolCallOutcome.CREATE_FILE,
+            ToolCallOutcome.MULTI_FILE_CREATE,
+        }:
+            if self.creates is None:
+                raise ValueError("create output requires files")
         else:
             raise TypeError("outcome must be a ToolCallOutcome")
 
@@ -443,6 +489,40 @@ def parse_model_output(text: str) -> ParsedModelOutput:
         if not isinstance(answer, str) or not answer.strip():
             raise ProtocolError("final answer must be non-empty text")
         return ParsedModelOutput(ToolCallOutcome.FINAL, text=answer)
+    if response_type == "create_file":
+        if set(payload) != {"type", "path", "content"} or not all(
+            isinstance(payload[key], str) for key in ("path", "content")
+        ):
+            raise ProtocolError("create_file requires exact path and content text")
+        return ParsedModelOutput(
+            ToolCallOutcome.CREATE_FILE,
+            creates=(
+                MappingProxyType(
+                    {"path": payload["path"], "content": payload["content"]}
+                ),
+            ),
+        )
+    if response_type == "multi_file_create":
+        if (
+            set(payload) != {"type", "creates"}
+            or not isinstance(payload["creates"], list)
+            or len(payload["creates"]) != 2
+        ):
+            raise ProtocolError("multi_file_create requires exactly two files")
+        creates = payload["creates"]
+        if any(
+            not isinstance(item, dict)
+            or set(item) != {"path", "content"}
+            or not all(isinstance(item[key], str) for key in ("path", "content"))
+            for item in creates
+        ):
+            raise ProtocolError(
+                "multi_file_create children require path and content text"
+            )
+        return ParsedModelOutput(
+            ToolCallOutcome.MULTI_FILE_CREATE,
+            creates=tuple(MappingProxyType(item) for item in creates),
+        )
     if response_type == "structured_edit":
         if set(payload) != {"type", "path", "old_text", "new_text"}:
             raise ProtocolError(
@@ -533,6 +613,7 @@ def _multi_edits(
 def build_mutation_ready_output(
     candidate_paths: tuple[str, ...],
     *,
+    create_paths: tuple[str, ...] = (),
     representation: MutationRepresentationPolicy = (
         MutationRepresentationPolicy.EXACT_TEXT
     ),
@@ -541,6 +622,20 @@ def build_mutation_ready_output(
     allow_single_file_subset: bool = False,
 ) -> OutputSpecification:
     """Require one candidate-bound configured mutation representation."""
+    if create_paths:
+        source = (
+            CREATE_FILE_SCHEMA if len(create_paths) == 1 else MULTI_FILE_CREATE_SCHEMA
+        )
+        creation = json.loads(json.dumps(source))
+        if len(create_paths) == 1:
+            creation["properties"]["path"]["enum"] = list(create_paths)
+        else:
+            creation["properties"]["creates"]["items"]["properties"]["path"]["enum"] = (
+                sorted(create_paths)
+            )
+        return OutputSpecification(
+            ResponseFormat.JSON, {"oneOf": [creation, FINAL_SCHEMA]}
+        )
     grouped = len(candidate_paths) > 1
     source_schema = (
         MULTI_FILE_LINE_RANGE_EDIT_SCHEMA

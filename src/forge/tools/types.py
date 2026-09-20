@@ -24,6 +24,7 @@ class ArgumentType(Enum):
     BOOLEAN = "boolean"
     TEXT_EDITS = "text_edits"
     MULTI_FILE_PATCHES = "multi_file_patches"
+    TEXT_FILE_CREATES = "text_file_creates"
 
 
 class ToolResultStatus(Enum):
@@ -209,6 +210,7 @@ class InvocationApproval:
 class ExecutionContext:
     workspace: Path
     prepared_project_command: object | None = None
+    create_candidates: tuple[CreateCandidate, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.workspace, Path):
@@ -222,6 +224,17 @@ class ExecutionContext:
         if not workspace.is_dir():
             raise ValueError(f"workspace is not a directory: {workspace}")
         object.__setattr__(self, "workspace", workspace)
+
+
+@dataclass(frozen=True, slots=True)
+class CreateCandidate:
+    """Trusted path authority; never inferred from model-authored file content."""
+
+    path: str
+    parent_device: int
+    parent_inode: int
+    generation: int
+    provenance: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +318,14 @@ def _matches_type(value: object, value_type: ArgumentType) -> bool:
             )
             for patch in value
         )
+    if value_type is ArgumentType.TEXT_FILE_CREATES:
+        return isinstance(value, (list, tuple)) and all(
+            isinstance(item, Mapping)
+            and set(item) == {"path", "content"}
+            and isinstance(item["path"], str)
+            and isinstance(item["content"], str)
+            for item in value
+        )
     return False
 
 
@@ -315,6 +336,9 @@ def _freeze_argument(value: object, value_type: ArgumentType) -> object:
     if value_type is ArgumentType.MULTI_FILE_PATCHES:
         assert isinstance(value, (list, tuple))
         return tuple(freeze_structured_value(patch) for patch in value)
+    if value_type is ArgumentType.TEXT_FILE_CREATES:
+        assert isinstance(value, (list, tuple))
+        return tuple(freeze_structured_value(item) for item in value)
     return value
 
 

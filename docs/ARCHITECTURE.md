@@ -1481,3 +1481,42 @@ is safe. In particular, imported code can catch denied operations, and native
 extension compatibility is not guaranteed. The feature remains experimental and
 OFF by default; `sandbox-exec` availability and the exact host policy must be
 validated on deployment hosts.
+
+## Controlled file creation
+
+A53 separates new-path authority from existing-source mutation candidates. Task
+setup must supply one or two exact `--create-path` values; search results, model
+prose, and A51 ephemeral acceptance candidates do not create this authority.
+Forge captures the already-existing real parent directory's device/inode and
+workspace generation. Paths must be normalized, relative, inside the workspace,
+and outside protected internal/generated roots. Dotfiles and symlink parents are
+ineligible. A target that exists, including a zero-byte file or broken symlink,
+cannot be created or overwritten.
+
+The model returns `create_file` or `multi_file_create` with complete text. Forge
+encodes UTF-8, permits an explicitly proposed empty file, rejects binary control
+bytes and content over 64 KiB per file, canonicalizes path
+order, and materializes all byte images in memory before any write. One preview
+labels each child CREATE and shows its complete `/dev/null` diff, size, SHA-256,
+and fixed `0644` mode. The normal WRITE permission remains ASK in confirm and
+trusted-exec profiles and DENY in safe; one exact invocation approval binds path,
+content hash, parent identity, and generation. The complete group is rechecked
+before application. Exclusive, no-follow creation prevents overwrite if a target
+appears. Created files are verified as regular files with exact bytes and mode.
+Handled later-child failure removes earlier files only after ownership identity
+and content checks; unsafe rollback is a terminal workspace-integrity failure.
+This is application-level rollback, not crash atomicity or a global TOCTOU proof.
+
+A53 v1 deliberately supports creation-only groups, not mixed edit/create groups;
+the existing A41 schemas and transaction remain unchanged. Successful creation is
+one logical mutation and increments workspace generation once. Normal repository
+index invalidation and fresh source acquisition apply afterward. Repair may edit
+a primary-created file only after a new trusted read and may not create surprise
+paths or delete files. A51/A52 generated tests remain ephemeral and are not
+persisted through creation authority. A53 adds no deletion, rename, directory
+creation, executable mode, or general-purpose filesystem tool.
+
+Compatibility boundary: the preexisting A9 `repository.write_file` create mode
+remains available in legacy assist flows after its existing inspected-parent and
+approval checks. When A53 `--create-path` authority is active, that legacy route
+is rejected for the task; creation must use the typed candidate-bound protocol.

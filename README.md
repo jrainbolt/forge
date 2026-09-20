@@ -221,6 +221,12 @@ failure restores files already replaced from retained original bytes. This is an
 application-level rollback guarantee, not a crash- or power-loss-proof filesystem
 transaction.
 
+To use A53 candidate-bound creation in a coding task, supply each exact absent path
+with `--create-path` (up to two paths). Forge previews the complete CREATE diff and
+asks for approval; it will not create parent directories or overwrite a target.
+This initial creation path supports creation-only groups, not mixed edit/create
+transactions. It does not persist generated ephemeral acceptance tests.
+
 `project.configure`, `project.build`, and `project.test` accept no model arguments. Their immutable argv
 arrays and timeouts come from the trusted local TOML configuration:
 
