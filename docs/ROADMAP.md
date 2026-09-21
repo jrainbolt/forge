@@ -2200,3 +2200,32 @@ previewed and applied the pair and passed verification plus oracle; Codestral
 previewed and applied the pair but failed semantically. qwen-small's run returned
 but its result could not be serialized by the evaluator, so that M5 outcome is
 unscored rather than inferred or repeatedly rerun. No A56 work was started.
+
+# Milestone A56 — Realistic Coding Capability Suite v2
+
+**Status:** Implemented and evaluated; architecture review pending.
+
+`realistic-coding-v2` extends the frozen semantic-maintenance fixture with
+controlled file-creation and mixed modify/create cases. Twelve versioned Python
+and C17 tasks are split evenly across EDIT_SINGLE, EDIT_MULTI, CREATE, and
+MIXED_EDIT_CREATE. Every task must pass baseline/reference/wrong and incomplete
+operation integrity gates before model scoring. The independent oracle and
+configured project verification are reported separately so verification-blind
+semantic failures cannot be mistaken for success. Three unchanged local model
+profiles run through the full production session at seed 42 with atomic
+per-cell checkpoints; model-specific routing is deferred pending evidence.
+The benchmark repository and results remain evaluator-only, outside installed
+Forge runtime resources. No deletion, rename, directory-creation, or new
+production filesystem authority is introduced.
+
+The 36-cell seed-42 matrix produced independent-oracle passes of 4/12 for
+qwen-small, 7/12 for qwen-large, and 6/12 for Codestral, with 10/12, 9/12,
+and 12/12 executed mutations respectively. Qwen-large led semantic outcomes
+and summed task time but missed every single-edit proposal; Codestral completed
+every transaction at higher runtime; qwen-small led the single-edit subset.
+Optional seed-43 repeats for qwen-large and Codestral reproduced every
+task-level oracle outcome and proposal-envelope shape. Zero of seven seed-42
+repair attempts recovered semantic correctness, and one Codestral create
+state passed configured verification while failing the independent oracle.
+These data call for verification/repair architecture review, not an automatic
+default-model switch or routing rule. A57 has not begun.

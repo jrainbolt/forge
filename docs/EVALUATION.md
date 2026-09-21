@@ -1338,3 +1338,85 @@ are excluded from M4–M5 comparison. The evaluator serializer and representatio
 setting were corrected; the invalid probes are retained only as an explicit
 instrumentation deviation. A55 makes no claim of universal qwen-small M5
 success or broad semantic coding reliability.
+
+## realistic-coding-v2
+
+A56 freezes twelve C01-v1–C12-v1 tasks in a Python/C17 service-and-engine
+repository. The four operation classes have three tasks each: single-file edits
+(C01–C03), paired existing-file edits (C04–C06), exact-path creation (C07–C09),
+and paired modify-plus-create transactions (C10–C12). Each task uses the normal
+repository session, configured project configure/build/test plan, approval-gated
+mutation, repair path, and an evaluator-held behavioral oracle in a disposable
+copy. Evaluator reference and wrong implementations are not model context.
+
+The integrity gate checks the baseline, reference, and predeclared wrong state
+for every task, plus each incomplete multi-operation state. All twelve baselines
+and wrong states fail the independent oracle; all twelve references pass; no
+partial paired state passes. Production verification is scored separately:
+three inherited edit baselines pass configure/build/test despite failing the
+behavioral oracle, so a green project verification result alone is not semantic
+success. Integrity, task prompts, wrong states, canonical repository bytes, and
+oracle code are bound by a frozen manifest before model execution.
+
+The primary matrix is qwen-small, qwen-large, and Codestral-22B at seed 42,
+temperature 0, 8192-token context, and 512 output tokens. Each completed cell,
+including a failed one, is committed atomically with model artifact identity and
+source-free structural, semantic, verification, repair, token, and timing fields.
+Resume skips committed cells and runs only missing ones. Reporting separates
+authorized proposal shape, preview/transaction execution, configured verification,
+first-pass behavior, final behavioral correctness, and repair recovery by operation
+class. The evaluator fixture and checkpoints are not installed runtime resources.
+
+The completed seed-42 matrix recorded 36/36 cells and 17 independent-oracle
+passes. qwen-small reached 4/12 semantic passes, 10/12 valid transactions,
+and 429 seconds of summed task time. qwen-large reached 7/12, 9/12, and
+334 seconds; its three single-edit cells exited after readiness without a
+mutation, while it passed all paired edits and mixed transactions. Codestral
+reached 6/12, 12/12, and 794 seconds; its line-range proposals all executed,
+but several failed verification or the oracle. These are profile-specific
+integrated outcomes, not a ranking of model reasoning in isolation.
+
+Across the 36 cells, the first-pass and final oracle totals were both 17:
+seven repair attempts recovered zero semantic failures. Thirty-one cells
+executed mutations, and 17 new files were created on authorized paths. Of
+fourteen semantically failing post-transaction states, configured verification
+rejected thirteen; Codestral C07 passed project verification while failing the
+independent oracle. Three inherited edit task baselines (C04–C06) also pass
+project verification despite failing the oracle. The benchmark therefore
+keeps semantic success separate from build/test green status. The primary
+matrix supports no automatic default switch or class-based routing policy;
+seed-43 stability evidence and hardware/runtime tradeoffs should be reviewed
+first.
+
+The optional qwen-large seed-43 repeat matched all twelve seed-42 semantic
+outcomes and all twelve source-free proposal-envelope shapes. It again scored
+7/12 oracle passes and 9/12 executed transactions (350 seconds of summed
+task time). Some reported token counts differed slightly, so the repeat is
+outcome/shape stability evidence, not a claim of byte-identical generation.
+The optional Codestral seed-43 repeat likewise matched all twelve seed-42
+semantic outcomes and envelope shapes: 6/12 oracle passes and 12/12 executed
+transactions, with 841 seconds of summed task time. Across both repeated
+profiles, the seed change at temperature zero did not alter task outcomes;
+some token counts and elapsed times changed.
+
+The class-specific primary comparison is more informative than total pass
+counts: EDIT_SINGLE passed 2/3 for qwen-small, 0/3 for qwen-large, and 1/3 for
+Codestral; EDIT_MULTI passed 1/3, 3/3, and 3/3; CREATE passed 0/3, 1/3, and
+1/3; MIXED_EDIT_CREATE passed 1/3, 3/3, and 1/3. Qwen-large is the strongest
+semantic and task-time profile in this local 12-task matrix, while Codestral
+has the highest mutation-protocol completion and qwen-small retains a
+lower-footprint practical role. Three tasks per class and profile-dependent
+representation are not enough to justify automatic routing or a default
+change. The next architecture review should prioritize task-relevant
+verification coverage and effective repair feedback, especially for creation
+and mixed semantics, while preserving the A55 framing and A53/A54 authority
+boundaries.
+
+Measurement caveat: three already committed qwen-small checkpoints retain
+early evaluator-only `failure_layer` labels. C04 is labeled source acquisition
+although it reached mutation and then failed repair verification; C06 and C11
+are labeled protocol failure although their role/path envelopes were correct
+and their edit contents were rejected before mutation. Later classifier fixes
+and deterministic tests do not rerun or rewrite these committed cells. Class
+comparisons above use the checkpointed role, schema, transaction, verification,
+and oracle fields directly, so these labels do not change pass counts.

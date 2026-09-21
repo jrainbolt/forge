@@ -121,6 +121,9 @@ class RealWorldTask:
     unsupported_reason: str | None = None
     configure_command: tuple[str, ...] | None = None
     execution_isolation: ExecutionIsolationPolicy = ExecutionIsolationPolicy()
+    create_candidate_paths: tuple[str, ...] = ()
+    mixed_file_operations: bool = False
+    setup_absent_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.task_id or not self.prompt:
@@ -132,6 +135,8 @@ class RealWorldTask:
             "allowed_paths",
             "expected_changed_paths",
             "required_candidate_paths",
+            "create_candidate_paths",
+            "setup_absent_paths",
         ):
             values = tuple(getattr(self, name))
             if any(
@@ -140,6 +145,10 @@ class RealWorldTask:
             ):
                 raise ValueError(f"{name} must contain confined relative paths")
             object.__setattr__(self, name, values)
+        if not set(self.setup_absent_paths).issubset(self.create_candidate_paths):
+            raise ValueError("setup absences require exact create candidates")
+        if self.mixed_file_operations and not self.create_candidate_paths:
+            raise ValueError("mixed operations require create candidates")
         object.__setattr__(self, "setup", tuple(self.setup))
         object.__setattr__(
             self, "setup_commands", tuple(tuple(c) for c in self.setup_commands)
@@ -352,6 +361,7 @@ class RealWorldEvaluationRunner:
         include_repair_mutation_history: bool = False,
         result_callback: Callable[[RealWorldTask, Path, RealWorldTaskResult], None]
         | None = None,
+        primary_mutation_callback: Callable[[RealWorldTask, Path], None] | None = None,
     ) -> None:
         self._profile = model_profile
         self._model = model
@@ -361,6 +371,7 @@ class RealWorldEvaluationRunner:
         self._verification_baseline = verification_baseline
         self._include_repair_mutation_history = include_repair_mutation_history
         self._result_callback = result_callback
+        self._primary_mutation_callback = primary_mutation_callback
 
     def run(
         self, tasks: Iterable[RealWorldTask], repository: RepositorySnapshot
@@ -396,6 +407,7 @@ class RealWorldEvaluationRunner:
             workspace = copy_repository(self._repository, Path(name) / "workspace")
             try:
                 apply_task_setup(workspace, task.setup)
+                apply_task_absences(workspace, task.setup_absent_paths)
                 if run_oracle(workspace, task.setup_commands) is EvaluationOutcome.FAIL:
                     raise TaskSetupError("evaluator-owned setup command failed")
                 before = hash_workspace(workspace)
@@ -419,6 +431,27 @@ class RealWorldEvaluationRunner:
                 )
                 semantic_index.build()
             activity: list[object] = []
+            primary_observed = False
+
+            def observe_activity(item: object) -> None:
+                nonlocal primary_observed
+                activity.append(item)
+                if (
+                    not primary_observed
+                    and self._primary_mutation_callback is not None
+                    and getattr(item, "status", None) == "success"
+                    and getattr(item, "tool_name", None)
+                    in {
+                        "repository.apply_patch",
+                        "repository.apply_multi_patch",
+                        "repository.apply_file_operations",
+                        "repository.create_text_files",
+                        "repository.write_file",
+                    }
+                ):
+                    primary_observed = True
+                    self._primary_mutation_callback(task, workspace)
+
             session = RepositoryChatSession(
                 self._profile,
                 self._model,
@@ -426,7 +459,12 @@ class RealWorldEvaluationRunner:
                 mode=task.mode,
                 generation=GenerationConfig(max_tokens=512, temperature=0.0, seed=seed),
                 registry=create_repository_registry(
-                    policy, commands, index, semantic_index, lexical_index
+                    policy,
+                    commands,
+                    index,
+                    semantic_index,
+                    lexical_index,
+                    include_creation=bool(task.create_candidate_paths),
                 ),
                 interaction_policy=policy,
                 approval_callback=approvals,
@@ -435,12 +473,21 @@ class RealWorldEvaluationRunner:
                 lexical_index=lexical_index,
                 require_relevant_source=False,
                 require_mutation_relevance=True,
-                activity_callback=activity.append,
+                activity_callback=observe_activity,
                 mutation_representation=self._mutation_representation,
                 verification_baseline=self._verification_baseline,
                 verification_plan=commands.verification_plan,
-                minimum_source_files=max(1, len(task.expected_changed_paths)),
+                minimum_source_files=max(
+                    1,
+                    len(
+                        task.required_candidate_paths
+                        if task.create_candidate_paths
+                        else task.expected_changed_paths
+                    ),
+                ),
                 required_candidate_paths=task.required_candidate_paths,
+                create_candidate_paths=task.create_candidate_paths,
+                mixed_file_operations=task.mixed_file_operations,
                 include_repair_mutation_history=(self._include_repair_mutation_history),
             )
             response = None
@@ -543,6 +590,22 @@ def apply_task_setup(workspace: Path, changes: Sequence[SetupReplacement]) -> No
         path.write_text(
             text.replace(change.expected, change.replacement, 1), encoding="utf-8"
         )
+
+
+def apply_task_absences(workspace: Path, paths: Sequence[str]) -> None:
+    """Remove only declared canonical reference files in a disposable copy."""
+    root = workspace.resolve(strict=True)
+    for relative in paths:
+        target = root / relative
+        if (
+            Path(relative).is_absolute()
+            or ".." in Path(relative).parts
+            or target.is_symlink()
+            or not target.is_file()
+            or root not in target.resolve(strict=True).parents
+        ):
+            raise TaskSetupError(f"setup absence unavailable: {relative}")
+        target.unlink()
 
 
 def hash_workspace(workspace: Path) -> tuple[tuple[str, str], ...]:
