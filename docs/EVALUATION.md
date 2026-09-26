@@ -1420,3 +1420,95 @@ and their edit contents were rejected before mutation. Later classifier fixes
 and deterministic tests do not rerun or rewrite these committed cells. Class
 comparisons above use the checkpointed role, schema, transaction, verification,
 and oracle fields directly, so these labels do not change pass counts.
+
+## repair-framing-v1
+
+A57 compares three evaluator-only correction conditions from byte-identical
+post-primary workspaces: R0 is the unchanged production repair path, R1 is an
+ordinary current-workspace coding task without repair terminology or failure
+evidence, and R2 is the same ordinary framing plus the exact bounded configured
+verification failure already available to R0. All conditions retain the same
+model, seed 42, 8192-token context, 512-token output ceiling, mutation
+representation, task text, existing-path authority, and full configured
+verification plan. Hidden oracle results and first-mutation history are not
+model context.
+
+Eight predeclared A56 failures received one planned primary capture each. Six
+met every eligibility gate and had a known-good correction wholly within the
+captured existing-path authority: qwen-small C02/C08, qwen-large C07/C09, and
+Codestral C01/C08. Qwen-small C10 and Codestral C12 were excluded after their
+planned primaries did not establish an eligible repair state; neither was
+replaced or rerun. The final corpus therefore contains two cases per profile,
+Python and C17, two single-file edits, and four creates. No legitimate mixed or
+paired-edit state survived the frozen eligibility gates. The A56
+verification-pass/oracle-fail cell remains explicitly outside this corpus.
+
+Across six cases, R0 produced five schema-valid correction proposals and two
+executed correction transactions. Both transactions reran the full plan and
+remained verification- and oracle-failing. R1 and R2 produced zero valid
+proposals, transactions, verification recoveries, or semantic recoveries. All
+six per-case diagnoses are `MODEL_LIMITED`: no fresh-framing condition recovered
+a case that current repair missed, and bounded failure evidence neither helped
+nor harmed semantic recovery. R0 used 21,492 input and 1,730 output tokens over
+235.099 seconds total; R1 used 10,626/1,046 over 124.603 seconds; R2 used
+14,530/981 over 123.535 seconds. Token totals cover condition-specific model
+calls, so R0 includes the unchanged production repair interaction and R1/R2
+include normal bounded protocol interactions.
+
+CREATE cases acquired the newly created file as ordinary current source, and
+the evaluator confirmed every known-good correction was possible without new
+create/delete/rename authority. Their failures therefore do not implicate the
+repair path ceiling in this corpus. The result supplies no evidence for a
+production repair-framing change: ordinary framing materially regressed
+structural compatibility, verification evidence added prompt cost without a
+recovery, and no cross-case semantic benefit appeared. Production repair,
+budgets, retries, authority, verification plans, default model, and routing
+remain unchanged. Local replay payloads and generated workspaces stay outside
+standard source-free results and installed packages.
+
+## cross-model-repair-v1
+
+A58 reuses the six frozen A57 authority-sufficient post-primary failures and
+their same-model R0 results, then evaluates the two other trusted local repair
+profiles against each exact workspace. Each case therefore has qwen-small,
+qwen-large, and Codestral repair conditions while retaining the original task,
+bounded production failure evidence, current source, path authority, mutation
+representation, seed 42, temperature 0, 8192-token context, 512-token output
+ceiling, and complete verification plan. The repair request is unchanged
+production framing. Model identity and hidden-oracle data are not prompt input.
+
+The 18-cell matrix contains six reused A57 diagonal results and twelve new
+off-diagonal cells. Qwen-large uniquely recovered K01, a qwen-small-primary C17
+single-edit case: its authorized transaction passed the full configured plan
+and independent semantic oracle. Codestral and qwen-small both executed K01
+repairs that remained verification- and semantic-failing. The other five cases
+had no semantic recovery from any profile. Consequently the case
+classification is one `CROSS_MODEL_RECOVERY` and five `NO_MODEL_RECOVERY`;
+there is no same-model recovery.
+
+By repair profile, qwen-small produced 3/6 schema-valid repairs, 2/6
+transactions, and 0/6 semantic recoveries; qwen-large produced 3/6, 1/6, and
+1/6; Codestral produced 5/6, 2/6, and 0/6. Codestral retained the strongest
+structural rate but was materially slower: summed generation time was 111.377
+seconds for qwen-small, 129.437 for qwen-large, and 458.539 for Codestral.
+Token totals were respectively 19,583/1,111, 19,161/2,191, and 21,391/2,125
+input/output tokens. Three total-latency values are explicitly unavailable
+after an evaluator timer defect was detected; generation and verification
+latencies remain valid and no cell was rerun.
+
+The operation split is sharp but small. EDIT_SINGLE produced 5/6 structurally
+valid transactions and the sole semantic recovery; CREATE produced 6/12 valid
+schemas, no executed corrective transaction, and no recovery. C17 contains the
+sole recovery; no Python case recovered. Exact diagonal mutation text was not
+retained by A57, so wrong-fix convergence cannot be classified reliably.
+Available hashes show the successful qwen-large K01 response differs from the
+Codestral wrong alternative, without placing source in standard results.
+
+One cross-model win does not meet the production threshold: it covers only one
+primary profile and one operation class, and qwen-large did not recover the
+Codestral failures. The result establishes that model identity can matter for
+an individual failure, but the dominant pattern remains shared semantic
+limitation. No default change, dedicated repair profile, automatic routing,
+retry, budget, authority, representation, framing, or verification change is
+adopted. A future confirmation study would need predeclared repeated evidence
+before any routing decision.

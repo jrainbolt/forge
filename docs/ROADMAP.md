@@ -2228,4 +2228,45 @@ task-level oracle outcome and proposal-envelope shape. Zero of seven seed-42
 repair attempts recovered semantic correctness, and one Codestral create
 state passed configured verification while failing the independent oracle.
 These data call for verification/repair architecture review, not an automatic
-default-model switch or routing rule. A57 has not begun.
+default-model switch or routing rule. A57 is evaluated below.
+
+# Milestone A57 — Repair Framing & Corrective Re-Solve Compatibility v1
+
+**Status:** Implemented and evaluated; architecture review pending.
+
+`repair-framing-v1` freezes six legitimate, authority-sufficient post-primary
+failures, two for each of qwen-small, qwen-large, and Codestral, then compares
+unchanged production repair with ordinary corrective framing both without and
+with the same bounded configured-verification evidence. Every condition uses an
+independent byte-identical disposable copy, the original task, the exact current
+existing-path authority, the same representation and budgets, and the complete
+verification plan. Hidden evaluator oracles remain outside model context.
+
+Current repair emitted five structurally valid proposals and executed two, but
+recovered neither verification nor semantics. Both ordinary-framing conditions
+produced zero valid proposals and zero semantic recoveries across the six-case
+matrix. Verification evidence increased input cost without changing outcomes;
+all cases classify as model-limited rather than repair-framing-limited. Known-good
+corrections fit the exact repair authority, including all CREATE-derived current
+files. No production framing, retry, budget, authority, default-model, or routing
+change is justified. A58 is evaluated below.
+
+# Milestone A58 — Cross-Model Repair Handoff v1
+
+**Status:** Implemented and evaluated; architecture review pending.
+
+`cross-model-repair-v1` reuses the six frozen A57 post-primary workspaces and
+same-model R0 outcomes, then runs qwen-small, qwen-large, and Codestral as the
+repair backend for every case. Task, source, bounded failure evidence, exact
+existing-path authority, representation, seed, budgets, framing, and full
+verification remain fixed. Six diagonal results are reused and twelve
+off-diagonal cells are executed exactly once with atomic checkpoints.
+
+Qwen-large semantically recovered one qwen-small-primary C17 single-edit case;
+no model recovered the other five cases. Codestral remained structurally
+strongest but recovered no semantics and cost substantially more generation
+time. The single cross-model win spans neither multiple primary-model sources
+nor multiple operation classes, so it does not meet the threshold for a
+dedicated repair profile or automatic routing. Production model defaults,
+repair framing, retries, budgets, authority, and verification are unchanged.
+A59 has not begun.
