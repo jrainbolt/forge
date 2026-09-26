@@ -2270,3 +2270,21 @@ nor multiple operation classes, so it does not meet the threshold for a
 dedicated repair profile or automatic routing. Production model defaults,
 repair framing, retries, budgets, authority, and verification are unchanged.
 A59 has not begun.
+
+# Milestone A59 — Cross-Model Repair Confirmation & Generalization v1
+
+**Status:** Blocked by predeclared minimum corpus size.
+
+`cross-model-repair-confirmation-v1` froze eight new integrity-checked tasks,
+sixteen exactly-once qwen-small/Codestral primary cells, H1, and the future
+routing threshold before model execution. The tasks balance Python/C17 and all
+four operation classes; historical A58 K01 is excluded.
+
+Ten primaries passed semantics. Six failed both verification and semantics,
+but only three Codestral states naturally entered production repair readiness
+with sufficient existing-path authority. Because the predeclared minimum was
+eight, the stop rule fired before any same-model or qwen-large repair call. No
+primary was rerun or replaced, and no routing conclusion is inferred from the
+undersized corpus. Production defaults, repair framing, retries, budgets,
+authority, representation, and verification remain unchanged. A60 has not
+begun.

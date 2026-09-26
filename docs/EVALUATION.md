@@ -1512,3 +1512,33 @@ limitation. No default change, dedicated repair profile, automatic routing,
 retry, budget, authority, representation, framing, or verification change is
 adopted. A future confirmation study would need predeclared repeated evidence
 before any routing decision.
+
+## cross-model-repair-confirmation-v1
+
+A59 predeclared H1—that qwen-large would recover more new failures than the
+same primary model—and froze a future-routing threshold of at least three
+qwen-large recoveries, an advantage of at least two cases, and recovery across
+two primary-model sources or operation classes. Historical A58 K01 is excluded
+from confirmation counts. Before any primary output, the manifest froze eight
+new task definitions, both qwen-small and Codestral primary profiles, seed 42,
+all four operation classes, Python/C17 balance, artifact hashes, eligibility
+rules, and sixteen exactly-once primary cells.
+
+All eight task baselines fail both configured verification and their hidden
+semantic oracle; canonical references pass both, and no partial multi-file
+reference passes. The exactly-once primary phase produced ten semantic
+successes. Six primary states remained semantically and verification-failing,
+but only three entered the normal production repair-ready path with bounded
+failure evidence and sufficient existing-path authority: Codestral Q01
+(Python EDIT_SINGLE), Q02 (C17 EDIT_SINGLE), and Q03 (Python EDIT_MULTI). The
+other three failures ended without production repair readiness and cannot be
+promoted using evaluator knowledge. No primary was rerun.
+
+The resulting confirmation corpus is 3 cases, below the mandated minimum of
+8. A59 therefore stops before any same-model or qwen-large repair call and is
+`BLOCKED` by legitimate corpus availability. This is not evidence for or
+against H1; the comparison was not run. A58 K01 remains discovery evidence
+only. No routing, default, framing, retry, budget, verification, representation,
+or authority change is made. Further work should move away from repeated repair
+experiments unless a naturally larger production-repair-ready corpus becomes
+available independently.
