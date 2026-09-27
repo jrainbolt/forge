@@ -2288,3 +2288,24 @@ primary was rerun or replaced, and no routing conclusion is inferred from the
 undersized corpus. Production defaults, repair framing, retries, budgets,
 authority, representation, and verification remain unchanged. A60 has not
 begun.
+
+# Milestone A60 — Real Repository Coding Pilot v1
+
+**Status:** Blocked by invalid discovery measurement; architecture review required.
+
+`real-repository-pilot-v1` froze eight integrity-checked maintenance tasks over
+a source-only snapshot of the external Foundation C17 repository and completed
+all 24 exactly-once qwen-small, qwen-large, and Codestral cells. Canonical
+Foundation identity remained unchanged. All baselines failed their behavioral
+oracle, all references passed, and full Foundation verification was measured
+separately. Qwen-small, qwen-large, and Codestral achieved 1/8, 4/8, and 0/8
+semantic passes respectively; none of five repair attempts recovered semantics.
+
+The acceptance stop is evaluator-side: hidden required-candidate metadata
+caused deterministic trusted reads of every expected implementation source.
+All cells therefore had sufficient source context but zero model discovery
+calls or index usage. This fails A60's central large-repository discovery
+question, and the frozen cells cannot be changed or rerun. The results remain
+useful production mutation/verification observations, not a valid integrated
+discovery pilot. No production behavior, model default, or routing changed.
+A61 has not begun.

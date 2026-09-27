@@ -1542,3 +1542,55 @@ only. No routing, default, framing, retry, budget, verification, representation,
 or authority change is made. Further work should move away from repeated repair
 experiments unless a naturally larger production-repair-ready corpus becomes
 available independently.
+
+## real-repository-pilot-v1
+
+A60 freezes a source-only snapshot of the external Foundation C17 factory
+simulation repository under identity
+`361af212a10507281338ebb7a5184d1d4577d90017264653c64f3e03200de690`.
+The snapshot contains 117 C source/header files, 58 C test files, and about
+41,030 source/test lines. Build output, VCS data, generated binaries, model
+artifacts, checkpoints, and mutation payloads are excluded. The canonical
+repository had the same identity before and after all evaluator work.
+
+Eight versioned maintenance tasks use evaluator-introduced defects in real
+Foundation source. F01–F04 are single-file clock, solar, entity-liveness, and
+command-validation fixes. F05–F08 are coordinated existing-file fixes covering
+component-store removal, splitter/inserter routing, advanced-science reporting,
+and snapshot/presentation behavior. Six prompts omit paths and two are
+path-known controls. Every defective baseline and plausible wrong state fails
+both its task-specific behavioral oracle and the full configure/build/58-test
+plan; every canonical reference passes both. All eight therefore classify as
+`FULLY_DISCRIMINATING`. References remain evaluator-only.
+
+The exactly-once seed-42 matrix used the unchanged qwen-small, qwen-large, and
+Codestral profiles at temperature 0, context 8192, and output 512. All 24 cells
+were durably committed. Qwen-small produced 4 valid transactions and 1 semantic
+and verification pass in 574.049 summed seconds. Qwen-large produced 5 valid
+transactions and 4 semantic and verification passes in 388.932 seconds.
+Codestral produced 6 valid transactions but no semantic or verification passes
+in 757.074 seconds. Across the matrix, 15 previews became 15 successful
+transactions with no infrastructure or unauthorized-path failure. Ten cells
+were repair-eligible, five attempted repair, and none recovered semantics.
+First failure layers were 9 protocol, 5 verification, 4 repair, 1 construction,
+and 5 pass.
+
+These model results are observational because the discovery portion of the
+pilot is invalid. Although all cells read the task-relevant source and the
+recorded context was sufficient, all recorded model discovery-call counts,
+lexical index builds, and symbol/index usage were zero. The evaluator supplied
+`required_candidate_paths` for its nominally discovery-required tasks, causing
+normal production deterministic trusted-source acquisition to place the
+expected sources in context without testing repository discovery. No irrelevant
+files were read. The definitions were frozen and every cell was exactly-once,
+so the corpus was not changed and cells were not rerun after this finding.
+
+Consequently A60 is blocked for acceptance despite useful coding-path evidence.
+The matrix supports the controlled-suite observation that qwen-large is the
+strongest semantic profile here and that Codestral's structural activity does
+not imply correct code, but it cannot answer whether any profile can discover
+the relevant implementation in a large repository. No production prompt,
+routing, default, repair, budget, authority, transaction, or verification code
+changed. A future milestone should first correct and independently validate the
+evaluator's discovery boundary, then run a newly versioned corpus rather than
+rewrite or rerun these committed cells.
