@@ -1594,3 +1594,42 @@ routing, default, repair, budget, authority, transaction, or verification code
 changed. A future milestone should first correct and independently validate the
 evaluator's discovery boundary, then run a newly versioned corpus rather than
 rewrite or rerun these committed cells.
+
+## real-repository-discovery-boundary-v1
+
+A61 validates the evaluator boundary that A60 lacked. The A60 contamination
+chain was `PilotTask` evaluator metadata → `RealWorldTask.required_candidate_paths`
+→ `RealWorldEvaluationRunner` session setup → `CodingTaskState` required
+candidates → orchestrator-owned deterministic `repository.read_file` calls →
+context and mutation readiness. The root cause is `EVALUATOR_DESIGN_BUG`:
+production honored explicit required-candidate authority as designed, while the
+evaluator incorrectly derived that authority from its hidden expected paths.
+
+A61 represents hidden scoring knowledge as `ExpectedImplementationPath` and
+explicit user path authority as the distinct `RequiredCandidatePath` type. For
+discovery-required controls, production receives no expected files, allowed
+paths, expected changed paths, required candidates, create candidates, context
+seeds, or mutation authority. A deterministic `DISCOVERY_EXPECTATION_LEAK`
+error fails closed if an expected path crosses into production authority. The
+path-known controls retain only paths literally present in their user prompts.
+
+The D01–D20 suite proves the separation, including non-authoritative search
+hints, trusted-read authority, context and mutation exclusion, observable
+search/index/read/context events, zero-discovery detection, acquired-source-only
+context classification, alternate-valid-source scoring, source-free results,
+canonical safety, packaging exclusion, unchanged A60 evidence, and the required
+new evaluator version. The model-free trace is task → search → result hint →
+trusted read → context selection → mutation candidate. Expected paths are used
+only after acquisition to classify `EXPECTED_PATH_FOUND`,
+`ALTERNATIVE_VALID_SOURCE_FOUND`, `INSUFFICIENT_SOURCE`, or
+`MISDIRECTED_SOURCE`; exact-path equality is not required for a valid alternate.
+
+The bounded Foundation smoke uses F01 and F03 with qwen-large, seed 42, context
+8192, and output 512 in disposable copies. It records actual discovery calls,
+search/index activity, trusted source reads, selected context, index build/query/
+refresh counts and latency, expected-area reach, and source sufficiency. The
+canonical repository is identity-checked before and after. This is A61 boundary
+evidence only, not an A60 rerun or replacement. Production discovery is
+reachable without required candidates; no production code, prompt, model
+default, routing, repair behavior, authority, budget, verification plan, or
+transaction limit changed.

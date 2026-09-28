@@ -2308,4 +2308,21 @@ calls or index usage. This fails A60's central large-repository discovery
 question, and the frozen cells cannot be changed or rerun. The results remain
 useful production mutation/verification observations, not a valid integrated
 discovery pilot. No production behavior, model default, or routing changed.
-A61 has not begun.
+# Milestone A61 — Real-Repository Discovery Boundary Validation v1
+
+**Status:** Implemented and evaluated; architecture review pending.
+
+`real-repository-discovery-boundary-v1` separates hidden evaluator expectations
+from production discovery authority with distinct path types and a fail-closed
+`DISCOVERY_EXPECTATION_LEAK` contract. Twenty deterministic cases plus a type
+separation guard cover discovery-required and path-known controls, trusted-read
+authority, context and mutation exclusion, observability, alternate-valid-source
+scoring, canonical safety, packaging, and preservation of A60 as blocked.
+
+The bounded qwen-large Foundation smoke uses two disposable discovery-required
+tasks with no implementation-path authority in either production session. It
+measures actual search/index/read/context behavior and preserves canonical
+identity. A59 remains blocked by corpus size and A60 remains blocked by invalid
+discovery measurement. Production code, prompts, defaults, routing, repair,
+authority, budgets, verification, and transaction limits are unchanged. A61 is
+pending review; A62 has not begun.
