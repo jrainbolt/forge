@@ -415,6 +415,12 @@ class RepositoryOrchestrationError(RuntimeError):
     """A repository-aware turn could not produce a safe final answer."""
 
 
+class GroundingInsufficientError(RepositoryOrchestrationError):
+    """Edit authority exists, but bounded semantic grounding did not complete."""
+
+    classification = "GROUNDING_INSUFFICIENT"
+
+
 class DuplicateToolCallIdError(RepositoryOrchestrationError):
     """A model reused an executed session-local protocol correlation ID."""
 
@@ -453,6 +459,9 @@ class RepositoryResponse:
     retrieval_metrics: RetrievalMetrics = RetrievalMetrics()
     evidence_goals: tuple[EvidenceGoalResult, ...] = ()
     coverage_complete: bool = True
+    grounding_ready: bool = True
+    grounding_rounds: int = 0
+    grounding_result: str = "GROUNDING_READY"
     premature_finals: int = 0
     goal_transitions: int = 0
     wrong_goal_reads: int = 0
@@ -1087,6 +1096,8 @@ class RepositoryChatSession:
             goal.goal_id: 0 for goal in evidence_plan.goals
         }
         wrong_goal_reads = 0
+        grounding_rounds = 0
+        grounding_exhausted = False
         task_phase = RepositoryTaskPhase.RETRIEVING
         finalization_corrections = 0
         finalization_metrics = FinalizationMetrics()
@@ -1096,6 +1107,10 @@ class RepositoryChatSession:
         observed_directories: set[str] = set()
         coding_task = self._active_coding_task if self._assist_mode else None
         agent_task = self._active_agent_task if self._agent_mode else None
+        if coding_task is not None and coding_task.required_candidate_paths:
+            # Explicit path authority is the established path-known control flow.
+            # A64 gates only discovery-derived edit authority.
+            coverage_required = False
         required_source_files = self._minimum_source_files or _required_source_files(
             user_text
         )
@@ -1241,12 +1256,20 @@ class RepositoryChatSession:
                 observed_hashes[candidate.path] = source_hash
                 candidate_files.add(candidate.path)
                 active = coverage.active_goal
-                if active is not None:
+                if evidence_plan.semantic_matching and isinstance(content, str):
+                    coverage.register_matching_source(
+                        candidate.path,
+                        content,
+                        self._mutation_generation,
+                        invocation.invocation_id,
+                    )
+                elif active is not None:
                     coverage.register_source(
                         active.goal_id,
                         candidate.path,
                         self._mutation_generation,
                         invocation.invocation_id,
+                        content=content if isinstance(content, str) else None,
                     )
                 if coding_task.repair_eligible:
                     coding_task.repair_source_refreshed(
@@ -1274,9 +1297,7 @@ class RepositoryChatSession:
                 )
                 if not write_available or write_decision is PermissionDecision.DENY:
                     coding_task.mutation_blocked_by_policy()
-                elif (
-                    coverage.complete or not coverage_required
-                ) and coding_task.enter_mutation_ready(len(activities)):
+                elif coding_task.enter_mutation_ready(len(activities)):
                     LOGGER.info(
                         "grouped_mutation_ready paths=%s generation=%d",
                         coding_task.required_candidate_paths,
@@ -1352,6 +1373,17 @@ class RepositoryChatSession:
                 )
         for _step in range(self._ephemeral_generation_calls, self._max_steps):
             acquire_required_sources()
+            if (
+                grounding_exhausted
+                and coding_task is not None
+                and coding_task.mutation_ready
+                and coverage_required
+                and not coverage.complete
+            ):
+                raise GroundingInsufficientError(
+                    "GROUNDING_INSUFFICIENT: semantic evidence remained incomplete "
+                    "after two additional discovery rounds"
+                )
             if agent_task is not None:
                 if agent_task.model_calls >= self._max_model_calls:
                     self._agent_stop_hint = AgentStopReason.MODEL_CALL_LIMIT
@@ -1372,14 +1404,17 @@ class RepositoryChatSession:
                     context_planner.mutation_succeeded(self._mutation_generation)
                     for candidate in stale_candidates:
                         observed_hashes.pop(candidate.path, None)
-                        coverage.invalidate_path(candidate.path)
+                        if coding_task.mutation_count == 0:
+                            coverage.invalidate_path(candidate.path)
                         retrieval_strategy.invalidate_path(
                             candidate.path, generation=self._mutation_generation
                         )
                     coding_task.invalidate_mutation_ready(self._mutation_generation)
             active_for_bootstrap = (
                 None
-                if coding_task is not None and coding_task.mutation_ready
+                if coding_task is not None
+                and coding_task.mutation_ready
+                and (coverage.complete or not coverage_required)
                 else coverage.active_goal
             )
             semantic_ready = _semantic_ready(self._semantic_index)
@@ -1530,8 +1565,11 @@ class RepositoryChatSession:
                 else candidate_files
             )
             mutation_ready = coding_task is not None and coding_task.mutation_ready
+            grounding_ready = not coverage_required or coverage.complete
             structured_edit_ready = (
-                coding_task is not None and coding_task.structured_edit_ready
+                coding_task is not None
+                and coding_task.structured_edit_ready
+                and grounding_ready
             )
             gate_complete = (
                 coding_task is not None
@@ -1909,7 +1947,7 @@ class RepositoryChatSession:
                 protocol_corrections += 1
                 if coding_task is not None:
                     coding_task.note_protocol_correction()
-                if coding_task is not None and coding_task.structured_edit_ready:
+                if structured_edit_ready and coding_task is not None:
                     grouped_ready = len(coding_task.mutation_candidates) > 1
                     mutation_correction = (
                         self._mixed_ready_guidance()
@@ -2018,7 +2056,7 @@ class RepositoryChatSession:
             if parsed.outcome is ToolCallOutcome.MULTI_FILE_CHANGE:
                 if (
                     coding_task is None
-                    or not coding_task.structured_edit_ready
+                    or not structured_edit_ready
                     or coding_task.repair_ready
                     or not self._create_paths
                     or not self._mixed_required
@@ -2167,7 +2205,7 @@ class RepositoryChatSession:
             }:
                 if (
                     coding_task is None
-                    or not coding_task.structured_edit_ready
+                    or not structured_edit_ready
                     or coding_task.repair_ready
                     or not self._create_paths
                     or self._mixed_required
@@ -2233,7 +2271,7 @@ class RepositoryChatSession:
                 ToolCallOutcome.MULTI_FILE_STRUCTURED_EDIT,
                 ToolCallOutcome.MULTI_FILE_LINE_RANGE_EDIT,
             }:
-                if coding_task is None or not coding_task.structured_edit_ready:
+                if coding_task is None or not structured_edit_ready:
                     raise RepositoryOrchestrationError(
                         "structured edit is only valid in mutation-ready state"
                     )
@@ -2441,7 +2479,7 @@ class RepositoryChatSession:
                     and coding_task.transition_metrics.entries > 0
                 ):
                     coding_task.mutation_failed()
-                if coding_task is not None and coding_task.structured_edit_ready:
+                if structured_edit_ready and coding_task is not None:
                     if coding_task.note_premature_final():
                         mutation_correction = (
                             self._mixed_ready_guidance()
@@ -2574,6 +2612,13 @@ class RepositoryChatSession:
                     retrieval_metrics=retrieval_strategy.metrics,
                     evidence_goals=coverage.results(),
                     coverage_complete=coverage.complete,
+                    grounding_ready=(not coverage_required or coverage.complete),
+                    grounding_rounds=grounding_rounds,
+                    grounding_result=(
+                        "GROUNDING_READY"
+                        if not coverage_required or coverage.complete
+                        else "GROUNDING_INCOMPLETE"
+                    ),
                     premature_finals=coverage.premature_finals,
                     goal_transitions=coverage.goal_transitions,
                     wrong_goal_reads=wrong_goal_reads,
@@ -2594,7 +2639,7 @@ class RepositoryChatSession:
                 )
             if (
                 coding_task is not None
-                and coding_task.structured_edit_ready
+                and structured_edit_ready
                 and not self._agent_mode
                 and call.tool_name
                 in {
@@ -2618,7 +2663,7 @@ class RepositoryChatSession:
                 )
             if (
                 coding_task is not None
-                and coding_task.structured_edit_ready
+                and structured_edit_ready
                 and call.tool_name in MUTATION_READY_BROAD_TOOLS
             ):
                 if coding_task.note_post_ready_discovery():
@@ -2634,7 +2679,7 @@ class RepositoryChatSession:
                 )
             if (
                 coding_task is not None
-                and coding_task.structured_edit_ready
+                and structured_edit_ready
                 and call.tool_name == "repository.read_range"
             ):
                 path = call.arguments.get("path")
@@ -2922,6 +2967,9 @@ class RepositoryChatSession:
             )
             activities.append(activity)
             active_before = coverage.active_goal
+            edit_ready_before_source = bool(
+                coding_task is not None and coding_task.mutation_ready
+            )
             if evidence is ToolEvidence.DISCOVERY and active_before is not None:
                 coverage.note_discovery(active_before.goal_id)
             retrieval_strategy.observe(
@@ -2937,22 +2985,40 @@ class RepositoryChatSession:
                     if empty_discoveries[active_before.goal_id] >= 2:
                         coverage.mark_failed(active_before.goal_id)
                         retrieval_strategy.mark_exhausted()
+            source_content = (
+                result.output.get("content")
+                if isinstance(result.output, Mapping)
+                and isinstance(result.output.get("content"), str)
+                else ""
+            )
             if (
                 result.status is ToolResultStatus.SUCCESS
                 and evidence is ToolEvidence.SOURCE_CONTENT
                 and activity.path is not None
                 and active_before is not None
                 and (
-                    not coverage_required
+                    evidence_plan.semantic_matching
+                    or not coverage_required
                     or activity.path in goal_candidates[active_before.goal_id]
                 )
             ):
-                coverage.register_source(
-                    active_before.goal_id,
-                    activity.path,
-                    self._mutation_generation,
-                    call.invocation_id,
-                )
+                if evidence_plan.semantic_matching:
+                    covered_goals = coverage.register_matching_source(
+                        activity.path,
+                        source_content,
+                        self._mutation_generation,
+                        call.invocation_id,
+                    )
+                    if not covered_goals:
+                        wrong_goal_reads += 1
+                else:
+                    coverage.register_source(
+                        active_before.goal_id,
+                        activity.path,
+                        self._mutation_generation,
+                        call.invocation_id,
+                        content=source_content,
+                    )
             elif (
                 result.status is ToolResultStatus.SUCCESS
                 and evidence is ToolEvidence.SOURCE_CONTENT
@@ -2961,6 +3027,15 @@ class RepositoryChatSession:
                 and coverage_required
             ):
                 wrong_goal_reads += 1
+            if (
+                edit_ready_before_source
+                and result.status is ToolResultStatus.SUCCESS
+                and evidence is ToolEvidence.SOURCE_CONTENT
+                and coverage_required
+                and not coverage.complete
+            ):
+                grounding_rounds += 1
+                grounding_exhausted = grounding_rounds >= 2
             if (
                 coding_task is not None
                 and (
@@ -3040,15 +3115,11 @@ class RepositoryChatSession:
                     )
                     if not write_available or write_decision is PermissionDecision.DENY:
                         coding_task.mutation_blocked_by_policy()
-                    elif (
-                        (coverage.complete or not coverage_required)
-                        and _has_source_evidence(
-                            activities,
-                            required_source_files,
-                            self._require_relevant_source,
-                        )
-                        and coding_task.enter_mutation_ready(len(activities))
-                    ):
+                    elif _has_source_evidence(
+                        activities,
+                        required_source_files,
+                        self._require_relevant_source,
+                    ) and coding_task.enter_mutation_ready(len(activities)):
                         LOGGER.info(
                             "mutation_ready_entered path=%s generation=%d",
                             activity.path,
@@ -3112,7 +3183,7 @@ class RepositoryChatSession:
                 # Explicit A22 plans require generation-current source coverage.
                 # The implicit compatibility goal preserves the pre-A22 coding
                 # workflow, whose verification state already guards mutations.
-                if coverage_required:
+                if self._evidence_plan is not None:
                     for mutation_path in mutation_paths:
                         coverage.invalidate_path(mutation_path)
                 for mutation_path in mutation_paths:

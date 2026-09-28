@@ -25,6 +25,7 @@ from forge.models import (
 )
 from forge.orchestration import (
     DuplicateToolCallIdError,
+    GroundingInsufficientError,
     RepositoryChatSession,
     RepositoryOrchestrationError,
 )
@@ -79,6 +80,7 @@ class EvaluationOutcome(Enum):
 class RealWorldFailure(Enum):
     MODEL_QUALITY = "MODEL_QUALITY"
     RETRIEVAL = "RETRIEVAL"
+    GROUNDING_INSUFFICIENT = "GROUNDING_INSUFFICIENT"
     CONTEXT = "CONTEXT"
     PROTOCOL = "PROTOCOL"
     TOOL_LIMIT = "TOOL_LIMIT"
@@ -734,6 +736,8 @@ def classify_realworld_failure(error: Exception) -> RealWorldFailure:
         return RealWorldFailure.MODEL_QUALITY
     if isinstance(error, DuplicateToolCallIdError):
         return RealWorldFailure.PROTOCOL
+    if isinstance(error, GroundingInsufficientError):
+        return RealWorldFailure.GROUNDING_INSUFFICIENT
     if isinstance(error, RepositoryOrchestrationError):
         message = str(error).casefold()
         if "protocol" in message or "json" in message:

@@ -1746,3 +1746,20 @@ Canonical Foundation identity remained
 `361af212a10507281338ebb7a5184d1d4577d90017264653c64f3e03200de690`
 before and after all diagnostics. Durable results contain paths, counts, labels,
 and usage only—never source or replacement text.
+
+## semantic-grounding-gate-v1
+
+A64 ran six new qwen-large diagnostic cells on a disposable Foundation snapshot:
+the four A63 historical-misdirected tasks F03–F06 and sufficient controls F01–F02.
+No A62 cell was relabeled or rerun as historical evidence. F03 and F04 improved
+from historical misdirection to evaluator-sufficient source sets. Multi-facet
+F05 and F06 improved to partial sets and were stopped before mutation. F01 stayed
+sufficient and grounded; F02 was conservatively blocked after reading only solar
+sources and therefore failed the required two-control preservation signal.
+
+All six cells remained mutation-free because later model responses either failed
+the existing mutation protocol or grounding stayed incomplete. The canonical
+Foundation identity remained
+`361af212a10507281338ebb7a5184d1d4577d90017264653c64f3e03200de690`.
+Diagnostic artifacts are source-free and remain outside the package under
+`/tmp/forge-a64-semantic-grounding-v1`.

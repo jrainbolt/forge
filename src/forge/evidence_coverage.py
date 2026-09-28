@@ -49,6 +49,7 @@ class EvidenceGoal:
 @dataclass(frozen=True, slots=True)
 class TaskEvidencePlan:
     goals: tuple[EvidenceGoal, ...]
+    semantic_matching: bool = False
 
     def __post_init__(self) -> None:
         goals = tuple(self.goals)
@@ -132,13 +133,28 @@ class EvidenceCoverageState:
             self.goal_transitions += 1
 
     def register_source(
-        self, goal_id: str, path: str, generation: int, observation_id: str
+        self,
+        goal_id: str,
+        path: str,
+        generation: int,
+        observation_id: str,
+        *,
+        content: str | None = None,
     ) -> bool:
         goal = next(goal for goal in self.plan.goals if goal.goal_id == goal_id)
         kind = classify_source(path)
-        if not _kind_satisfies(goal.kind, kind) or any(
-            self._statuses[dep] is not EvidenceGoalStatus.SOURCE_COVERED
-            for dep in goal.depends_on
+        if (
+            not _kind_satisfies(goal.kind, kind)
+            or (
+                self.plan.semantic_matching
+                and goal.kind is not EvidenceGoalKind.RELATIONSHIP
+                and content is not None
+                and not _semantic_match(goal.description, path, content or "")
+            )
+            or any(
+                self._statuses[dep] is not EvidenceGoalStatus.SOURCE_COVERED
+                for dep in goal.depends_on
+            )
         ):
             return False
         self._coverage.append(
@@ -151,6 +167,28 @@ class EvidenceCoverageState:
             self.goal_transitions += 1
         self._cover_relationships()
         return True
+
+    def register_matching_source(
+        self,
+        path: str,
+        content: str,
+        generation: int,
+        observation_id: str,
+    ) -> tuple[str, ...]:
+        """Apply one trusted source to every semantically supported open goal."""
+        covered = []
+        for goal in self.plan.goals:
+            if goal.kind is EvidenceGoalKind.RELATIONSHIP:
+                continue
+            if self.register_source(
+                goal.goal_id,
+                path,
+                generation,
+                observation_id,
+                content=content,
+            ):
+                covered.append(goal.goal_id)
+        return tuple(covered)
 
     def invalidate_path(self, path: str) -> None:
         affected = {item.goal_id for item in self._coverage if item.path == path}
@@ -230,6 +268,10 @@ def decompose_evidence_plan(task: str) -> TaskEvidencePlan:
     if not normalized:
         raise ValueError("task must be non-empty")
 
+    semantic = _semantic_facets(normalized)
+    if semantic is not None:
+        return semantic
+
     relationship = _RELATIONSHIP.match(normalized)
     if relationship is not None:
         left = _clean_description(relationship.group(1))
@@ -267,6 +309,118 @@ def decompose_evidence_plan(task: str) -> TaskEvidencePlan:
     if len(separated) >= 2:
         return _facet_plan(separated, task)
     return default_evidence_plan(normalized)
+
+
+_BEHAVIOR_TASK = re.compile(
+    r"^(?:fix|repair|correct|restore|reject|prevent|ensure|change|update)\b",
+    re.IGNORECASE,
+)
+_FACET_SPLIT = re.compile(r"\s+(?:so(?:\s+that)?|while)\s+", re.IGNORECASE)
+
+
+def _semantic_facets(task: str) -> TaskEvidencePlan | None:
+    """Conservatively decompose behavioral work without model or repository hints."""
+    if not _BEHAVIOR_TASK.match(task):
+        return None
+    clauses = [part.strip(" .") for part in _FACET_SPLIT.split(task) if part.strip()]
+    if not clauses:
+        return None
+    owners = [clauses[0]]
+    first = clauses[0]
+    both = re.search(r"\bboth\s+(.+?)\s+and\s+(.+)$", first, re.IGNORECASE)
+    paired_for = re.search(r"^(.+?\bfor\s+.+?)\s+and\s+(.+?\bfor\s+.+)$", first)
+    if both is not None:
+        prefix = first[: both.start()].strip()
+        owners = [f"{prefix} {both.group(1)}", both.group(2)]
+    elif paired_for is not None:
+        owners = [paired_for.group(1), paired_for.group(2)]
+    owners = [item for item in owners if len(_semantic_tokens(item)) >= 2]
+    if not owners:
+        return None
+    owners = owners[:3]
+    goals = [
+        EvidenceGoal(f"G{index}", item, EvidenceGoalKind.IMPLEMENTATION)
+        for index, item in enumerate(owners, 1)
+    ]
+    if len(clauses) > 1 and len(goals) < MAX_EVIDENCE_GOALS:
+        goals.append(
+            EvidenceGoal(
+                f"G{len(goals) + 1}",
+                " ".join(clauses[1:])[:MAX_GOAL_DESCRIPTION],
+                EvidenceGoalKind.RELATIONSHIP,
+                depends_on=tuple(goal.goal_id for goal in goals),
+            )
+        )
+    return TaskEvidencePlan(tuple(goals), semantic_matching=True)
+
+
+_SEMANTIC_STOPWORDS = frozenset(
+    {
+        "a",
+        "all",
+        "and",
+        "are",
+        "both",
+        "correct",
+        "every",
+        "fix",
+        "for",
+        "from",
+        "it",
+        "of",
+        "only",
+        "repair",
+        "restore",
+        "so",
+        "the",
+        "then",
+        "to",
+        "valid",
+        "verify",
+        "while",
+        "whose",
+    }
+)
+
+
+def _stem(value: str) -> str:
+    semantic_forms = {
+        "creation": "create",
+        "destruction": "destroy",
+        "rejection": "reject",
+    }
+    if value in semantic_forms:
+        return semantic_forms[value]
+    for suffix in (
+        "ization",
+        "ation",
+        "ments",
+        "ment",
+        "ness",
+        "ing",
+        "ers",
+        "es",
+        "s",
+    ):
+        if value.endswith(suffix) and len(value) > len(suffix) + 3:
+            return value[: -len(suffix)]
+    return value
+
+
+def _semantic_tokens(value: str) -> frozenset[str]:
+    return frozenset(
+        _stem(token.casefold())
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9]+", value)
+        if token.casefold() not in _SEMANTIC_STOPWORDS
+    )
+
+
+def _semantic_match(description: str, path: str, content: str) -> bool:
+    goal = _semantic_tokens(description)
+    evidence = _semantic_tokens(f"{path} {content}")
+    overlap = goal.intersection(evidence)
+    required = 1 if len(goal) == 1 else 2 if len(goal) <= 5 else 3
+    return len(overlap) >= required
 
 
 def _facet_plan(facets: list[str], fallback: str) -> TaskEvidencePlan:

@@ -7,6 +7,7 @@ from forge.evaluation import run_mutation_transition_v1
 from forge.models import MockModel
 from forge.orchestration import (
     CodingTaskState,
+    GroundingInsufficientError,
     RepositoryChatSession,
     RepositoryOrchestrationError,
 )
@@ -115,6 +116,43 @@ def test_second_mutation_ready_final_fails_truthfully(tmp_path: Path) -> None:
     assert session.last_coding_task is not None
     assert session.last_coding_task.transition_metrics.premature_finals == 2
     assert source.read_text() == "VALUE = 1\n"
+
+
+def test_edit_authority_without_grounding_allows_two_reads_then_blocks(
+    tmp_path: Path,
+) -> None:
+    for name in ("first.py", "second.py", "third.py"):
+        (tmp_path / name).write_text(f"VALUE_{name[0].upper()} = 1\n")
+    model = MockModel(
+        (
+            _call("search-1", "repository.search_files", {"query": "VALUE_F"}),
+            _call("read-1", "repository.read_file", {"path": "first.py"}),
+            _call("search-2", "repository.search_files", {"query": "VALUE_S"}),
+            _call("read-2", "repository.read_file", {"path": "second.py"}),
+            _call("search-3", "repository.search_files", {"query": "VALUE_T"}),
+            _call("read-3", "repository.read_file", {"path": "third.py"}),
+        )
+    )
+    chat = RepositoryChatSession(
+        "test",
+        model,
+        tmp_path,
+        registry=create_assist_repository_registry(),
+        policy=create_assist_repository_policy(),
+        approval_callback=lambda *_args: True,
+        require_relevant_source=False,
+    )
+    with pytest.raises(GroundingInsufficientError, match="GROUNDING_INSUFFICIENT"):
+        chat.execute_task(
+            "Fix both entity creation and entity destruction so stale handles "
+            "are rejected"
+        )
+    assert chat.last_coding_task is not None
+    assert chat.last_coding_task.transition_metrics.entries == 1
+    assert all(
+        (tmp_path / name).read_text().endswith("= 1\n")
+        for name in ("first.py", "second.py", "third.py")
+    )
 
 
 def test_read_mode_never_enters_mutation_ready(tmp_path: Path) -> None:

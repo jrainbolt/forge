@@ -1568,3 +1568,21 @@ The A9 `write_file` implementation retains its low-level helper API, but normal
 coding sessions reject its absent-target create mode even after directory inspection.
 There is still no delete, rename, directory creation, binary, or executable-file
 authority.
+
+## Semantic grounding gate
+
+A64 extends the existing A22 evidence plan rather than introducing another
+planner. Behavioral task text is deterministically decomposed into one to four
+implementation-owner and dependent relationship goals. Trusted source content,
+paths, and symbols may cover zero, one, or several owner goals; source kind alone
+is insufficient for these semantic plans. Relationship goals close only after
+their dependencies.
+
+`EDIT_READY` remains legal/current mutation authority. Independently,
+`GROUNDING_READY` means required semantic goals have trusted coverage. Discovery-
+derived coding tasks expose mutation schemas only when both are true. When edit
+authority arrives first, normal discovery remains available for at most two more
+successful source-acquisition rounds; unresolved coverage then terminates as
+`GROUNDING_INSUFFICIENT` without mutation. Explicit path-known controls retain
+their established authority flow, and explicit A22 plans retain generation-
+current invalidation semantics.

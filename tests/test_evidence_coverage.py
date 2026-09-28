@@ -15,6 +15,7 @@ from forge.evidence_coverage import (
 )
 from forge.models import MockModel
 from forge.orchestration import RepositoryChatSession
+from forge.orchestration.coding_task import CodingTaskState
 
 
 def test_plan_validates_bounds_dependencies_and_cycles() -> None:
@@ -113,6 +114,65 @@ def test_plan_is_immutable_against_injection_text() -> None:
         EvidenceGoalStatus.UNRESOLVED,
         EvidenceGoalStatus.UNRESOLVED,
     ]
+
+
+def test_behavioral_task_decomposes_semantic_owners_and_relationship() -> None:
+    request = (
+        "Fix entity liveness for creation and entity liveness for destruction "
+        "so stale handles are rejected."
+    )
+    plan = decompose_evidence_plan(request)
+    assert plan.semantic_matching
+    assert 1 < len(plan.goals) <= 4
+    assert plan == decompose_evidence_plan(request)
+    assert plan.goals[-1].kind is EvidenceGoalKind.RELATIONSHIP
+    assert plan.goals[-1].depends_on == ("G1", "G2")
+
+
+def test_semantic_source_can_cover_multiple_goals_but_irrelevant_source_cannot() -> (
+    None
+):
+    plan = decompose_evidence_plan(
+        "Fix both entity creation and entity destruction so stale handles are rejected."
+    )
+    state = EvidenceCoverageState(plan)
+    assert not state.register_matching_source(
+        "src/logging.cpp", "void write_log_message();", 0, "wrong"
+    )
+    covered = state.register_matching_source(
+        "src/entity_registry.cpp",
+        "void create_entity(); void destroy_entity(); bool stale_handle_rejected();",
+        0,
+        "right",
+    )
+    assert covered == ("G1", "G2")
+    assert state.complete
+
+
+def test_semantic_goals_can_be_covered_by_distinct_sources() -> None:
+    plan = decompose_evidence_plan(
+        "Fix both entity creation and entity destruction so stale handles are rejected."
+    )
+    state = EvidenceCoverageState(plan)
+    assert state.register_matching_source(
+        "src/create.cpp", "void create_entity();", 0, "create"
+    ) == ("G1",)
+    assert not state.complete
+    assert state.register_matching_source(
+        "src/destroy.cpp", "void destroy_entity();", 0, "destroy"
+    ) == ("G2",)
+    assert state.complete
+
+
+def test_grounding_completion_does_not_grant_edit_authority() -> None:
+    plan = decompose_evidence_plan("Fix retry boundary so attempts stop at the limit")
+    coverage = EvidenceCoverageState(plan)
+    coverage.register_matching_source(
+        "src/retry.py", "def retry_boundary(): return attempts < limit", 0, "read"
+    )
+    authority = CodingTaskState(0)
+    assert coverage.complete
+    assert not authority.mutation_ready
 
 
 def _call(identifier: str, tool: str, arguments: dict[str, object]) -> str:

@@ -2367,3 +2367,20 @@ pre-generation context-budget limitations. No valid paired case established a
 general semantic coding limitation. `EDIT_READY` remains an authority/protocol
 state, evaluator truth remains scoring-only, and no production behavior changed.
 A63 is pending review; A64 has not begun.
+
+# Milestone A64 — Semantic Evidence Decomposition & Grounding Gate v1
+
+**Status:** Blocked by sufficient-control false blocking.
+
+A64 connected the existing bounded evidence ledger to discovery-derived coding
+tasks. Semantic coverage is separate from `EDIT_READY`, additional grounding is
+limited to two source rounds, and unresolved work stops as
+`GROUNDING_INSUFFICIENT` without mutation. Deterministic tests cover bounded
+decomposition, subset/multi-source coverage, authority separation, bounded
+failure, and path-known compatibility.
+
+In six new qwen-large Foundation diagnostics, two of four historical
+misdirections became sufficient and the other two became partial and did not
+mutate. F01 remained sufficient, but F02 was falsely blocked with solar-only
+context, so the mandatory two-control signal was not met. A64 is therefore
+reported BLOCKED; no A65 work has begun.
