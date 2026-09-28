@@ -2203,7 +2203,7 @@ unscored rather than inferred or repeatedly rerun. No A56 work was started.
 
 # Milestone A56 — Realistic Coding Capability Suite v2
 
-**Status:** Implemented and evaluated; architecture review pending.
+**Status:** Accepted.
 
 `realistic-coding-v2` extends the frozen semantic-maintenance fixture with
 controlled file-creation and mixed modify/create cases. Twelve versioned Python
@@ -2310,7 +2310,7 @@ useful production mutation/verification observations, not a valid integrated
 discovery pilot. No production behavior, model default, or routing changed.
 # Milestone A61 — Real-Repository Discovery Boundary Validation v1
 
-**Status:** Implemented and evaluated; architecture review pending.
+**Status:** Accepted.
 
 `real-repository-discovery-boundary-v1` separates hidden evaluator expectations
 from production discovery authority with distinct path types and a fail-closed
@@ -2325,4 +2325,24 @@ measures actual search/index/read/context behavior and preserves canonical
 identity. A59 remains blocked by corpus size and A60 remains blocked by invalid
 discovery measurement. Production code, prompts, defaults, routing, repair,
 authority, budgets, verification, and transaction limits are unchanged. A61 is
-pending review; A62 has not begun.
+accepted.
+
+# Milestone A62 — Real Repository Coding Pilot v2
+
+**Status:** Implemented and evaluated; architecture review pending.
+
+`real-repository-pilot-v2` completed a new frozen 8-task × 3-profile exactly-once
+Foundation matrix using A61's corrected discovery boundary. All 24 cells began
+without evaluator leakage; six task definitions were discovery-required and two
+were path-known controls. All integrity states were fully discriminating and
+canonical Foundation remained unchanged.
+
+Real discovery produced sufficient expected context in 12/24 cells and
+misdirected context in 12/24, despite every session reaching production mutation
+readiness. Qwen-small, qwen-large, and Codestral each achieved sufficient context
+in 4/8 cells. They completed 3, 0, and 6 transactions respectively, but no cell
+passed full verification or semantics and none of 9 repairs recovered. First
+failures were 12 context, 7 protocol, 4 repair, and 1 transaction. Single-file
+tasks produced 6 transactions versus 3 for multi-file tasks, preserving the
+observed multi-file weakness. No production tuning or routing change is
+justified. A62 is pending review; A63 has not begun.

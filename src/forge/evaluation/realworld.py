@@ -362,6 +362,7 @@ class RealWorldEvaluationRunner:
         result_callback: Callable[[RealWorldTask, Path, RealWorldTaskResult], None]
         | None = None,
         primary_mutation_callback: Callable[[RealWorldTask, Path], None] | None = None,
+        authorize_discovered_sources: bool = False,
     ) -> None:
         self._profile = model_profile
         self._model = model
@@ -372,6 +373,7 @@ class RealWorldEvaluationRunner:
         self._include_repair_mutation_history = include_repair_mutation_history
         self._result_callback = result_callback
         self._primary_mutation_callback = primary_mutation_callback
+        self._authorize_discovered_sources = authorize_discovered_sources
 
     def run(
         self, tasks: Iterable[RealWorldTask], repository: RepositorySnapshot
@@ -416,7 +418,11 @@ class RealWorldEvaluationRunner:
                     task, seed, started, RealWorldFailure.INFRASTRUCTURE, str(error)
                 )
             commands = _project_commands(task)
-            approvals = ExpectedApproval(task, workspace, commands)
+            approvals = (
+                DiscoveredSourceApproval(task, workspace, commands)
+                if self._authorize_discovered_sources
+                else ExpectedApproval(task, workspace, commands)
+            )
             policy = resolve_interaction_policy(task.mode)
             index = RepositoryIndex(workspace)
             lexical_index = RepositoryLexicalIndex(
@@ -436,6 +442,8 @@ class RealWorldEvaluationRunner:
             def observe_activity(item: object) -> None:
                 nonlocal primary_observed
                 activity.append(item)
+                if isinstance(approvals, DiscoveredSourceApproval):
+                    approvals.observe(item)
                 if (
                     not primary_observed
                     and self._primary_mutation_callback is not None
@@ -504,7 +512,7 @@ class RealWorldEvaluationRunner:
                 coding_result = session.last_coding_task
             after = hash_workspace(workspace)
             changed = changed_paths(before, after)
-            unexpected = tuple(sorted(set(changed) - set(task.allowed_paths)))
+            unexpected = tuple(sorted(set(changed) - set(approvals.authorized_paths)))
             oracle = run_oracle(workspace, task.oracle_commands)
             result = score_task_result(
                 task,
@@ -538,6 +546,10 @@ class ExpectedApproval:
         self.approved = 0
         self.rejected = 0
 
+    @property
+    def authorized_paths(self) -> tuple[str, ...]:
+        return self.task.allowed_paths
+
     def __call__(
         self,
         _invocation: ToolInvocation,
@@ -548,6 +560,53 @@ class ExpectedApproval:
             approved = set(preview.paths).issubset(self.task.allowed_paths)
         elif isinstance(preview, MutationPreview):
             approved = preview.path in self.task.allowed_paths
+        elif isinstance(preview, PreparedProjectCommand):
+            configured = getattr(self.commands, preview.operation, None)
+            approved = (
+                configured is not None
+                and preview.workspace.resolve() == self.workspace
+                and preview.argv == configured.argv
+                and preview.timeout_seconds == configured.timeout_seconds
+                and preview.isolation == self.commands.execution_isolation
+            )
+        if approved:
+            self.approved += 1
+        else:
+            self.rejected += 1
+        return approved
+
+
+class DiscoveredSourceApproval(ExpectedApproval):
+    """Approve mutations only for source established by successful trusted reads."""
+
+    def __init__(self, task: RealWorldTask, workspace: Path, commands: ProjectCommands):
+        super().__init__(task, workspace, commands)
+        self._discovered_paths: set[str] = set()
+
+    @property
+    def authorized_paths(self) -> tuple[str, ...]:
+        return tuple(sorted({*self.task.allowed_paths, *self._discovered_paths}))
+
+    def observe(self, activity: object) -> None:
+        if (
+            getattr(activity, "status", None) == "success"
+            and getattr(activity, "tool_name", None)
+            in {"repository.read_file", "repository.read_range"}
+            and isinstance(getattr(activity, "path", None), str)
+        ):
+            self._discovered_paths.add(activity.path)
+
+    def __call__(
+        self,
+        _invocation: ToolInvocation,
+        preview: MutationPreview | MultiFileMutationPreview | PreparedProjectCommand,
+    ) -> bool:
+        approved = False
+        authorized = set(self.authorized_paths)
+        if isinstance(preview, MultiFileMutationPreview):
+            approved = set(preview.paths).issubset(authorized)
+        elif isinstance(preview, MutationPreview):
+            approved = preview.path in authorized
         elif isinstance(preview, PreparedProjectCommand):
             configured = getattr(self.commands, preview.operation, None)
             approved = (

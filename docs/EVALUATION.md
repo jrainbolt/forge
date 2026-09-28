@@ -1633,3 +1633,57 @@ evidence only, not an A60 rerun or replacement. Production discovery is
 reachable without required candidates; no production code, prompt, model
 default, routing, repair behavior, authority, budget, verification plan, or
 transaction limit changed.
+
+## real-repository-pilot-v2
+
+A62 freezes a new version-2 manifest over the same eight fully discriminating
+Foundation maintenance semantics. All eight defective baselines and plausible
+wrong states fail both their independent semantic oracle and full Foundation
+verification; all eight canonical references pass both. Six tasks are
+discovery-required and begin with no expected files, expected changed paths,
+allowed paths, required candidates, create candidates, reference paths, or
+evaluator context. F07–F08 remain path-known controls because their paths are
+literal task text. A discovery expectation leak fails closed.
+
+Evaluator approval for discovery-required tasks is derived dynamically from
+successful trusted `repository.read_file` or `repository.read_range` events.
+Search and index hits do not authorize mutation. This permits the normal
+production proposal, preview, transaction, verification, and repair path
+without promoting post-hoc expected paths. Context sufficiency is scored
+independently: reaching production mutation readiness does not make a
+misdirected read sufficient.
+
+The exactly-once seed-42 matrix completed all 24 cells at context 8192, output
+512, and temperature 0. It recorded 18 discovery calls, 45 trusted reads, 18
+lexical-index builds, and 18 refreshes. Twelve cells found every expected path
+and had `SUFFICIENT` context; twelve acquired `MISDIRECTED_SOURCE`. There were
+no partial or evaluator-validated alternate-source cells. All 24 production
+sessions reached mutation readiness, illustrating why readiness is not the
+discovery score.
+
+Each profile had four sufficient and four misdirected contexts. Qwen-small
+completed 3 transactions and 3 repair attempts; its first failures were 4
+context, 2 protocol, and 2 repair. Qwen-large completed no transaction; its
+first failures were 4 context, 3 protocol, and 1 transaction. Codestral
+completed 6 transactions and 6 repair attempts; its first failures were 4
+context, 2 protocol, and 2 repair. No cell passed full verification or the
+independent semantic oracle, and none of 9 repairs recovered. Thus qwen-large
+does not remain strongest under genuine discovery; Codestral remains most
+structurally active, but no model demonstrates semantic success.
+
+Single-file and multi-file cells each found sufficient context in 6/12 cases.
+Single-file tasks produced 6 transactions versus 3 for multi-file tasks, so the
+A60 multi-file transaction weakness remains, while discovery sufficiency itself
+is tied. Failures are evenly dominated by context discovery (12/24); the
+remaining first failures are 7 protocol, 4 repair, and 1 transaction. Nine
+successful atomic transactions and normal failed-verification/repair flows show
+that infrastructure remained operational, but zero verification passes prevent
+a stronger reliability conclusion about successful end-to-end completion.
+
+The canonical Foundation identity remained
+`361af212a10507281338ebb7a5184d1d4577d90017264653c64f3e03200de690`
+before and after integrity validation and all cells. A59 remains blocked by its
+corpus gate, A60 remains blocked by contaminated discovery, and A61 remains the
+accepted boundary validation. No production prompt, retrieval behavior, model
+default, routing, repair behavior, budget, permission, mutation ceiling, or
+transaction behavior changed.
