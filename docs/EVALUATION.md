@@ -1687,3 +1687,62 @@ corpus gate, A60 remains blocked by contaminated discovery, and A61 remains the
 accepted boundary validation. No production prompt, retrieval behavior, model
 default, routing, repair behavior, budget, permission, mutation ceiling, or
 transaction behavior changed.
+
+## grounding-diagnosis-v1
+
+A63 reuses A62 only as frozen source-free historical evidence; no committed A62
+cell is rerun. The diagnostic corpus contains eight grounding cases (four
+misdirected and four sufficient) plus six sufficient-context C0/C1 coding cases
+spanning qwen-small, qwen-large, and Codestral. Every reconstruction uses a
+disposable Foundation snapshot, seed 42, temperature 0, context 8192, and output
+512. Hidden expected paths remain post-hoc scoring facts and never enter a query,
+coverage decision, source read, mutation schema, or authority gate.
+
+All four misdirected cases stopped after the first plausible authoritative
+implementation read. Their production-visible evidence plans reported complete,
+with no unresolved goal, even though evaluator scoring later classified their
+context as misdirected. One additional ordinary lexical/source round recovered
+none of the four; it selected another plausible but insufficient candidate.
+Coverage-triggered G2 ran in none because coverage was already marked complete,
+and therefore recovered none. The four sufficient controls remained sufficient
+under G0, G1, and G2 scoring. Conservative remaining-budget estimates were zero
+for three misdirected cases and about 2,002 characters-equivalent for the fourth,
+so budget pressure is a secondary ambiguity in three cases, but it does not
+explain why coverage declared semantic completion.
+
+The existing A21–A24 evidence machinery is `PRESENT_BUT_NOT_CONNECTED`. It is
+production-visible, tracks trusted observations, source kinds, dependencies,
+invalidations, and unresolved goals, and is usable as an authority/evidence
+ledger. For these natural-language repair prompts, however, decomposition emits
+one broad `OTHER` goal and the first compatible source read marks it covered.
+It cannot determine whether the source actually addresses entity liveness,
+command validation, or every half of a coordinated operation. A future gate
+could use richer production-visible task decomposition and unresolved evidence,
+but must never use evaluator expected paths. `EDIT_READY` remains strictly an
+authority/protocol state.
+
+In sufficient-context coding diagnostics, C0 used normal repository-session
+history with discovery fixed to A62-acquired source; C1 used the same task,
+source paths, representation, seed, and budgets in an isolated production-schema
+call, then replayed that response through normal validation, transaction,
+verification, and oracle execution. Qwen-small C01 was structurally valid in
+both: C0 transacted but failed verification and repair, while C1 passed full
+verification and semantics, indicating history/framing sensitivity. Qwen-small
+C02 failed schema in both. Qwen-large C03 passed verification and semantics in
+both conditions; multi-file C04 failed schema in both. Codestral C05/C06 C0
+exhausted the fixed-source context before a model call; bounded same-source C1
+produced respectively a structurally valid but incomplete operation set and an
+invalid schema. These Codestral pairs are not valid continuity comparisons.
+
+The normalized post-grounding taxonomy is: one continuity/history-sensitive
+case, two model/protocol cases, one pass/pass control, and two C0 pre-generation
+context-budget limitations whose C1 outcomes were incomplete-operation and
+protocol failures. No valid pair had both conditions structurally pass while
+the oracle failed, so this corpus does not establish a general semantic coding
+limitation. Multi-file protocol construction remains the clearest post-grounding
+weakness. No production code or default changed.
+
+Canonical Foundation identity remained
+`361af212a10507281338ebb7a5184d1d4577d90017264653c64f3e03200de690`
+before and after all diagnostics. Durable results contain paths, counts, labels,
+and usage only—never source or replacement text.

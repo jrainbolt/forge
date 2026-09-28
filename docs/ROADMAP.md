@@ -2329,7 +2329,7 @@ accepted.
 
 # Milestone A62 — Real Repository Coding Pilot v2
 
-**Status:** Implemented and evaluated; architecture review pending.
+**Status:** Accepted.
 
 `real-repository-pilot-v2` completed a new frozen 8-task × 3-profile exactly-once
 Foundation matrix using A61's corrected discovery boundary. All 24 cells began
@@ -2345,4 +2345,25 @@ passed full verification or semantics and none of 9 repairs recovered. First
 failures were 12 context, 7 protocol, 4 repair, and 1 transaction. Single-file
 tasks produced 6 transactions versus 3 for multi-file tasks, preserving the
 observed multi-file weakness. No production tuning or routing change is
-justified. A62 is pending review; A63 has not begun.
+justified. A62 is accepted.
+
+# Milestone A63 — Grounding Coverage & Post-Grounding Failure Diagnosis v1
+
+**Status:** Implemented and evaluated; architecture review pending.
+
+`grounding-diagnosis-v1` diagnoses four frozen A62 misdirected cells, four
+sufficient controls, and six sufficient-context C0/C1 coding cases without
+rerunning A62. All misdirected cases accepted the first plausible source; one
+extra bounded ordinary discovery round recovered none. Existing evidence
+coverage considered every case complete and therefore never triggered the
+coverage-conditioned G2 round. The audit classifies coverage as
+`PRESENT_BUT_NOT_CONNECTED`: it is a sound production-visible evidence ledger,
+but its broad single-goal decomposition does not establish task-semantic
+coverage.
+
+Post-grounding evidence includes one qwen-small history-sensitive recovery, two
+model/protocol failures, one qwen-large pass/pass control, and two Codestral C0
+pre-generation context-budget limitations. No valid paired case established a
+general semantic coding limitation. `EDIT_READY` remains an authority/protocol
+state, evaluator truth remains scoring-only, and no production behavior changed.
+A63 is pending review; A64 has not begun.
