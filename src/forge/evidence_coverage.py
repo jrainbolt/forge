@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -25,6 +26,15 @@ class EvidenceGoalStatus(StrEnum):
     DISCOVERY_ONLY = "discovery_only"
     SOURCE_COVERED = "source_covered"
     FAILED = "failed"
+
+
+class EvidenceReasonKind(StrEnum):
+    LEXICAL_MATCH = "lexical_match"
+    SYMBOL_DEFINITION = "symbol_definition"
+    SYMBOL_REFERENCE = "symbol_reference"
+    INCLUDE_OR_IMPORT = "include_or_import"
+    DECLARATION_IMPLEMENTATION = "declaration_implementation"
+    DEPENDENCY_RELATION = "dependency_relation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,12 +87,22 @@ class EvidenceCoverage:
 
 
 @dataclass(frozen=True, slots=True)
+class _SourceStructure:
+    path: str
+    definitions: frozenset[str]
+    declarations: frozenset[str]
+    references: frozenset[str]
+    includes: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
 class EvidenceGoalResult:
     goal_id: str
     description: str
     required: bool
     status: EvidenceGoalStatus
     source_paths: tuple[str, ...]
+    evidence_reasons: tuple[str, ...] = ()
 
 
 class EvidenceCoverageState:
@@ -92,6 +112,8 @@ class EvidenceCoverageState:
             goal.goal_id: EvidenceGoalStatus.UNRESOLVED for goal in plan.goals
         }
         self._coverage: list[EvidenceCoverage] = []
+        self._reasons: dict[str, list[str]] = {goal.goal_id: [] for goal in plan.goals}
+        self._structures: dict[str, _SourceStructure] = {}
         self.premature_finals = 0
         self.goal_transitions = 0
 
@@ -123,6 +145,30 @@ class EvidenceCoverageState:
             for goal in self.plan.goals
         )
 
+    @property
+    def unresolved_reference_symbols(self) -> tuple[str, ...]:
+        """Bounded structural leads relevant to the active relationship goal."""
+        active = self.active_goal
+        if active is None or active.kind is not EvidenceGoalKind.RELATIONSHIP:
+            return ()
+        tokens = _semantic_tokens(active.description)
+        defined = {
+            symbol
+            for structure in self._structures.values()
+            for symbol in structure.definitions
+        }
+        return tuple(
+            sorted(
+                {
+                    symbol
+                    for structure in self._structures.values()
+                    for symbol in structure.references
+                    if symbol not in defined
+                    and tokens.intersection(_semantic_tokens(symbol))
+                }
+            )[:4]
+        )
+
     def note_discovery(self, goal_id: str) -> None:
         if self._statuses[goal_id] is EvidenceGoalStatus.UNRESOLVED:
             self._statuses[goal_id] = EvidenceGoalStatus.DISCOVERY_ONLY
@@ -140,6 +186,8 @@ class EvidenceCoverageState:
         observation_id: str,
         *,
         content: str | None = None,
+        reason: EvidenceReasonKind = EvidenceReasonKind.LEXICAL_MATCH,
+        detail: str = "task/source token overlap",
     ) -> bool:
         goal = next(goal for goal in self.plan.goals if goal.goal_id == goal_id)
         kind = classify_source(path)
@@ -165,7 +213,11 @@ class EvidenceCoverageState:
         if self._statuses[goal_id] is not EvidenceGoalStatus.SOURCE_COVERED:
             self._statuses[goal_id] = EvidenceGoalStatus.SOURCE_COVERED
             self.goal_transitions += 1
-        self._cover_relationships()
+        explanation = f"{reason.value}:{path}:{detail}"
+        if explanation not in self._reasons[goal_id]:
+            self._reasons[goal_id].append(explanation)
+        if not self.plan.semantic_matching:
+            self._cover_dependency_relationships()
         return True
 
     def register_matching_source(
@@ -176,23 +228,74 @@ class EvidenceCoverageState:
         observation_id: str,
     ) -> tuple[str, ...]:
         """Apply one trusted source to every semantically supported open goal."""
+        self._structures[path] = _source_structure(path, content)
         covered = []
         for goal in self.plan.goals:
             if goal.kind is EvidenceGoalKind.RELATIONSHIP:
                 continue
-            if self.register_source(
-                goal.goal_id,
-                path,
-                generation,
-                observation_id,
-                content=content,
+            structural = self._structural_owner_match(goal, path)
+            if structural is not None:
+                reason, detail = structural
+                matched = self.register_source(
+                    goal.goal_id,
+                    path,
+                    generation,
+                    observation_id,
+                    content=None,
+                    reason=reason,
+                    detail=detail,
+                )
+            else:
+                matched = self.register_source(
+                    goal.goal_id,
+                    path,
+                    generation,
+                    observation_id,
+                    content=content,
+                )
+            if matched:
+                covered.append(goal.goal_id)
+        for goal in self.plan.goals:
+            if (
+                goal.kind is EvidenceGoalKind.RELATIONSHIP
+                and self._statuses[goal.goal_id]
+                is not EvidenceGoalStatus.SOURCE_COVERED
+                and all(
+                    self._statuses[dependency] is EvidenceGoalStatus.SOURCE_COVERED
+                    for dependency in goal.depends_on
+                )
+                and _semantic_match(goal.description, path, content)
+                and self.register_source(
+                    goal.goal_id,
+                    path,
+                    generation,
+                    observation_id,
+                    content=content,
+                )
             ):
                 covered.append(goal.goal_id)
+        covered.extend(self._cover_structural_relationships(generation, observation_id))
         return tuple(covered)
+
+    def _cover_dependency_relationships(self) -> None:
+        for goal in self.plan.goals:
+            if (
+                goal.kind is EvidenceGoalKind.RELATIONSHIP
+                and goal.depends_on
+                and all(
+                    self._statuses[dep] is EvidenceGoalStatus.SOURCE_COVERED
+                    for dep in goal.depends_on
+                )
+            ):
+                self._statuses[goal.goal_id] = EvidenceGoalStatus.SOURCE_COVERED
+                reason = "dependency_relation:plan:covered dependencies"
+                if reason not in self._reasons[goal.goal_id]:
+                    self._reasons[goal.goal_id].append(reason)
 
     def invalidate_path(self, path: str) -> None:
         affected = {item.goal_id for item in self._coverage if item.path == path}
         self._coverage = [item for item in self._coverage if item.path != path]
+        self._structures.pop(path, None)
         for goal_id in affected:
             if not any(item.goal_id == goal_id for item in self._coverage):
                 self._statuses[goal_id] = EvidenceGoalStatus.UNRESOLVED
@@ -213,6 +316,7 @@ class EvidenceCoverageState:
                         }
                     )
                 ),
+                tuple(self._reasons[goal.goal_id]),
             )
             for goal in self.plan.goals
         )
@@ -231,17 +335,84 @@ class EvidenceCoverageState:
                 selected.append((goal.goal_id, match.observation_id, match.path))
         return tuple(selected)
 
-    def _cover_relationships(self) -> None:
+    def _structural_owner_match(
+        self, goal: EvidenceGoal, path: str
+    ) -> tuple[EvidenceReasonKind, str] | None:
+        goal_tokens = _expanded_semantic_tokens(goal.description)
+        other_goal_tokens = frozenset(
+            token
+            for item in self.plan.goals
+            if item.goal_id != goal.goal_id
+            for token in _semantic_tokens(item.description)
+        )
+        structure = self._structures[path]
+        relevant_references = sorted(
+            reference
+            for reference in structure.references
+            if other_goal_tokens.intersection(_semantic_tokens(reference))
+        )
+        for symbol in sorted(structure.definitions):
+            support = set(goal_tokens.intersection(_semantic_tokens(symbol)))
+            support.update(
+                goal_tokens.intersection(
+                    _semantic_tokens(" ".join(relevant_references))
+                )
+            )
+            required = min(2, len(_semantic_tokens(goal.description)))
+            if len(support) >= required and relevant_references:
+                return (
+                    EvidenceReasonKind.SYMBOL_DEFINITION,
+                    f"{symbol} references {relevant_references[0]}",
+                )
+        for symbol in sorted(structure.declarations):
+            if not goal_tokens.intersection(_semantic_tokens(symbol)):
+                continue
+            if any(
+                symbol in other.definitions
+                for other in self._structures.values()
+                if other.path != path
+            ):
+                return EvidenceReasonKind.DECLARATION_IMPLEMENTATION, symbol
+        return None
+
+    def _cover_structural_relationships(
+        self, generation: int, observation_id: str
+    ) -> tuple[str, ...]:
+        covered = []
         for goal in self.plan.goals:
             if (
                 goal.kind is EvidenceGoalKind.RELATIONSHIP
                 and goal.depends_on
+                and self._statuses[goal.goal_id]
+                is not EvidenceGoalStatus.SOURCE_COVERED
                 and all(
                     self._statuses[dep] is EvidenceGoalStatus.SOURCE_COVERED
                     for dep in goal.depends_on
                 )
             ):
+                relation = _find_structural_relation(
+                    tuple(self._structures.values()), goal.description
+                )
+                if relation is None:
+                    continue
+                kind, source_path, detail = relation
+                self._coverage.append(
+                    EvidenceCoverage(
+                        goal.goal_id,
+                        source_path,
+                        generation,
+                        "structural_relation",
+                        classify_source(source_path),
+                        observation_id,
+                    )
+                )
                 self._statuses[goal.goal_id] = EvidenceGoalStatus.SOURCE_COVERED
+                self._reasons[goal.goal_id].append(
+                    f"{kind.value}:{source_path}:{detail}"
+                )
+                self.goal_transitions += 1
+                covered.append(goal.goal_id)
+        return tuple(covered)
 
 
 def default_evidence_plan(task: str) -> TaskEvidencePlan:
@@ -415,12 +586,108 @@ def _semantic_tokens(value: str) -> frozenset[str]:
     )
 
 
+_SEMANTIC_EQUIVALENTS = {
+    "boundary": frozenset({"edge", "limit", "threshold", "intensity"}),
+}
+
+
+def _expanded_semantic_tokens(value: str) -> frozenset[str]:
+    tokens = set(_semantic_tokens(value))
+    for token in tuple(tokens):
+        tokens.update(_SEMANTIC_EQUIVALENTS.get(token, ()))
+    return frozenset(tokens)
+
+
 def _semantic_match(description: str, path: str, content: str) -> bool:
     goal = _semantic_tokens(description)
     evidence = _semantic_tokens(f"{path} {content}")
     overlap = goal.intersection(evidence)
     required = 1 if len(goal) == 1 else 2 if len(goal) <= 5 else 3
     return len(overlap) >= required
+
+
+_C_DEFINITION = re.compile(
+    r"(?m)^\s*(?:[A-Za-z_]\w*[\s*]+)+([A-Za-z_]\w*)\s*\([^;{}]*\)\s*\{"
+)
+_C_DECLARATION = re.compile(
+    r"(?m)^\s*(?:[A-Za-z_]\w*[\s*]+)+([A-Za-z_]\w*)\s*\([^;{}]*\)\s*;"
+)
+_CALL = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
+_INCLUDE = re.compile(r'(?m)^\s*#\s*include\s*[<"]([^>"]+)[>"]')
+_PY_DEFINITION = re.compile(r"(?m)^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(")
+_PY_IMPORT = re.compile(
+    r"(?m)^\s*(?:from\s+([A-Za-z_][\w.]*)\s+import|import\s+([A-Za-z_][\w.]*))"
+)
+_CONTROL_WORDS = frozenset({"if", "for", "while", "switch", "return", "sizeof"})
+
+
+def _source_structure(path: str, content: str) -> _SourceStructure:
+    definitions = frozenset(
+        {match.group(1) for match in _C_DEFINITION.finditer(content)}
+        | {match.group(1) for match in _PY_DEFINITION.finditer(content)}
+    )
+    declarations = frozenset(
+        match.group(1) for match in _C_DECLARATION.finditer(content)
+    )
+    calls = Counter(match.group(1) for match in _CALL.finditer(content))
+    references = frozenset(
+        symbol
+        for symbol, count in calls.items()
+        if symbol not in _CONTROL_WORDS and (symbol not in definitions or count > 1)
+    )
+    includes = {
+        match.group(1).replace("\\", "/") for match in _INCLUDE.finditer(content)
+    }
+    includes.update(
+        next(group for group in match.groups() if group is not None)
+        for match in _PY_IMPORT.finditer(content)
+    )
+    return _SourceStructure(
+        path, definitions, declarations, references, frozenset(includes)
+    )
+
+
+def _find_structural_relation(
+    structures: tuple[_SourceStructure, ...], description: str
+) -> tuple[EvidenceReasonKind, str, str] | None:
+    relationship_tokens = _semantic_tokens(description)
+    for implementation in structures:
+        for symbol in sorted(implementation.definitions):
+            if not relationship_tokens.intersection(_semantic_tokens(symbol)):
+                continue
+            for caller in structures:
+                if symbol in caller.references:
+                    return (
+                        EvidenceReasonKind.SYMBOL_REFERENCE,
+                        implementation.path,
+                        f"{caller.path} references definition {symbol}",
+                    )
+            for declaration in structures:
+                if (
+                    declaration.path != implementation.path
+                    and symbol in declaration.declarations
+                ):
+                    return (
+                        EvidenceReasonKind.DECLARATION_IMPLEMENTATION,
+                        implementation.path,
+                        f"{declaration.path} declares {symbol}",
+                    )
+    for importer in structures:
+        for included in sorted(importer.includes):
+            if not relationship_tokens.intersection(_semantic_tokens(included)):
+                continue
+            target = included.rsplit("/", 1)[-1]
+            for dependency in structures:
+                if dependency.path == importer.path:
+                    continue
+                dependency_name = dependency.path.rsplit("/", 1)[-1].split(".", 1)[0]
+                if dependency.path.endswith(target) or dependency_name == target:
+                    return (
+                        EvidenceReasonKind.INCLUDE_OR_IMPORT,
+                        dependency.path,
+                        f"{importer.path} includes/imports {included}",
+                    )
+    return None
 
 
 def _facet_plan(facets: list[str], fallback: str) -> TaskEvidencePlan:

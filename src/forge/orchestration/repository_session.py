@@ -1098,6 +1098,7 @@ class RepositoryChatSession:
         wrong_goal_reads = 0
         grounding_rounds = 0
         grounding_exhausted = False
+        structural_symbols_attempted: set[str] = set()
         task_phase = RepositoryTaskPhase.RETRIEVING
         finalization_corrections = 0
         finalization_metrics = FinalizationMetrics()
@@ -1304,6 +1305,191 @@ class RepositoryChatSession:
                         self._mutation_generation,
                     )
 
+        def acquire_structural_grounding() -> None:
+            nonlocal grounding_rounds, grounding_exhausted
+            if (
+                coding_task is None
+                or not coverage_required
+                or coverage.complete
+                or (coding_task.mutation_ready and grounding_rounds >= 2)
+            ):
+                return
+            symbols = tuple(
+                symbol
+                for symbol in coverage.unresolved_reference_symbols
+                if symbol not in structural_symbols_attempted
+            )
+            registered = {item.name for item in self._registry.metadata}
+            if not symbols or not {
+                "repository.lexical_search",
+                "repository.read_file",
+            }.issubset(registered):
+                return
+            remaining = self._max_tool_executions - len(activities)
+            if remaining < 3:  # search, read, and the still-reserved mutation
+                return
+            symbol = symbols[0]
+            structural_symbols_attempted.add(symbol)
+            post_edit = coding_task.mutation_ready
+            search = ToolInvocation(
+                f"forge-grounding-search-{len(structural_symbols_attempted)}",
+                "repository.lexical_search",
+                {
+                    "query": symbol,
+                    "limit": 12,
+                    "preferred_source_kind": "implementation",
+                },
+            )
+            search_result = self._executor.execute(search, self._context)
+            coding_task.record_tool(search.tool_name)
+            search_activity = ToolActivity(
+                search.invocation_id,
+                search.tool_name,
+                search_result.status.value,
+                ToolEvidence.DISCOVERY.value,
+                False,
+                generation=self._mutation_generation,
+                acquisition_origin="orchestrator_grounding",
+            )
+            activities.append(search_activity)
+            if self._activity_callback is not None:
+                self._activity_callback(search_activity)
+            context_planner.register(
+                assistant_text=json.dumps(
+                    {"type": "structural_grounding_search", "symbol": symbol},
+                    sort_keys=True,
+                ),
+                rendered_result=render_tool_result(
+                    search_result, ToolEvidence.DISCOVERY
+                ),
+                result=search_result,
+                evidence=ToolEvidence.DISCOVERY,
+                arguments=search.arguments,
+                generation=self._mutation_generation,
+                assistant_role=MessageRole.SYSTEM,
+            )
+            matches = (
+                search_result.output.get("matches", ())
+                if search_result.status is ToolResultStatus.SUCCESS
+                and isinstance(search_result.output, Mapping)
+                else ()
+            )
+            acquired = {
+                item.path
+                for item in activities
+                if item.evidence == ToolEvidence.SOURCE_CONTENT.value
+                and item.path is not None
+            }
+            candidates = [
+                item
+                for item in matches
+                if isinstance(item, Mapping)
+                and isinstance(item.get("path"), str)
+                and item.get("path") not in acquired
+                and item.get("source_kind") == "implementation"
+            ]
+            candidates.sort(
+                key=lambda item: (
+                    -len(item.get("matched_tokens", ())),
+                    str(item["path"]),
+                )
+            )
+            path = candidates[0].get("path") if candidates else None
+            if post_edit:
+                grounding_rounds += 1
+            if not isinstance(path, str):
+                grounding_exhausted = post_edit and grounding_rounds >= 2
+                return
+            read = ToolInvocation(
+                f"forge-grounding-read-{len(structural_symbols_attempted)}",
+                "repository.read_file",
+                {"path": path},
+            )
+            read_result = self._executor.execute(read, self._context)
+            coding_task.record_tool(read.tool_name)
+            evidence = _tool_evidence(self._registry, read.tool_name, read.arguments)
+            read_activity = ToolActivity(
+                read.invocation_id,
+                read.tool_name,
+                read_result.status.value,
+                evidence.value,
+                True,
+                path,
+                generation=self._mutation_generation,
+                returned_bytes=_output_integer(read_result, "size_bytes"),
+                returned_lines=_returned_lines(read_result),
+                acquisition_origin="orchestrator_grounding",
+            )
+            activities.append(read_activity)
+            if self._activity_callback is not None:
+                self._activity_callback(read_activity)
+            context_planner.register(
+                assistant_text=json.dumps(
+                    {"type": "structural_grounding_read", "path": path},
+                    sort_keys=True,
+                ),
+                rendered_result=render_tool_result(read_result, evidence),
+                result=read_result,
+                evidence=evidence,
+                arguments=read.arguments,
+                generation=self._mutation_generation,
+                assistant_role=MessageRole.SYSTEM,
+            )
+            if (
+                read_result.status is ToolResultStatus.SUCCESS
+                and isinstance(read_result.output, Mapping)
+                and isinstance(read_result.output.get("content"), str)
+            ):
+                content = str(read_result.output["content"])
+                coverage.register_matching_source(
+                    path,
+                    content,
+                    self._mutation_generation,
+                    read.invocation_id,
+                )
+                candidate_files.add(path)
+                source_hash = read_result.output.get("sha256")
+                if isinstance(source_hash, str):
+                    lines = len(content.splitlines())
+                    coding_task.note_source_acquired(
+                        path,
+                        source_hash,
+                        start_line=1 if lines else None,
+                        end_line=lines if lines else None,
+                        deterministic=True,
+                    )
+                    coding_task.consider_source(
+                        path,
+                        source_hash,
+                        self._mutation_generation,
+                        read.invocation_id,
+                        start_line=1 if lines else None,
+                        end_line=lines if lines else None,
+                    )
+                    observed_hashes[path] = source_hash
+                    if coverage.complete:
+                        write_available = any(
+                            item.name == "repository.apply_patch"
+                            for item in self._registry.metadata
+                        )
+                        write_decision = self._executor.permission(
+                            ToolInvocation(
+                                "forge-grounding-permission-probe",
+                                "repository.apply_patch",
+                                {},
+                            ),
+                            self._context,
+                        )
+                        if (
+                            write_available
+                            and write_decision is not PermissionDecision.DENY
+                        ):
+                            coding_task.enter_mutation_ready(len(activities))
+            grounding_exhausted = (
+                post_edit and grounding_rounds >= 2 and not coverage.complete
+            )
+            transcript[:] = context_planner.active_messages
+
         if (
             coding_task is not None
             and self._verification_baseline
@@ -1373,6 +1559,7 @@ class RepositoryChatSession:
                 )
         for _step in range(self._ephemeral_generation_calls, self._max_steps):
             acquire_required_sources()
+            acquire_structural_grounding()
             if (
                 grounding_exhausted
                 and coding_task is not None
@@ -2967,9 +3154,14 @@ class RepositoryChatSession:
             )
             activities.append(activity)
             active_before = coverage.active_goal
-            edit_ready_before_source = bool(
-                coding_task is not None and coding_task.mutation_ready
-            )
+            if (
+                evidence is ToolEvidence.DISCOVERY
+                and coding_task is not None
+                and coding_task.mutation_ready
+                and coverage_required
+                and not coverage.complete
+            ):
+                grounding_rounds += 1
             if evidence is ToolEvidence.DISCOVERY and active_before is not None:
                 coverage.note_discovery(active_before.goal_id)
             retrieval_strategy.observe(
@@ -2985,11 +3177,13 @@ class RepositoryChatSession:
                     if empty_discoveries[active_before.goal_id] >= 2:
                         coverage.mark_failed(active_before.goal_id)
                         retrieval_strategy.mark_exhausted()
-            source_content = (
-                result.output.get("content")
+            raw_source_content = (
+                result.output.get("content", result.output.get("text"))
                 if isinstance(result.output, Mapping)
-                and isinstance(result.output.get("content"), str)
-                else ""
+                else None
+            )
+            source_content = (
+                raw_source_content if isinstance(raw_source_content, str) else ""
             )
             if (
                 result.status is ToolResultStatus.SUCCESS
@@ -3028,14 +3222,15 @@ class RepositoryChatSession:
             ):
                 wrong_goal_reads += 1
             if (
-                edit_ready_before_source
-                and result.status is ToolResultStatus.SUCCESS
+                result.status is ToolResultStatus.SUCCESS
                 and evidence is ToolEvidence.SOURCE_CONTENT
+                and coding_task is not None
+                and coding_task.mutation_ready
                 and coverage_required
                 and not coverage.complete
+                and grounding_rounds >= 2
             ):
-                grounding_rounds += 1
-                grounding_exhausted = grounding_rounds >= 2
+                grounding_exhausted = True
             if (
                 coding_task is not None
                 and (

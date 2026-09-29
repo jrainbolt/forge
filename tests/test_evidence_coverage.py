@@ -141,11 +141,13 @@ def test_semantic_source_can_cover_multiple_goals_but_irrelevant_source_cannot()
     )
     covered = state.register_matching_source(
         "src/entity_registry.cpp",
-        "void create_entity(); void destroy_entity(); bool stale_handle_rejected();",
+        "void create_entity(){}\nvoid destroy_entity(){}\n"
+        "bool stale_handle_rejected(){return true;}\n"
+        "void validate(){stale_handle_rejected();}\n",
         0,
         "right",
     )
-    assert covered == ("G1", "G2")
+    assert covered == ("G1", "G2", "G3")
     assert state.complete
 
 
@@ -155,12 +157,18 @@ def test_semantic_goals_can_be_covered_by_distinct_sources() -> None:
     )
     state = EvidenceCoverageState(plan)
     assert state.register_matching_source(
-        "src/create.cpp", "void create_entity();", 0, "create"
+        "src/create.cpp",
+        "void create_entity(){stale_handle_rejected();}\n",
+        0,
+        "create",
     ) == ("G1",)
     assert not state.complete
     assert state.register_matching_source(
-        "src/destroy.cpp", "void destroy_entity();", 0, "destroy"
-    ) == ("G2",)
+        "src/destroy.cpp",
+        "void destroy_entity(){}\nbool stale_handle_rejected(){return true;}\n",
+        0,
+        "destroy",
+    ) == ("G2", "G3")
     assert state.complete
 
 
@@ -168,7 +176,12 @@ def test_grounding_completion_does_not_grant_edit_authority() -> None:
     plan = decompose_evidence_plan("Fix retry boundary so attempts stop at the limit")
     coverage = EvidenceCoverageState(plan)
     coverage.register_matching_source(
-        "src/retry.py", "def retry_boundary(): return attempts < limit", 0, "read"
+        "src/retry.py",
+        "def retry_boundary(): return attempts_stop_at_limit()\n"
+        "def attempts_stop_at_limit(): return True\n"
+        "attempts_stop_at_limit()",
+        0,
+        "read",
     )
     authority = CodingTaskState(0)
     assert coverage.complete

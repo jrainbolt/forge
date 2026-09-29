@@ -2370,7 +2370,7 @@ A63 is pending review; A64 has not begun.
 
 # Milestone A64 — Semantic Evidence Decomposition & Grounding Gate v1
 
-**Status:** Blocked by sufficient-control false blocking.
+**Status:** Accepted after grounding false-block correction.
 
 A64 connected the existing bounded evidence ledger to discovery-derived coding
 tasks. Semantic coverage is separate from `EDIT_READY`, additional grounding is
@@ -2383,4 +2383,9 @@ In six new qwen-large Foundation diagnostics, two of four historical
 misdirections became sufficient and the other two became partial and did not
 mutate. F01 remained sufficient, but F02 was falsely blocked with solar-only
 context, so the mandatory two-control signal was not met. A64 is therefore
-reported BLOCKED; no A65 work has begun.
+initially reported BLOCKED. The correction pass connected deterministic
+definition/reference and include/declaration facts to coverage. A new six-cell
+run preserved safe blocking, restored F02 to sufficient context and a verified
+semantic pass, and retained F01 sufficiency. Frozen held-out controls recorded
+three true sufficient acceptances, one true insufficient block, and no false
+classification. A64 is accepted; no A65 work has begun.

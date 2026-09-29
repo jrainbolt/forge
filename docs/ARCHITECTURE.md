@@ -1586,3 +1586,13 @@ successful source-acquisition rounds; unresolved coverage then terminates as
 `GROUNDING_INSUFFICIENT` without mutation. Explicit path-known controls retain
 their established authority flow, and explicit A22 plans retain generation-
 current invalidation semantics.
+
+The A64 correction pass adds explainable structural reasons to that ledger:
+lexical match, symbol definition/reference, include/import,
+declaration/implementation, and dependency relation. Relationship coverage now
+requires either sufficient trusted relationship text or an observed structural
+edge; reading two files alone is insufficient. An unresolved referenced symbol
+may drive one bounded ordinary lexical-search/read round using production index
+facts. The selected candidate must be an implementation result with maximal
+query-token coverage, and all normal authority, budget, and two-round limits
+still apply.

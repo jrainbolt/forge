@@ -1763,3 +1763,19 @@ Foundation identity remained
 `361af212a10507281338ebb7a5184d1d4577d90017264653c64f3e03200de690`.
 Diagnostic artifacts are source-free and remain outside the package under
 `/tmp/forge-a64-semantic-grounding-v1`.
+
+### A64 grounding false-block correction
+
+The correction identified F02 as a lexical false negative: trusted solar source
+called `factory_solar_intensity`, but the owner goal required the absent word
+“boundary,” so the clock implementation was never acquired. The corrected gate
+records the caller/definition edge and uses that production-visible symbol to
+acquire `src/clock.c`; no evaluator path participates.
+
+Six new qwen-large correction cells under
+`/tmp/forge-a64-grounding-correction-final` produced: F01 sufficient; F02
+sufficient with verified semantic pass; F03 sufficient with verified semantic
+pass; F04 misdirected but blocked before mutation; and F05/F06 sufficient before
+their unchanged protocol failures. Four frozen held-out controls produced three
+true sufficient acceptances and one true insufficient block, with no false
+sufficient or false-blocked result. Canonical Foundation remained unchanged.
