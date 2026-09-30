@@ -1779,3 +1779,25 @@ pass; F04 misdirected but blocked before mutation; and F05/F06 sufficient before
 their unchanged protocol failures. Four frozen held-out controls produced three
 true sufficient acceptances and one true insufficient block, with no false
 sufficient or false-blocked result. Canonical Foundation remained unchanged.
+
+## grouped-mutation-protocol-v1
+
+A65 froze Foundation F05–F08 as four sufficiently grounded multi-file tasks and
+F01–F02 as single-file controls, then ran qwen-small, qwen-large, and Codestral
+at seed 42, temperature 0, context 8192, and output 512. P0 used the production
+session, P1 used the identical production grouped schema with history removed,
+and evaluator-only P2 requested each authorized child independently.
+
+Across the 12 multi-file rows, structural success was 4/12 for P0, 3/12 for P1,
+and 6/12 for P2. P1 did not improve on P0, rejecting a general continuity or
+history-framing defect. P2 improved child construction for some qwen-small and
+Codestral cells, but remained invalid or incomplete in half of the rows and did
+not identify missing schema information: the grouped schema already states the
+exact path set, count, representation, uniqueness, and complete-set rule.
+
+No generic production correction met the change threshold. Qwen-large retained
+both single-file P0 passes while its grouped rows remained mostly schema-invalid;
+Codestral more often formed groups but failed verification/semantics; qwen-small
+showed isolated P2 successes without consistent P1 recovery. Results are
+source-free under `/tmp/forge-a65-grouped-protocol-v1`. Canonical Foundation was
+unchanged.

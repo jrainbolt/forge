@@ -2389,3 +2389,17 @@ run preserved safe blocking, restored F02 to sufficient context and a verified
 semantic pass, and retained F01 sufficiency. Frozen held-out controls recorded
 three true sufficient acceptances, one true insufficient block, and no false
 classification. A64 is accepted; no A65 work has begun.
+
+# Milestone A65 — Grounded Multi-File Mutation Protocol v1
+
+**Status:** Accepted diagnostic; no production correction justified.
+
+A65 evaluated four grounded multi-file Foundation tasks and two single-file
+controls across qwen-small, qwen-large, and Codestral using production P0,
+isolated grouped-schema P1, and evaluator-only independent-child P2. P1 did not
+outperform P0, while P2 gains were inconsistent and still failed half of the
+multi-file rows. The current schema already exposes exact paths, operation count,
+representation, uniqueness, and completeness. Evidence therefore identifies a
+model/task composition limitation rather than a generic production framing defect.
+No production protocol, authority, retry, budget, grounding, repair, or
+transaction behavior changed. A66 has not begun.
