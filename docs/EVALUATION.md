@@ -1801,3 +1801,48 @@ Codestral more often formed groups but failed verification/semantics; qwen-small
 showed isolated P2 successes without consistent P1 recovery. Results are
 source-free under `/tmp/forge-a65-grouped-protocol-v1`. Canonical Foundation was
 unchanged.
+
+## child-edit-composition-v1
+
+A66 corrected evaluator repository identity to hash an explicit source manifest.
+The manifest includes recognized source, configuration, documentation, and build
+definition files while excluding `.git`, generated build trees, evaluator output,
+caches, checkpoints, replay data, virtual environments, and other mutable
+non-source metadata. Foundation's source-only identity was
+`f68c32e4eca8e15735ac526b294408621525bdbd6cf52d0f7b8c3c1f834f75ad`
+before and after the experiment. Deterministic tests prove that VCS/build metadata
+does not affect this identity and source modifications do.
+
+The experiment retained A65's 12 grouped P0 cells as the fixed C0 baseline and
+ran 12 new evaluator-only C1 cells over F05–F08 with qwen-small, qwen-large, and
+Codestral. Each required path received one independent call containing the
+original task, its exact authority, trusted current source for that file, and the
+normal single-file mutation schema. Settings remained seed 42, temperature 0,
+context 8192, and output 512. All execution used evaluator-owned disposable
+Foundation snapshots.
+
+C0 contained four structurally valid proposals, all of which failed semantics,
+and eight grouped-schema failures. C1 produced no complete valid child set:
+seven cells produced schema-shaped children that failed current-source
+materialization (`CHILD_SEMANTIC_INCOMPLETE`), while five had at least one absent
+single-file proposal (`MISSING_CHILD`). Thus 0/24 children passed all schema,
+authority, non-no-op, and current-source gates, 0/12 cells reached compatibility,
+and no cell entered the transaction or semantic oracle layers.
+
+The deterministic composition harness separately proves that a complete valid
+set is canonically ordered and passed exactly once to the existing
+`repository.apply_multi_patch` transaction, yielding one logical mutation and
+one generation increment. Partial, unauthorized, stale, duplicate, conflicting,
+or invalid children are rejected before application; injected later-child
+failure restores all originals. No alternate transaction mechanism exists.
+
+Because no live C1 cell reached composition, no cross-file semantic failure was
+observed and the evaluator-side `INDEPENDENT_CHILD_WRONG`,
+`CROSS_FILE_INCONSISTENCY`, or `UNKNOWN` diagnosis was not applicable. The
+failures occurred within individual child construction, not between accepted
+children. A65's F01/F02 controls remain the fixed single-file comparison: the
+unchanged production path retained qwen-large's two P0 passes and the previously
+recorded model-specific failures. No production decomposition, retry, routing,
+budget, permission, grounding, repair, or transaction behavior changed. Results
+are source-free under `/tmp/forge-a66-child-composition-v1` and are excluded from
+packaging.

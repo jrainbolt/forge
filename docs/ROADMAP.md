@@ -2403,3 +2403,26 @@ representation, uniqueness, and completeness. Evidence therefore identifies a
 model/task composition limitation rather than a generic production framing defect.
 No production protocol, authority, retry, budget, grounding, repair, or
 transaction behavior changed. A66 has not begun.
+
+# Milestone A66 — Bounded Child-Edit Composition v1
+
+**Status:** Accepted evaluation; production adoption rejected.
+
+A66 introduced an explicit source-only evaluator identity that excludes `.git`,
+build output, caches, evaluator artifacts, and other mutable non-source metadata.
+The canonical Foundation source identity remained stable throughout the new
+diagnostics.
+
+Twelve new C1 cells independently requested one edit per required file across
+F05–F08 and all three model profiles. None produced a complete valid child set:
+seven failed current-source materialization and five omitted at least one usable
+child. Consequently no live C1 cell reached composition, transaction,
+verification, or semantic recovery, compared with four structurally valid but
+semantically failing grouped C0 proposals.
+
+Deterministic coverage proves that valid complete children compose into the
+existing A41 multi-file transaction with one logical mutation and generation
+increment, while incomplete, stale, unauthorized, conflicting, or failed groups
+produce no partial writes. The production-adoption threshold was not met. No
+automatic decomposition, retry, routing, budget, authority, or transaction
+behavior changed. A67 has not begun.

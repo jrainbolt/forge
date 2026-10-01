@@ -206,18 +206,86 @@ def payload_sha256(payload: dict[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def source_state_identity(root: Path) -> str:
+SOURCE_FILE_NAMES = frozenset(
+    {
+        ".gitignore",
+        "CMakeLists.txt",
+        "Makefile",
+        "SConstruct",
+    }
+)
+SOURCE_FILE_SUFFIXES = frozenset(
+    {
+        ".c",
+        ".cc",
+        ".cmake",
+        ".cpp",
+        ".cxx",
+        ".gd",
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx",
+        ".ini",
+        ".js",
+        ".json",
+        ".md",
+        ".py",
+        ".sh",
+        ".toml",
+        ".ts",
+        ".txt",
+        ".yaml",
+        ".yml",
+    }
+)
+NON_SOURCE_DIRECTORY_NAMES = frozenset(
+    {
+        ".forge-exec",
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".venv",
+        "__pycache__",
+        "checkpoints",
+        "dist",
+        "eval-results",
+        "node_modules",
+        "replay-payloads",
+        "tmp",
+    }
+)
+
+
+def source_manifest(root: Path) -> tuple[tuple[str, str], ...]:
+    """Return the explicit, deterministic source-content manifest for a tree."""
     resolved = root.resolve(strict=True)
-    values = []
+    values: list[tuple[str, str]] = []
     for path in sorted(resolved.rglob("*")):
-        if path.is_file() and not path.is_symlink():
-            relative = path.relative_to(resolved).as_posix()
-            if any(
-                part in {"build", "__pycache__", ".pytest_cache"} for part in path.parts
-            ):
-                continue
-            values.append((relative, hashlib.sha256(path.read_bytes()).hexdigest()))
-    return hashlib.sha256(canonical_json(values)).hexdigest()
+        if not path.is_file() or path.is_symlink():
+            continue
+        relative = path.relative_to(resolved)
+        directories = relative.parts[:-1]
+        if any(
+            part in NON_SOURCE_DIRECTORY_NAMES or part.startswith("build")
+            for part in directories
+        ):
+            continue
+        if (
+            path.name not in SOURCE_FILE_NAMES
+            and path.suffix.lower() not in SOURCE_FILE_SUFFIXES
+        ):
+            continue
+        values.append(
+            (relative.as_posix(), hashlib.sha256(path.read_bytes()).hexdigest())
+        )
+    return tuple(values)
+
+
+def source_state_identity(root: Path) -> str:
+    return hashlib.sha256(canonical_json(source_manifest(root))).hexdigest()
 
 
 def repository_identity(root: Path) -> str:
