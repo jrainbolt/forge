@@ -2426,3 +2426,22 @@ increment, while incomplete, stale, unauthorized, conflicting, or failed groups
 produce no partial writes. The production-adoption threshold was not met. No
 automatic decomposition, retry, routing, budget, authority, or transaction
 behavior changed. A67 has not begun.
+
+# Milestone A67 — Child Mutation Scope & Materialization Diagnosis v1
+
+**Status:** Accepted evaluation; no production adoption.
+
+A67 precisely classified child materialization under frozen D0, scope-explicit
+D1, and cooperating-context D2 conditions. Materializable-child rate improved
+from 0/24 in D0 to 10/24 in D1 and 11/24 in D2. D1 formed three complete sets
+and D2 formed four, spanning qwen-small and Codestral. D2 qwen-small F05 was the
+first decomposed candidate to pass atomic transaction, full verification, and
+the independent semantic oracle.
+
+The evidence identifies multiple causes: task-scope conflict, one direct
+cooperating-context recovery, isolated range selection failure, and persistent
+schema/replacement construction failures. Qwen-large did not recover. This
+meets the threshold for further evaluation of child-scoped requests but not the
+stronger production-adoption threshold because only one semantic pass occurred.
+No prompt, decomposition, routing, retry, budget, representation, authority,
+grounding, repair, or transaction behavior changed. A68 has not begun.

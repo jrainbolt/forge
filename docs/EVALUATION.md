@@ -1846,3 +1846,53 @@ recorded model-specific failures. No production decomposition, retry, routing,
 budget, permission, grounding, repair, or transaction behavior changed. Results
 are source-free under `/tmp/forge-a66-child-composition-v1` and are excluded from
 packaging.
+
+## child-mutation-scope-materialization-v1
+
+A67 froze Foundation F05–F08 and compared the accepted A66 D0 child evidence
+with two new evaluator-only conditions across qwen-small, qwen-large, and
+Codestral. D1 added only generic single-file responsibility framing. D2 retained
+that framing and added bounded source from the other already-grounded required
+file. All conditions retained seed 42, temperature 0, context 8192, output 512,
+the profile's existing representation, exact child authority, and disposable
+snapshots. No hidden reference or evaluator-derived implementation entered a
+request.
+
+D0 materialized 0/24 children and formed no complete set. Its accepted durable
+data distinguishes seven task/model cells with schema-shaped current-source
+failures from five cells missing a usable child, but does not preserve enough
+per-child detail for retrospective mechanical subtyping. D0 was not rerun.
+
+D1 materialized 10/24 children (41.7%) and produced three complete sets:
+qwen-small F05 and Codestral F05/F07. D2 materialized 11/24 (45.8%) and produced
+four complete sets: qwen-small F05 and Codestral F05/F06/F08. The D1 taxonomy
+was 10 valid, 12 malformed, one no-op, and one exact-text source mismatch. D2
+was 11 valid, nine malformed, one missing child, one source mismatch, one
+invalid range, and one no-op. No wrong or unauthorized path, stale source, or
+representation switch occurred.
+
+Three D1 and four D2 sets reached deterministic composition. Two in each
+condition completed a production multi-file transaction. Neither D1 transaction
+passed verification or semantics. Under D2, qwen-small F05 passed transaction,
+verification, and the independent semantic oracle; Codestral F05 transacted but
+failed verification. Other mechanically complete Codestral sets were rejected
+before a transaction by the unchanged production path.
+
+The primary cause is mixed. D0-to-D1 recovery across qwen-small and Codestral
+establishes `TASK_SCOPE_CONFLICT` for multiple tasks. Codestral F06's one-valid
+D1 set became complete under D2, establishing a bounded
+`COOPERATING_CONTEXT_LIMIT` case. Codestral F07's D2 invalid range supplies a
+specific `RANGE_SELECTION_FAILURE`, while qwen-small F06/F08 and the repeated
+malformed/no-op outputs establish replacement/schema construction limitations.
+Qwen-large did not respond to either condition and remained dominated by
+malformed output.
+
+A67 meets its evaluator signal for further study: materialization improved on
+multiple tasks across qwen-small and Codestral and yielded more than two
+complete sets without authority, retry, representation, or budget expansion.
+It does not meet the stronger A66 production-adoption standard because only one
+semantic pass was recovered. No production behavior changed. Source-free
+results remain outside the package under
+`/tmp/forge-a67-child-materialization-v1`, and canonical Foundation's
+source-only identity remained
+`f68c32e4eca8e15735ac526b294408621525bdbd6cf52d0f7b8c3c1f834f75ad`.
