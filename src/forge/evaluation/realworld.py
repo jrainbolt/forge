@@ -8,8 +8,8 @@ import shutil
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable, Iterable, Sequence
-from dataclasses import asdict, dataclass
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from pathlib import Path
 
@@ -311,6 +311,8 @@ class RealWorldTaskResult:
     metrics: RealWorldMetrics
     usage: ModelUsage
     elapsed_seconds: float
+    mutation_ready_metadata: tuple[dict[str, object], ...] = ()
+    mutation_ready_evaluations: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,6 +366,9 @@ class RealWorldEvaluationRunner:
         result_callback: Callable[[RealWorldTask, Path, RealWorldTaskResult], None]
         | None = None,
         primary_mutation_callback: Callable[[RealWorldTask, Path], None] | None = None,
+        mutation_ready_callback: (
+            Callable[[RealWorldTask, Path, Mapping[str, object]], None] | None
+        ) = None,
         authorize_discovered_sources: bool = False,
     ) -> None:
         self._profile = model_profile
@@ -375,6 +380,7 @@ class RealWorldEvaluationRunner:
         self._include_repair_mutation_history = include_repair_mutation_history
         self._result_callback = result_callback
         self._primary_mutation_callback = primary_mutation_callback
+        self._mutation_ready_callback = mutation_ready_callback
         self._authorize_discovered_sources = authorize_discovered_sources
 
     def run(
@@ -439,7 +445,23 @@ class RealWorldEvaluationRunner:
                 )
                 semantic_index.build()
             activity: list[object] = []
+            mutation_ready_metadata: list[dict[str, object]] = []
+            mutation_ready_evaluations: list[dict[str, object]] = []
             primary_observed = False
+
+            def observe_proposal(payload: Mapping[str, object]) -> None:
+                from forge.evaluation.mutation_ready import (
+                    evaluate_mutation_ready_v1,
+                    source_free_evaluation,
+                )
+
+                recorded = dict(payload)
+                mutation_ready_metadata.append(recorded)
+                mutation_ready_evaluations.append(
+                    source_free_evaluation(evaluate_mutation_ready_v1(recorded))
+                )
+                if self._mutation_ready_callback is not None:
+                    self._mutation_ready_callback(task, workspace, recorded)
 
             def observe_activity(item: object) -> None:
                 nonlocal primary_observed
@@ -484,6 +506,7 @@ class RealWorldEvaluationRunner:
                 require_relevant_source=False,
                 require_mutation_relevance=True,
                 activity_callback=observe_activity,
+                proposal_observation_callback=observe_proposal,
                 mutation_representation=self._mutation_representation,
                 verification_baseline=self._verification_baseline,
                 verification_plan=commands.verification_plan,
@@ -532,6 +555,11 @@ class RealWorldEvaluationRunner:
                 tuple(activity),
                 lexical_index,
                 coding_result,
+            )
+            result = replace(
+                result,
+                mutation_ready_metadata=tuple(mutation_ready_metadata),
+                mutation_ready_evaluations=tuple(mutation_ready_evaluations),
             )
             if self._result_callback is not None:
                 self._result_callback(task, workspace, result)

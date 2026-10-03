@@ -535,6 +535,9 @@ class RepositoryChatSession:
         verification_baseline: bool = False,
         verification_plan: VerificationPlan | None = None,
         activity_callback: Callable[[ToolActivity], None] | None = None,
+        proposal_observation_callback: (
+            Callable[[Mapping[str, object]], None] | None
+        ) = None,
         approval_callback: (
             Callable[
                 [
@@ -798,6 +801,7 @@ class RepositoryChatSession:
         self._verification_baseline = verification_baseline
         self._verification_plan = verification_plan
         self._activity_callback = activity_callback
+        self._proposal_observation_callback = proposal_observation_callback
         self._approval_callback = approval_callback
         self._repository_index = repository_index
         self._semantic_index = semantic_index
@@ -2573,6 +2577,114 @@ class RepositoryChatSession:
                             if group_arguments is not None
                             else None
                         ),
+                    )
+                if self._proposal_observation_callback is not None:
+                    proposal_edits = proposal.edits if grouped else (proposal,)
+                    candidates_by_path = {
+                        item.path: item for item in coding_task.mutation_candidates
+                    }
+                    required_provenance = {
+                        item.path: item.discovery_provenance
+                        for item in coding_task.required_candidates
+                    }
+                    range_by_path = (
+                        {path: (start, end) for path, start, end in validation.ranges}
+                        if grouped
+                        else {
+                            proposal.path: (
+                                validation.start_line,
+                                validation.end_line,
+                            )
+                        }
+                    )
+                    children = []
+                    candidate_metadata = []
+                    for edit in proposal_edits:
+                        candidate = candidates_by_path.get(edit.path)
+                        proposed_start = getattr(edit, "start_line", None)
+                        proposed_end = getattr(edit, "end_line", None)
+                        resolved_start, resolved_end = range_by_path.get(
+                            edit.path, (proposed_start, proposed_end)
+                        )
+                        children.append(
+                            {
+                                "path": edit.path,
+                                "operation_type": "edit",
+                                "representation": (
+                                    "line_range" if line_range else "exact_text"
+                                ),
+                                "source_sha256": (
+                                    candidate.sha256 if candidate is not None else ""
+                                ),
+                                "start_line": resolved_start,
+                                "end_line": resolved_end,
+                                "generation": self._mutation_generation,
+                                "candidate_observation_id": (
+                                    candidate.observation_id
+                                    if candidate is not None
+                                    else ""
+                                ),
+                            }
+                        )
+                    for candidate in coding_task.mutation_candidates:
+                        candidate_metadata.append(
+                            {
+                                "path": candidate.path,
+                                "observation_id": candidate.observation_id,
+                                "trusted_source_sha256": candidate.sha256,
+                                "authorized_start_line": candidate.start_line,
+                                "authorized_end_line": candidate.end_line,
+                                "generation": candidate.generation,
+                                "authority_provenance_class": required_provenance.get(
+                                    candidate.path, "trusted_source_observation"
+                                ),
+                            }
+                        )
+                    canonical_paths = tuple(sorted(item["path"] for item in children))
+                    source_free_identity = {
+                        "workspace_generation": self._mutation_generation,
+                        "paths": canonical_paths,
+                        "observations": tuple(
+                            sorted(
+                                (
+                                    item["path"],
+                                    item["candidate_observation_id"],
+                                    item["source_sha256"],
+                                )
+                                for item in children
+                            )
+                        ),
+                    }
+                    group_identity = (
+                        str(validation.arguments.get("group_id"))
+                        if grouped and validation.arguments is not None
+                        else hashlib.sha256(
+                            json.dumps(
+                                source_free_identity,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ).encode()
+                        ).hexdigest()
+                    )
+                    self._proposal_observation_callback(
+                        {
+                            "schema_version": 1,
+                            "workspace_generation": self._mutation_generation,
+                            "authorized_paths": tuple(sorted(candidates_by_path)),
+                            "candidates": tuple(candidate_metadata),
+                            "mutation_representation": (
+                                "line_range" if line_range else "exact_text"
+                            ),
+                            "children": tuple(children),
+                            "normalized_operation_count": len(children),
+                            "canonical_child_order": canonical_paths,
+                            "group_identity": group_identity,
+                            "group_generation": self._mutation_generation,
+                            "preview_eligible": validation.valid,
+                            "transaction_readiness_state": (
+                                "ready" if validation.valid else "not_ready"
+                            ),
+                        }
                     )
                 correction_available = coding_task.note_structured_edit(
                     failure,

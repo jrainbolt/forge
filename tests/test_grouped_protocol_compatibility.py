@@ -256,7 +256,7 @@ def test_suite_has_three_two_file_tasks_and_two_language_families() -> None:
     assert {item.language for item in SYNTHETIC_GROUPED_FIXTURES} == {"C17", "Python"}
 
 
-def _production_session(tmp_path, responses):  # type: ignore[no-untyped-def]
+def _production_session(tmp_path, responses, proposal_observation_callback=None):  # type: ignore[no-untyped-def]
     (tmp_path / "a.py").write_text("A = 1\n")
     (tmp_path / "b.py").write_text("B = 1\n")
     model = MockModel(responses, context_capacity=8192)
@@ -271,6 +271,7 @@ def _production_session(tmp_path, responses):  # type: ignore[no-untyped-def]
         minimum_source_files=2,
         required_candidate_paths=("b.py", "a.py"),
         mutation_representation=MutationRepresentationPolicy.LINE_RANGE,
+        proposal_observation_callback=proposal_observation_callback,
     )
     return session, model
 
@@ -326,6 +327,29 @@ def test_full_forge_corrects_incomplete_single_file_group_once(tmp_path) -> None
     assert rendered.index("PATH: a.py") < rendered.index("PATH: b.py")
     assert any("   1 | A = 1" in value for value in rendered)
     assert any("   1 | B = 1" in value for value in rendered)
+
+
+def test_production_proposal_boundary_emits_source_free_v1_metadata(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from forge.evaluation.mutation_ready import (
+        MutationReadyClassification,
+        evaluate_mutation_ready_v1,
+    )
+
+    observations = []
+    session, _model = _production_session(
+        tmp_path,
+        (
+            _grouped_fixture_response(),
+            json.dumps({"type": "final", "answer": "done"}),
+        ),
+        observations.append,
+    )
+    session.execute_task("Change both values")
+    assert len(observations) == 1
+    result = evaluate_mutation_ready_v1(observations[0])
+    assert result.classification is MutationReadyClassification.PASS
+    encoded = json.dumps(observations[0])
+    assert "A = 2" not in encoded and "B = 2" not in encoded
 
 
 def test_full_forge_grouped_premature_final_correction_is_group_specific(
