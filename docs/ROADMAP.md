@@ -2445,3 +2445,24 @@ meets the threshold for further evaluation of child-scoped requests but not the
 stronger production-adoption threshold because only one semantic pass occurred.
 No prompt, decomposition, routing, retry, budget, representation, authority,
 grounding, repair, or transaction behavior changed. A68 has not begun.
+
+# Milestone A68 — Child-Scoped Mutation Generalization v1
+
+**Status:** Accepted evaluation; generalization threshold not met.
+
+A68 expanded the child-scoped experiment to eight qualified multi-file
+Foundation tasks across qwen-small, qwen-large, and Codestral. G0 grouped
+production mutation formed 7/24 complete proposals, completed seven
+transactions, and passed semantics twice. G1 materialized 23/48 children,
+formed 8/24 complete sets, completed five transactions, and also passed
+semantics twice.
+
+The two G1 passes span qwen-small F05 and qwen-large F09, showing that
+qwen-large's A67 failure does not persist universally. Codestral formed five
+complete sets but no semantic pass. Exact tracing placed every mechanically
+complete non-mutating composition at grouped validation, before preview or
+transaction; no approval or atomicity defect was found.
+
+G1 gained only one complete set, produced fewer transactions, and fell short of
+the required three semantic passes. Automatic decomposition remains rejected.
+No production behavior changed. A69 has not begun.

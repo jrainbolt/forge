@@ -1896,3 +1896,50 @@ results remain outside the package under
 `/tmp/forge-a67-child-materialization-v1`, and canonical Foundation's
 source-only identity remained
 `f68c32e4eca8e15735ac526b294408621525bdbd6cf52d0f7b8c3c1f834f75ad`.
+
+## child-scoped-mutation-generalization-v1
+
+A68 froze an eight-task, three-profile corpus. It retained F05–F08 and added
+four coordinated two-file tasks: F09 steam recipe validation, F10 invalid
+assembler/refinery recipe lookup calls, F11 extractor/burner timing, and F12
+fluid/fluid-machine definition validation. Every addition was qualified before
+model execution: the corrupted baseline failed and exact reference restoration
+passed. Paths in the new tasks are production-visible in their prompts; no
+hidden expected implementation or reference code entered model context.
+
+G0 used grouped production mutation. G1 used one scope-explicit call per file
+with bounded already-trusted cooperating source, the production representation,
+the exact same authority, and no retry or budget expansion. Accepted A65/A67
+cells were reused for F05–F08 except that Codestral F06/F08 complete non-mutating
+sets were rerun to capture their exact rejection layer.
+
+Across 24 cells, G0 formed 7 structurally complete proposals, completed 7
+transactions, and achieved 2 verification/semantic passes. G1 materialized
+23/48 children, formed 8 complete sets, completed 5 transactions, and achieved
+2 verification/semantic passes. Its failure classes were 11 child-schema, 5
+child-materialization, 3 production-rejection, 3 verification, and 2 pass.
+
+All three mechanically complete G1 sets that did not mutate—Codestral F06, F08,
+and F09—were rejected at `GROUP_VALIDATION_REJECTED`. None reached preview,
+approval identity, transaction precheck, or application. No transaction
+correctness defect or partial mutation was found. The two G1 semantic passes
+were qwen-small F05 and qwen-large F09. Codestral formed five complete sets but
+had no semantic pass. Qwen-large's A67 zero-materialization result did not
+persist absolutely: on the expanded corpus it materialized 3/16 children,
+formed one complete set, and passed F09, while its other seven tasks remained
+incomplete.
+
+Cooperating context remains a mixed signal based on the controlled A67 D1/D2
+comparison: it improved aggregate child and complete-set rates and enabled the
+qwen-small F05 pass, was neutral in many cells, and was harmful to Codestral F07
+range selection. A68's new-task design compares grouped G0 with cooperating G1,
+so it does not independently estimate the context-only effect for F09–F12.
+
+G1 does not meet the architecture-review threshold. Its complete-set advantage
+is only one cell, it completes fewer transactions than G0, and it has two rather
+than three semantic passes. No production decomposition, prompt, routing,
+default, retry, budget, authority, grounding, repair, representation, approval,
+or transaction behavior changed. Source-free results remain under
+`/tmp/forge-a68-child-generalization-v1`. Canonical Foundation's source-only
+identity remained
+`f68c32e4eca8e15735ac526b294408621525bdbd6cf52d0f7b8c3c1f834f75ad`.
