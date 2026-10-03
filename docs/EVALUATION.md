@@ -1943,3 +1943,43 @@ or transaction behavior changed. Source-free results remain under
 `/tmp/forge-a68-child-generalization-v1`. Canonical Foundation's source-only
 identity remained
 `f68c32e4eca8e15735ac526b294408621525bdbd6cf52d0f7b8c3c1f834f75ad`.
+
+## group-validation-boundary-v1
+
+A69 audited the full production boundary from model envelope through grouped
+normalization, candidate validation, preview, and transaction preparation. The
+audit corrected A68's coarse rejection label: Codestral F06, F08, and F09 show
+`structured_mutation_valid=0`, zero line-range attempts, group validation
+`not_run`, and no preview. Production therefore never rejected those candidates
+inside grouped validation. The evaluator replay declared snapshot-level children
+complete without proving that the combined response was bound to a mutation-ready
+session's trusted candidate identities.
+
+Production enforces layered invariants that A68 V0 did not mirror: exact bounded
+operation count and path authority; unique edit operations; representation tied
+to the session profile; current whole-source identity; selected range contained
+within the authorized observation; child candidate generation and observation
+identity; mutation-ready authority provenance; canonical normalization; and a
+group identity binding canonical patches to workspace generation. Raw child
+order is not itself rejected: validation sorts children before the transaction,
+whose patch list must be canonical.
+
+A69 V1 mirrors these prerequisites without changing production. It distinguishes
+`MECHANICALLY_MATERIALIZABLE`, `PRODUCTION_VALIDATABLE`, and
+`TRANSACTION_READY`. Its taxonomy covers path set, operation count, duplicates,
+operation type, representation, source identity, range identity, generation,
+provenance, authority, and canonicalization.
+
+The six-case diagnostic contains the three A68 rejections plus qwen-small F05 G1
+transaction, qwen-small F09 G0 transaction, and deterministic synthetic valid
+controls. V0 accepts the three rejected groups mechanically; V1 rejects all
+three as `PROVENANCE_MISMATCH` before claiming production readiness. V1 accepts
+all three controls, which production also previews and transacts. This is an
+`EVALUATOR_GAP` with expected production strictness, not a production bug.
+
+No production validation, schema, authority, source-currentness, preview,
+approval, transaction, grounding, repair, budget, retry, route, or model default
+changed. Source-free diagnostics remain outside the package under
+`/tmp/forge-a69-group-validation-boundary-v1`. Canonical Foundation's
+source-only identity remained
+`f68c32e4eca8e15735ac526b294408621525bdbd6cf52d0f7b8c3c1f834f75ad`.

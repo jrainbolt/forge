@@ -2466,3 +2466,18 @@ transaction; no approval or atomicity defect was found.
 G1 gained only one complete set, produced fewer transactions, and fell short of
 the required three semantic passes. Automatic decomposition remains rejected.
 No production behavior changed. A69 has not begun.
+
+# Milestone A69 — Group Validation Boundary Diagnosis v1
+
+**Status:** Accepted evaluator correction; no production bug.
+
+A69 established that the three A68 Codestral cases labeled
+`GROUP_VALIDATION_REJECTED` never entered production grouped validation. Their
+children were mechanically applicable to snapshot files, but evaluator V0 did
+not prove mutation-ready candidate provenance, observation ranges, generation,
+or group identity before declaring them composition-ready.
+
+Evaluator-only V1 mirrors these production prerequisites. It rejects Codestral
+F06/F08/F09 as `PROVENANCE_MISMATCH` and accepts the qwen-small F05 G1,
+qwen-small F09 G0, and synthetic transaction controls. Production behavior and
+strictness remain unchanged. A70 has not begun.
