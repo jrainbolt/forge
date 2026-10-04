@@ -313,6 +313,7 @@ class RealWorldTaskResult:
     elapsed_seconds: float
     mutation_ready_metadata: tuple[dict[str, object], ...] = ()
     mutation_ready_evaluations: tuple[dict[str, object], ...] = ()
+    mutation_observation_classifications: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,10 +448,12 @@ class RealWorldEvaluationRunner:
             activity: list[object] = []
             mutation_ready_metadata: list[dict[str, object]] = []
             mutation_ready_evaluations: list[dict[str, object]] = []
+            mutation_observation_classifications: list[str] = []
             primary_observed = False
 
             def observe_proposal(payload: Mapping[str, object]) -> None:
                 from forge.evaluation.mutation_ready import (
+                    classify_observation_metadata,
                     evaluate_mutation_ready_v1,
                     source_free_evaluation,
                 )
@@ -459,6 +462,9 @@ class RealWorldEvaluationRunner:
                 mutation_ready_metadata.append(recorded)
                 mutation_ready_evaluations.append(
                     source_free_evaluation(evaluate_mutation_ready_v1(recorded))
+                )
+                mutation_observation_classifications.append(
+                    classify_observation_metadata(recorded).value
                 )
                 if self._mutation_ready_callback is not None:
                     self._mutation_ready_callback(task, workspace, recorded)
@@ -560,6 +566,9 @@ class RealWorldEvaluationRunner:
                 result,
                 mutation_ready_metadata=tuple(mutation_ready_metadata),
                 mutation_ready_evaluations=tuple(mutation_ready_evaluations),
+                mutation_observation_classifications=tuple(
+                    mutation_observation_classifications
+                ),
             )
             if self._result_callback is not None:
                 self._result_callback(task, workspace, result)

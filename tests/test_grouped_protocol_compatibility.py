@@ -346,10 +346,97 @@ def test_production_proposal_boundary_emits_source_free_v1_metadata(tmp_path) ->
     )
     session.execute_task("Change both values")
     assert len(observations) == 1
+    assert observations[0]["proposal_observation_id"] == "proposal-observation-1"
     result = evaluate_mutation_ready_v1(observations[0])
     assert result.classification is MutationReadyClassification.PASS
     encoded = json.dumps(observations[0])
     assert "A = 2" not in encoded and "B = 2" not in encoded
+
+
+def test_single_edit_proposal_callback_is_exactly_once(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    (tmp_path / "a.py").write_text("A = 1\n")
+    observations = []
+    session = RepositoryChatSession(
+        "mock",
+        MockModel(
+            (
+                json.dumps(
+                    {
+                        "type": "line_range_edit",
+                        "path": "a.py",
+                        "start_line": 1,
+                        "end_line": 1,
+                        "new_text": "A = 2",
+                    }
+                ),
+                json.dumps({"type": "final", "answer": "done"}),
+            ),
+            context_capacity=8192,
+        ),
+        tmp_path,
+        registry=create_assist_repository_registry(),
+        policy=create_assist_repository_policy(),
+        approval_callback=lambda *_args: True,
+        require_relevant_source=False,
+        required_candidate_paths=("a.py",),
+        mutation_representation=MutationRepresentationPolicy.LINE_RANGE,
+        proposal_observation_callback=observations.append,
+    )
+    session.execute_task("Change a.py")
+    assert len(observations) == 1
+    assert observations[0]["proposal_observation_id"] == "proposal-observation-1"
+
+
+def test_rejected_exact_edit_marks_production_metadata_unavailable(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from forge.evaluation.mutation_ready import (
+        ObservationMetadataClassification,
+        classify_observation_metadata,
+    )
+
+    (tmp_path / "a.py").write_text("A = 1\n")
+    observations = []
+    session = RepositoryChatSession(
+        "mock",
+        MockModel(
+            (
+                json.dumps(
+                    {
+                        "type": "structured_edit",
+                        "path": "a.py",
+                        "old_text": "missing",
+                        "new_text": "A = 2",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "structured_edit",
+                        "path": "a.py",
+                        "old_text": "A = 1",
+                        "new_text": "A = 2",
+                    }
+                ),
+                json.dumps({"type": "final", "answer": "done"}),
+            ),
+            context_capacity=8192,
+        ),
+        tmp_path,
+        registry=create_assist_repository_registry(),
+        policy=create_assist_repository_policy(),
+        approval_callback=lambda *_args: True,
+        require_relevant_source=False,
+        required_candidate_paths=("a.py",),
+        proposal_observation_callback=observations.append,
+    )
+    session.execute_task("Change a.py")
+    assert len(observations) == 2
+    rejected = observations[0]
+    assert rejected["observation_metadata_status"] == "complete"
+    assert rejected["production_metadata_status"] == "unavailable"
+    assert rejected["candidates"][0]["authorized_start_line"] == 1
+    assert (
+        classify_observation_metadata(rejected)
+        is ObservationMetadataClassification.PRODUCTION_METADATA_UNAVAILABLE
+    )
 
 
 def test_full_forge_grouped_premature_final_correction_is_group_specific(

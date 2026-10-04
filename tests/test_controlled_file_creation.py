@@ -358,6 +358,11 @@ def test_c13_session_creation_increments_generation_once(tmp_path: Path) -> None
     from forge.evaluation.mutation_ready import evaluate_mutation_ready_v1
 
     assert len(observations) == 1
+    assert observations[0]["proposal_observation_id"] == "proposal-observation-1"
+    candidate = observations[0]["candidates"][0]
+    assert candidate["authority_kind"] == "create_parent"
+    assert candidate["authorized_start_line"] is None
+    assert candidate["authorized_end_line"] is None
     assert evaluate_mutation_ready_v1(observations[0]).transaction_ready
 
 

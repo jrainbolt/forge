@@ -36,6 +36,8 @@ class ProposalResult:
     first_failed_stage: str | None
     failure_layer: str
     metadata_classification: str
+    observation_id: str | None
+    observation_metadata_classification: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +128,11 @@ def run_cell(
     for index in range(count):
         envelope = envelopes[index] if index < len(envelopes) else {"type": "missing"}
         recorded = metadata[index] if index < len(metadata) else None
+        observation_classification = (
+            raw.mutation_observation_classifications[index]
+            if index < len(raw.mutation_observation_classifications)
+            else "OBSERVATION_METADATA_INCOMPLETE"
+        )
         applied = bool(raw.metrics.mutations) and index == count - 1
         readiness = evaluate_mutation_ready_v1(recorded or {}).transaction_ready
         applied_in_funnel = (
@@ -148,6 +155,13 @@ def run_cell(
                 funnel.first_failed_stage,
                 funnel.failure_layer,
                 funnel.metadata_classification,
+                (
+                    str(recorded.get("proposal_observation_id"))
+                    if recorded is not None
+                    and recorded.get("proposal_observation_id") is not None
+                    else None
+                ),
+                observation_classification,
             )
         )
     return CellResult(

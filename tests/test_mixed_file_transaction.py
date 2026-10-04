@@ -441,7 +441,76 @@ def test_m15_production_session_one_generation_one_mutation(tmp_path: Path) -> N
     from forge.evaluation.mutation_ready import evaluate_mutation_ready_v1
 
     assert len(observations) == 1
+    assert observations[0]["proposal_observation_id"] == "proposal-observation-1"
     assert evaluate_mutation_ready_v1(observations[0]).transaction_ready
+
+
+def test_rejected_mixed_attempts_are_observed_once_with_distinct_ids(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a.py").write_text("VALUE = 1\n")
+
+    def proposal(end_line: int) -> str:
+        return json.dumps(
+            {
+                "type": "multi_file_change",
+                "operations": [
+                    {"type": "create_file", "path": "b.py", "content": "NEW = 1\n"},
+                    {
+                        "type": "line_range_edit",
+                        "path": "a.py",
+                        "start_line": 1,
+                        "end_line": end_line,
+                        "new_text": "VALUE = 2",
+                    },
+                ],
+            }
+        )
+
+    observations = []
+    session = RepositoryChatSession(
+        "test",
+        MockModel(
+            (
+                proposal(99),
+                proposal(1),
+                json.dumps({"type": "final", "answer": "Done"}),
+            )
+        ),
+        tmp_path,
+        registry=create_assist_repository_registry(include_creation=True),
+        policy=create_assist_repository_policy(),
+        required_candidate_paths=("a.py",),
+        create_candidate_paths=("b.py",),
+        mixed_file_operations=True,
+        mutation_representation=MutationRepresentationPolicy.LINE_RANGE,
+        approval_callback=lambda *_args: True,
+        proposal_observation_callback=observations.append,
+        require_relevant_source=False,
+    )
+    session.execute_task("Update a.py and create b.py")
+    assert len(observations) == 2
+    assert [item["proposal_observation_id"] for item in observations] == [
+        "proposal-observation-1",
+        "proposal-observation-2",
+    ]
+    rejected, accepted = observations
+    assert rejected["transaction_readiness_state"] == "materialization_failed"
+    assert rejected["observation_metadata_status"] == "complete"
+    assert rejected["production_metadata_status"] == "available"
+    edit_candidate = next(
+        item for item in rejected["candidates"] if item["path"] == "a.py"
+    )
+    create_candidate = next(
+        item for item in rejected["candidates"] if item["path"] == "b.py"
+    )
+    assert (
+        edit_candidate["authorized_start_line"],
+        edit_candidate["authorized_end_line"],
+    ) == (1, 1)
+    assert create_candidate["authority_kind"] == "create_parent"
+    assert create_candidate["authorized_start_line"] is None
+    assert accepted["transaction_readiness_state"] == "ready"
 
 
 def test_m16_repair_freshly_edits_primary_created_file(tmp_path: Path) -> None:

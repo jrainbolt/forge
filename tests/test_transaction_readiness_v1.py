@@ -22,7 +22,9 @@ from forge.evaluation.mutation_ready import (
     CandidateMetadata,
     ChildMetadata,
     MutationReadyMetadata,
+    ObservationMetadataClassification,
     atomic_checkpoint,
+    classify_observation_metadata,
     evaluate_mutation_ready_v1,
     source_free_metadata,
 )
@@ -35,18 +37,20 @@ def _metadata(operation: str = "edit") -> dict[str, object]:
         "src/a.py",
         "observation",
         "a" * 64,
-        0 if operation == "create" else 1,
-        20,
+        None if operation == "create" else 1,
+        None if operation == "create" else 20,
         3,
         "trusted",
+        "create_parent" if operation == "create" else "existing_source",
+        "a" * 64 if operation == "create" else None,
     )
     child = ChildMetadata(
         "src/a.py",
         operation,
         representation,
         "a" * 64,
-        0 if operation == "create" else 4,
-        0 if operation == "create" else 6,
+        None if operation == "create" else 4,
+        None if operation == "create" else 6,
         3,
         "observation",
     )
@@ -127,6 +131,28 @@ def test_missing_metadata_fails_closed() -> None:
     assert result.failure_layer == FailureLayer.MUTATION_READY_METADATA_INCOMPLETE.value
 
 
+def test_instrumentation_failure_is_separate_from_production_unavailability() -> None:
+    complete = {
+        **_metadata(),
+        "proposal_observation_id": "proposal-observation-1",
+        "observation_metadata_status": "complete",
+        "production_metadata_status": "available",
+    }
+    assert (
+        classify_observation_metadata(complete)
+        is ObservationMetadataClassification.OBSERVATION_METADATA_COMPLETE
+    )
+    assert (
+        classify_observation_metadata(_metadata())
+        is ObservationMetadataClassification.OBSERVATION_METADATA_INCOMPLETE
+    )
+    unavailable = {**complete, "production_metadata_status": "unavailable"}
+    assert (
+        classify_observation_metadata(unavailable)
+        is ObservationMetadataClassification.PRODUCTION_METADATA_UNAVAILABLE
+    )
+
+
 @pytest.mark.parametrize("operation", ["edit", "create"])
 def test_single_and_create_readiness(operation: str) -> None:
     assert _funnel(_metadata(operation)).failure_layer == FailureLayer.PASS.value
@@ -157,15 +183,17 @@ def test_grouped_and_mixed_readiness() -> None:
     assert _funnel(grouped).failure_layer == FailureLayer.PASS.value
     create_candidate = {
         **second_candidate,
-        "authorized_start_line": 0,
-        "authorized_end_line": 0,
+        "authorized_start_line": None,
+        "authorized_end_line": None,
+        "authority_kind": "create_parent",
+        "creation_parent_identity": "b" * 64,
     }
     create_child = {
         **second_child,
         "operation_type": "create",
         "representation": "create_text",
-        "start_line": 0,
-        "end_line": 0,
+        "start_line": None,
+        "end_line": None,
     }
     mixed = {
         **grouped,
@@ -205,16 +233,25 @@ def test_checkpoint_resume_exactness_source_free_and_package_exclusion(
     tmp_path: Path,
 ) -> None:
     result = source_free_funnel(_funnel())
+    metadata = {
+        **_metadata(),
+        "proposal_observation_id": "proposal-observation-1",
+        "observation_metadata_status": "complete",
+        "production_metadata_status": "available",
+    }
     payload = {
         "task_id": "C01",
         "model_profile": "qwen-small",
         "result": result,
-        "metadata": _metadata(),
+        "metadata": metadata,
     }
     path = checkpoint_path(tmp_path, "qwen-small", "C01")
     atomic_checkpoint(path, payload)
     expected = {"task_id": "C01", "model_profile": "qwen-small"}
     assert read_cell(path, expected) == json.loads(json.dumps(payload))
+    assert read_cell(path, expected)["metadata"]["proposal_observation_id"] == (
+        "proposal-observation-1"
+    )
     assert standard_result_is_source_free(payload)
     configuration = (Path(__file__).parents[1] / "pyproject.toml").read_text()
     assert 'where = ["src"]' in configuration

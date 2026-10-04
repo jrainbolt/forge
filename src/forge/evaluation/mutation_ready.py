@@ -41,6 +41,13 @@ class MutationReadyClassification(StrEnum):
     GROUP_BINDING_MISMATCH = "GROUP_BINDING_MISMATCH"
     PREVIEW_INELIGIBLE = "PREVIEW_INELIGIBLE"
     TRANSACTION_NOT_READY = "TRANSACTION_NOT_READY"
+    MATERIALIZATION_FAILURE = "MATERIALIZATION_FAILURE"
+
+
+class ObservationMetadataClassification(StrEnum):
+    OBSERVATION_METADATA_COMPLETE = "OBSERVATION_METADATA_COMPLETE"
+    OBSERVATION_METADATA_INCOMPLETE = "OBSERVATION_METADATA_INCOMPLETE"
+    PRODUCTION_METADATA_UNAVAILABLE = "PRODUCTION_METADATA_UNAVAILABLE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,10 +55,12 @@ class CandidateMetadata:
     path: str
     observation_id: str
     trusted_source_sha256: str
-    authorized_start_line: int
-    authorized_end_line: int
+    authorized_start_line: int | None
+    authorized_end_line: int | None
     generation: int
     authority_provenance_class: str
+    authority_kind: str = "existing_source"
+    creation_parent_identity: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,8 +69,8 @@ class ChildMetadata:
     operation_type: str
     representation: str
     source_sha256: str
-    start_line: int
-    end_line: int
+    start_line: int | None
+    end_line: int | None
     generation: int
     candidate_observation_id: str
 
@@ -127,19 +136,27 @@ def evaluate_mutation_ready_v1(
         isinstance(metadata.workspace_generation, bool)
         or not isinstance(metadata.workspace_generation, int)
         or any(
-            isinstance(candidate.authorized_start_line, bool)
-            or not isinstance(candidate.authorized_start_line, int)
-            or isinstance(candidate.authorized_end_line, bool)
-            or not isinstance(candidate.authorized_end_line, int)
+            candidate.authority_kind == "existing_source"
+            and (
+                isinstance(candidate.authorized_start_line, bool)
+                or not isinstance(candidate.authorized_start_line, int)
+                or isinstance(candidate.authorized_end_line, bool)
+                or not isinstance(candidate.authorized_end_line, int)
+            )
+            or candidate.authority_kind == "create_parent"
+            and not candidate.creation_parent_identity
             or isinstance(candidate.generation, bool)
             or not isinstance(candidate.generation, int)
             for candidate in metadata.candidates
         )
         or any(
-            isinstance(child.start_line, bool)
-            or not isinstance(child.start_line, int)
-            or isinstance(child.end_line, bool)
-            or not isinstance(child.end_line, int)
+            child.operation_type == "edit"
+            and (
+                isinstance(child.start_line, bool)
+                or not isinstance(child.start_line, int)
+                or isinstance(child.end_line, bool)
+                or not isinstance(child.end_line, int)
+            )
             or isinstance(child.generation, bool)
             or not isinstance(child.generation, int)
             for child in metadata.children
@@ -208,6 +225,17 @@ def evaluate_mutation_ready_v1(
             return _reject(MutationReadyClassification.GENERATION_MISMATCH)
         if child.source_sha256 != candidate.trusted_source_sha256:
             return _reject(MutationReadyClassification.SOURCE_IDENTITY_MISMATCH)
+        if child.operation_type == "create":
+            if (
+                candidate.authority_kind != "create_parent"
+                or child.start_line is not None
+                or child.end_line is not None
+            ):
+                return _reject(MutationReadyClassification.AUTHORITY_MISMATCH)
+            continue
+        assert candidate.authorized_start_line is not None
+        assert candidate.authorized_end_line is not None
+        assert child.start_line is not None and child.end_line is not None
         authorized_end = candidate.authorized_end_line + (
             1 if child.representation == "exact_text" else 0
         )
@@ -222,6 +250,8 @@ def evaluate_mutation_ready_v1(
         or metadata.group_generation != metadata.workspace_generation
     ):
         return _reject(MutationReadyClassification.GROUP_BINDING_MISMATCH)
+    if metadata.transaction_readiness_state == "materialization_failed":
+        return _reject(MutationReadyClassification.MATERIALIZATION_FAILURE)
     if not metadata.preview_eligible:
         return _reject(MutationReadyClassification.PREVIEW_INELIGIBLE, production=True)
     if metadata.transaction_readiness_state != "ready":
@@ -235,6 +265,26 @@ def evaluate_mutation_ready_v1(
         True,
         True,
     )
+
+
+def classify_observation_metadata(
+    metadata: MutationReadyMetadata | Mapping[str, object],
+) -> ObservationMetadataClassification:
+    """Separate observer coverage from production proposal validity."""
+    if isinstance(metadata, MutationReadyMetadata):
+        return ObservationMetadataClassification.OBSERVATION_METADATA_INCOMPLETE
+    observation_id = metadata.get("proposal_observation_id")
+    observation_status = metadata.get("observation_metadata_status")
+    production_status = metadata.get("production_metadata_status")
+    if production_status == "unavailable":
+        return ObservationMetadataClassification.PRODUCTION_METADATA_UNAVAILABLE
+    if (
+        not isinstance(observation_id, str)
+        or not observation_id
+        or observation_status != "complete"
+    ):
+        return ObservationMetadataClassification.OBSERVATION_METADATA_INCOMPLETE
+    return ObservationMetadataClassification.OBSERVATION_METADATA_COMPLETE
 
 
 def source_free_metadata(metadata: MutationReadyMetadata) -> dict[str, object]:

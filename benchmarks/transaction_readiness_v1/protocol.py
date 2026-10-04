@@ -82,6 +82,8 @@ def _metadata_failure(classification: MutationReadyClassification) -> FailureLay
         MutationReadyClassification.TRANSACTION_NOT_READY,
     }:
         return FailureLayer.PREVIEW_OR_APPROVAL_FAILURE
+    if classification is MutationReadyClassification.MATERIALIZATION_FAILURE:
+        return FailureLayer.MATERIALIZATION_FAILURE
     return FailureLayer.MATERIALIZATION_FAILURE
 
 

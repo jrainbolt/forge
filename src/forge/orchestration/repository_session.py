@@ -802,6 +802,7 @@ class RepositoryChatSession:
         self._verification_plan = verification_plan
         self._activity_callback = activity_callback
         self._proposal_observation_callback = proposal_observation_callback
+        self._proposal_observation_index = 0
         self._approval_callback = approval_callback
         self._repository_index = repository_index
         self._semantic_index = semantic_index
@@ -830,6 +831,174 @@ class RepositoryChatSession:
     @property
     def conversation(self) -> Conversation:
         return self._conversation
+
+    def _emit_proposal_observation(
+        self,
+        payload: Mapping[str, object],
+        *,
+        production_metadata_available: bool = True,
+    ) -> None:
+        """Emit one source-free observation for one parsed proposal attempt."""
+        if self._proposal_observation_callback is None:
+            return
+        self._proposal_observation_index += 1
+        enriched = {
+            **payload,
+            "proposal_observation_id": (
+                f"proposal-observation-{self._proposal_observation_index}"
+            ),
+            "observation_metadata_status": "complete",
+            "production_metadata_status": (
+                "available" if production_metadata_available else "unavailable"
+            ),
+        }
+        self._proposal_observation_callback(enriched)
+
+    def _observe_rejected_composed_proposal(
+        self,
+        operations: tuple[Mapping[str, object], ...],
+        coding_task: CodingTaskState,
+        *,
+        representation: str,
+        ranges: tuple[tuple[str, int, int], ...] = (),
+    ) -> None:
+        """Capture parsed create/mixed authority before a rejection discards it."""
+        if self._proposal_observation_callback is None:
+            return
+        edit_candidates = {item.path: item for item in coding_task.mutation_candidates}
+        create_candidates = {
+            item.path: item for item in self._context.create_candidates
+        }
+        required_provenance = {
+            item.path: item.discovery_provenance
+            for item in coding_task.required_candidates
+        }
+        range_by_path = {path: (start, end) for path, start, end in ranges}
+        candidates = []
+        children = []
+        production_available = True
+        for item in sorted(operations, key=lambda child: str(child.get("path", ""))):
+            path = item.get("path")
+            if not isinstance(path, str):
+                production_available = False
+                continue
+            if item.get("type") in {"create", "create_file"}:
+                candidate = create_candidates.get(path)
+                if candidate is None:
+                    production_available = False
+                    continue
+                identity = hashlib.sha256(
+                    json.dumps(
+                        {
+                            "path": candidate.path,
+                            "parent_device": candidate.parent_device,
+                            "parent_inode": candidate.parent_inode,
+                            "generation": candidate.generation,
+                            "provenance": candidate.provenance,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest()
+                candidates.append(
+                    {
+                        "path": path,
+                        "observation_id": identity,
+                        "trusted_source_sha256": identity,
+                        "authorized_start_line": None,
+                        "authorized_end_line": None,
+                        "generation": candidate.generation,
+                        "authority_provenance_class": candidate.provenance,
+                        "authority_kind": "create_parent",
+                        "creation_parent_identity": identity,
+                    }
+                )
+                children.append(
+                    {
+                        "path": path,
+                        "operation_type": "create",
+                        "representation": "create_text",
+                        "source_sha256": identity,
+                        "start_line": None,
+                        "end_line": None,
+                        "generation": self._mutation_generation,
+                        "candidate_observation_id": identity,
+                    }
+                )
+                continue
+            candidate = edit_candidates.get(path)
+            if candidate is None:
+                production_available = False
+                continue
+            proposed_range = range_by_path.get(path)
+            if proposed_range is None and representation == "line_range":
+                start, end = item.get("start_line"), item.get("end_line")
+                if isinstance(start, int) and isinstance(end, int):
+                    proposed_range = (start, end)
+            if proposed_range is None:
+                production_available = False
+                proposed_range = (candidate.start_line, candidate.end_line)
+            start, end = proposed_range
+            candidates.append(
+                {
+                    "path": path,
+                    "observation_id": candidate.observation_id,
+                    "trusted_source_sha256": candidate.sha256,
+                    "authorized_start_line": candidate.start_line,
+                    "authorized_end_line": candidate.end_line,
+                    "generation": candidate.generation,
+                    "authority_provenance_class": required_provenance.get(
+                        path, "trusted_source_observation"
+                    ),
+                }
+            )
+            children.append(
+                {
+                    "path": path,
+                    "operation_type": "edit",
+                    "representation": representation,
+                    "source_sha256": candidate.sha256,
+                    "start_line": start,
+                    "end_line": end,
+                    "generation": self._mutation_generation,
+                    "candidate_observation_id": candidate.observation_id,
+                }
+            )
+        canonical_paths = tuple(
+            sorted(str(item.get("path", "")) for item in operations)
+        )
+        identity = hashlib.sha256(
+            json.dumps(
+                {
+                    "generation": self._mutation_generation,
+                    "paths": canonical_paths,
+                    "representation": representation,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        self._emit_proposal_observation(
+            {
+                "schema_version": 1,
+                "workspace_generation": self._mutation_generation,
+                "authorized_paths": tuple(
+                    sorted((*edit_candidates, *create_candidates))
+                ),
+                "candidates": tuple(candidates),
+                "mutation_representation": (
+                    "mixed" if edit_candidates and create_candidates else representation
+                ),
+                "children": tuple(children),
+                "normalized_operation_count": len(operations),
+                "canonical_child_order": canonical_paths,
+                "group_identity": identity,
+                "group_generation": self._mutation_generation,
+                "preview_eligible": False,
+                "transaction_readiness_state": "materialization_failed",
+            },
+            production_metadata_available=production_available,
+        )
 
     @property
     def last_activity(self) -> tuple[ToolActivity, ...]:
@@ -2245,14 +2414,26 @@ class RepositoryChatSession:
                 )
                 continue
             if parsed.outcome is ToolCallOutcome.MULTI_FILE_CHANGE:
+                if coding_task is None or parsed.operations is None:
+                    raise RepositoryOrchestrationError(
+                        "mixed change requires primary edit and create authority"
+                    )
                 if (
-                    coding_task is None
-                    or not structured_edit_ready
+                    not structured_edit_ready
                     or coding_task.repair_ready
                     or not self._create_paths
                     or not self._mixed_required
-                    or parsed.operations is None
                 ):
+                    self._observe_rejected_composed_proposal(
+                        tuple(parsed.operations),
+                        coding_task,
+                        representation=(
+                            "line_range"
+                            if self._mutation_representation
+                            is MutationRepresentationPolicy.LINE_RANGE
+                            else "exact_text"
+                        ),
+                    )
                     raise RepositoryOrchestrationError(
                         "mixed change requires primary edit and create authority"
                     )
@@ -2337,6 +2518,16 @@ class RepositoryChatSession:
                             (path, validation.start_line, validation.end_line)
                         )
                 if not valid_set:
+                    self._observe_rejected_composed_proposal(
+                        tuple(raw),
+                        coding_task,
+                        representation=(
+                            "line_range"
+                            if expected_kind == "line_range_edit"
+                            else "exact_text"
+                        ),
+                        ranges=tuple(ranges),
+                    )
                     if coding_task.note_structured_edit("invalid_mixed_group"):
                         mutation_correction = self._mixed_ready_guidance()
                         continue
@@ -2357,6 +2548,16 @@ class RepositoryChatSession:
                     }
                     preview_mixed_file_transaction(mixed_arguments, self._context)
                 except (ToolError, UnicodeEncodeError):
+                    self._observe_rejected_composed_proposal(
+                        tuple(raw),
+                        coding_task,
+                        representation=(
+                            "line_range"
+                            if expected_kind == "line_range_edit"
+                            else "exact_text"
+                        ),
+                        ranges=tuple(ranges),
+                    )
                     if coding_task.note_structured_edit("invalid_mixed_group"):
                         mutation_correction = self._mixed_ready_guidance()
                         continue
@@ -2400,10 +2601,12 @@ class RepositoryChatSession:
                                     "path": path,
                                     "observation_id": identity,
                                     "trusted_source_sha256": identity,
-                                    "authorized_start_line": 0,
-                                    "authorized_end_line": 0,
+                                    "authorized_start_line": None,
+                                    "authorized_end_line": None,
                                     "generation": candidate.generation,
                                     "authority_provenance_class": candidate.provenance,
+                                    "authority_kind": "create_parent",
+                                    "creation_parent_identity": identity,
                                 }
                             )
                             children.append(
@@ -2412,8 +2615,8 @@ class RepositoryChatSession:
                                     "operation_type": "create",
                                     "representation": "create_text",
                                     "source_sha256": identity,
-                                    "start_line": 0,
-                                    "end_line": 0,
+                                    "start_line": None,
+                                    "end_line": None,
                                     "generation": self._mutation_generation,
                                     "candidate_observation_id": identity,
                                 }
@@ -2453,7 +2656,7 @@ class RepositoryChatSession:
                             }
                         )
                     canonical_paths = tuple(item["path"] for item in children)
-                    self._proposal_observation_callback(
+                    self._emit_proposal_observation(
                         {
                             "schema_version": 1,
                             "workspace_generation": self._mutation_generation,
@@ -2499,14 +2702,23 @@ class RepositoryChatSession:
                 ToolCallOutcome.CREATE_FILE,
                 ToolCallOutcome.MULTI_FILE_CREATE,
             }:
+                if coding_task is None or parsed.creates is None:
+                    raise RepositoryOrchestrationError(
+                        "creation is only valid with explicit primary create authority"
+                    )
                 if (
-                    coding_task is None
-                    or not structured_edit_ready
+                    not structured_edit_ready
                     or coding_task.repair_ready
                     or not self._create_paths
                     or self._mixed_required
-                    or parsed.creates is None
                 ):
+                    self._observe_rejected_composed_proposal(
+                        tuple(
+                            {"type": "create_file", **item} for item in parsed.creates
+                        ),
+                        coding_task,
+                        representation="create_text",
+                    )
                     raise RepositoryOrchestrationError(
                         "creation is only valid with explicit primary create authority"
                     )
@@ -2515,6 +2727,11 @@ class RepositoryChatSession:
                     for item in sorted(parsed.creates, key=lambda item: item["path"])
                 )
                 if tuple(item["path"] for item in creates) != self._create_paths:
+                    self._observe_rejected_composed_proposal(
+                        tuple({"type": "create_file", **item} for item in creates),
+                        coding_task,
+                        representation="create_text",
+                    )
                     if coding_task.note_structured_edit("unauthorized_create"):
                         mutation_correction = CREATE_READY_GUIDANCE
                         continue
@@ -2532,6 +2749,11 @@ class RepositoryChatSession:
                         creates, authority, self._mutation_generation
                     )
                 except ToolError:
+                    self._observe_rejected_composed_proposal(
+                        tuple({"type": "create_file", **item} for item in creates),
+                        coding_task,
+                        representation="create_text",
+                    )
                     if coding_task.note_structured_edit("invalid_create_content"):
                         mutation_correction = CREATE_READY_GUIDANCE
                         continue
@@ -2566,10 +2788,12 @@ class RepositoryChatSession:
                                 "path": candidate.path,
                                 "observation_id": identity,
                                 "trusted_source_sha256": identity,
-                                "authorized_start_line": 0,
-                                "authorized_end_line": 0,
+                                "authorized_start_line": None,
+                                "authorized_end_line": None,
                                 "generation": candidate.generation,
                                 "authority_provenance_class": candidate.provenance,
+                                "authority_kind": "create_parent",
+                                "creation_parent_identity": identity,
                             }
                         )
                         children.append(
@@ -2578,14 +2802,14 @@ class RepositoryChatSession:
                                 "operation_type": "create",
                                 "representation": "create_text",
                                 "source_sha256": identity,
-                                "start_line": 0,
-                                "end_line": 0,
+                                "start_line": None,
+                                "end_line": None,
                                 "generation": self._mutation_generation,
                                 "candidate_observation_id": identity,
                             }
                         )
                     canonical_paths = tuple(item["path"] for item in children)
-                    self._proposal_observation_callback(
+                    self._emit_proposal_observation(
                         {
                             "schema_version": 1,
                             "workspace_generation": self._mutation_generation,
@@ -2624,7 +2848,36 @@ class RepositoryChatSession:
                 ToolCallOutcome.MULTI_FILE_STRUCTURED_EDIT,
                 ToolCallOutcome.MULTI_FILE_LINE_RANGE_EDIT,
             }:
-                if coding_task is None or not structured_edit_ready:
+                if coding_task is None:
+                    raise RepositoryOrchestrationError(
+                        "structured edit is only valid in mutation-ready state"
+                    )
+                if not structured_edit_ready:
+                    premature_edits = (
+                        tuple(parsed.multi_file_line_range_edit or ())
+                        if parsed.outcome is ToolCallOutcome.MULTI_FILE_LINE_RANGE_EDIT
+                        else tuple(parsed.multi_file_structured_edit or ())
+                        if parsed.outcome is ToolCallOutcome.MULTI_FILE_STRUCTURED_EDIT
+                        else (parsed.line_range_edit,)
+                        if parsed.outcome is ToolCallOutcome.LINE_RANGE_EDIT
+                        and parsed.line_range_edit is not None
+                        else (parsed.structured_edit,)
+                        if parsed.structured_edit is not None
+                        else ()
+                    )
+                    self._observe_rejected_composed_proposal(
+                        tuple(item for item in premature_edits if item is not None),
+                        coding_task,
+                        representation=(
+                            "line_range"
+                            if parsed.outcome
+                            in {
+                                ToolCallOutcome.LINE_RANGE_EDIT,
+                                ToolCallOutcome.MULTI_FILE_LINE_RANGE_EDIT,
+                            }
+                            else "exact_text"
+                        ),
+                    )
                     raise RepositoryOrchestrationError(
                         "structured edit is only valid in mutation-ready state"
                     )
@@ -2644,11 +2897,32 @@ class RepositoryChatSession:
                     self._mutation_representation
                     is MutationRepresentationPolicy.LINE_RANGE
                 )
+                parsed_edits = (
+                    tuple(parsed.multi_file_line_range_edit or ())
+                    if grouped and line_range
+                    else tuple(parsed.multi_file_structured_edit or ())
+                    if grouped
+                    else (parsed.line_range_edit,)
+                    if line_range and parsed.line_range_edit is not None
+                    else (parsed.structured_edit,)
+                    if parsed.structured_edit is not None
+                    else ()
+                )
                 if line_range is not expected_line_range:
+                    self._observe_rejected_composed_proposal(
+                        tuple(item for item in parsed_edits if item is not None),
+                        coding_task,
+                        representation="line_range" if line_range else "exact_text",
+                    )
                     raise RepositoryOrchestrationError(
                         "mutation response does not match the configured representation"
                     )
                 if grouped and len(coding_task.mutation_candidates) < 2:
+                    self._observe_rejected_composed_proposal(
+                        tuple(item for item in parsed_edits if item is not None),
+                        coding_task,
+                        representation="line_range" if line_range else "exact_text",
+                    )
                     raise RepositoryOrchestrationError(
                         "grouped mutation requires multiple authorized candidates"
                     )
@@ -2657,6 +2931,11 @@ class RepositoryChatSession:
                     and len(coding_task.mutation_candidates) > 1
                     and not coding_task.repair_ready
                 ):
+                    self._observe_rejected_composed_proposal(
+                        tuple(item for item in parsed_edits if item is not None),
+                        coding_task,
+                        representation="line_range" if line_range else "exact_text",
+                    )
                     correction_available = coding_task.note_structured_edit(
                         "incomplete_grouped_mutation",
                         representation="line_range" if line_range else "exact_text",
@@ -2828,7 +3107,7 @@ class RepositoryChatSession:
                             ).encode()
                         ).hexdigest()
                     )
-                    self._proposal_observation_callback(
+                    self._emit_proposal_observation(
                         {
                             "schema_version": 1,
                             "workspace_generation": self._mutation_generation,
@@ -2844,9 +3123,22 @@ class RepositoryChatSession:
                             "group_generation": self._mutation_generation,
                             "preview_eligible": validation.valid,
                             "transaction_readiness_state": (
-                                "ready" if validation.valid else "not_ready"
+                                "ready"
+                                if validation.valid
+                                else "materialization_failed"
                             ),
-                        }
+                        },
+                        production_metadata_available=all(
+                            item["start_line"] is not None
+                            and item["end_line"] is not None
+                            and bool(item["candidate_observation_id"])
+                            for item in children
+                        )
+                        and all(
+                            item["authorized_start_line"] is not None
+                            and item["authorized_end_line"] is not None
+                            for item in candidate_metadata
+                        ),
                     )
                 correction_available = coding_task.note_structured_edit(
                     failure,
