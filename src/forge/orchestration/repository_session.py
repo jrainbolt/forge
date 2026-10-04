@@ -2364,6 +2364,111 @@ class RepositoryChatSession:
                     raise RepositoryOrchestrationError(
                         "invalid mixed group repeated"
                     ) from None
+                if self._proposal_observation_callback is not None:
+                    edit_candidates = {
+                        item.path: item for item in coding_task.mutation_candidates
+                    }
+                    required_provenance = {
+                        item.path: item.discovery_provenance
+                        for item in coding_task.required_candidates
+                    }
+                    create_candidates = {
+                        item.path: item for item in self._context.create_candidates
+                    }
+                    range_by_path = {path: (start, end) for path, start, end in ranges}
+                    candidate_metadata = []
+                    children = []
+                    for item in operation_tuple:
+                        path = str(item["path"])
+                        if item["type"] == "create":
+                            candidate = create_candidates[path]
+                            identity = hashlib.sha256(
+                                json.dumps(
+                                    {
+                                        "path": candidate.path,
+                                        "parent_device": candidate.parent_device,
+                                        "parent_inode": candidate.parent_inode,
+                                        "generation": candidate.generation,
+                                        "provenance": candidate.provenance,
+                                    },
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                ).encode()
+                            ).hexdigest()
+                            candidate_metadata.append(
+                                {
+                                    "path": path,
+                                    "observation_id": identity,
+                                    "trusted_source_sha256": identity,
+                                    "authorized_start_line": 0,
+                                    "authorized_end_line": 0,
+                                    "generation": candidate.generation,
+                                    "authority_provenance_class": candidate.provenance,
+                                }
+                            )
+                            children.append(
+                                {
+                                    "path": path,
+                                    "operation_type": "create",
+                                    "representation": "create_text",
+                                    "source_sha256": identity,
+                                    "start_line": 0,
+                                    "end_line": 0,
+                                    "generation": self._mutation_generation,
+                                    "candidate_observation_id": identity,
+                                }
+                            )
+                            continue
+                        candidate = edit_candidates[path]
+                        start, end = range_by_path[path]
+                        candidate_metadata.append(
+                            {
+                                "path": path,
+                                "observation_id": candidate.observation_id,
+                                "trusted_source_sha256": candidate.sha256,
+                                "authorized_start_line": candidate.start_line,
+                                "authorized_end_line": candidate.end_line,
+                                "generation": candidate.generation,
+                                "authority_provenance_class": (
+                                    required_provenance.get(
+                                        path, "trusted_source_observation"
+                                    )
+                                ),
+                            }
+                        )
+                        children.append(
+                            {
+                                "path": path,
+                                "operation_type": "edit",
+                                "representation": (
+                                    "line_range"
+                                    if expected_kind == "line_range_edit"
+                                    else "exact_text"
+                                ),
+                                "source_sha256": candidate.sha256,
+                                "start_line": start,
+                                "end_line": end,
+                                "generation": self._mutation_generation,
+                                "candidate_observation_id": candidate.observation_id,
+                            }
+                        )
+                    canonical_paths = tuple(item["path"] for item in children)
+                    self._proposal_observation_callback(
+                        {
+                            "schema_version": 1,
+                            "workspace_generation": self._mutation_generation,
+                            "authorized_paths": canonical_paths,
+                            "candidates": tuple(candidate_metadata),
+                            "mutation_representation": "mixed",
+                            "children": tuple(children),
+                            "normalized_operation_count": len(children),
+                            "canonical_child_order": canonical_paths,
+                            "group_identity": group_id,
+                            "group_generation": self._mutation_generation,
+                            "preview_eligible": True,
+                            "transaction_readiness_state": "ready",
+                        }
+                    )
                 coding_task.note_structured_edit(
                     None,
                     representation=(
@@ -2439,6 +2544,63 @@ class RepositoryChatSession:
                     "workspace_generation": self._mutation_generation,
                     "creates": creates,
                 }
+                if self._proposal_observation_callback is not None:
+                    candidate_metadata = []
+                    children = []
+                    for candidate in authority:
+                        identity = hashlib.sha256(
+                            json.dumps(
+                                {
+                                    "path": candidate.path,
+                                    "parent_device": candidate.parent_device,
+                                    "parent_inode": candidate.parent_inode,
+                                    "generation": candidate.generation,
+                                    "provenance": candidate.provenance,
+                                },
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ).encode()
+                        ).hexdigest()
+                        candidate_metadata.append(
+                            {
+                                "path": candidate.path,
+                                "observation_id": identity,
+                                "trusted_source_sha256": identity,
+                                "authorized_start_line": 0,
+                                "authorized_end_line": 0,
+                                "generation": candidate.generation,
+                                "authority_provenance_class": candidate.provenance,
+                            }
+                        )
+                        children.append(
+                            {
+                                "path": candidate.path,
+                                "operation_type": "create",
+                                "representation": "create_text",
+                                "source_sha256": identity,
+                                "start_line": 0,
+                                "end_line": 0,
+                                "generation": self._mutation_generation,
+                                "candidate_observation_id": identity,
+                            }
+                        )
+                    canonical_paths = tuple(item["path"] for item in children)
+                    self._proposal_observation_callback(
+                        {
+                            "schema_version": 1,
+                            "workspace_generation": self._mutation_generation,
+                            "authorized_paths": canonical_paths,
+                            "candidates": tuple(candidate_metadata),
+                            "mutation_representation": "create_text",
+                            "children": tuple(children),
+                            "normalized_operation_count": len(children),
+                            "canonical_child_order": canonical_paths,
+                            "group_identity": group_id,
+                            "group_generation": self._mutation_generation,
+                            "preview_eligible": True,
+                            "transaction_readiness_state": "ready",
+                        }
+                    )
                 coding_task.note_structured_edit(None, representation="create_text")
                 create_invocation_id = "structured-edit-create-" + str(
                     coding_task.structured_mutation_metrics.attempts

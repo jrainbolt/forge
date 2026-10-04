@@ -332,6 +332,7 @@ def test_c13_session_creation_increments_generation_once(tmp_path: Path) -> None
             json.dumps({"type": "final", "answer": "Created helper.py"}),
         )
     )
+    observations = []
     session = RepositoryChatSession(
         "test",
         model,
@@ -342,6 +343,7 @@ def test_c13_session_creation_increments_generation_once(tmp_path: Path) -> None
         repository_index=index,
         approval_callback=lambda *_args: True,
         require_relevant_source=False,
+        proposal_observation_callback=observations.append,
     )
     response = session.execute_task("Create helper.py so main.py can import value")
     assert (tmp_path / "helper.py").exists(), [
@@ -353,6 +355,10 @@ def test_c13_session_creation_increments_generation_once(tmp_path: Path) -> None
     assert session._context.create_candidates == ()
     assert any(row["name"] == "value" for row in index.file_symbols("helper.py"))
     assert response.coding_task is not None and response.coding_task.mutation_count == 1
+    from forge.evaluation.mutation_ready import evaluate_mutation_ready_v1
+
+    assert len(observations) == 1
+    assert evaluate_mutation_ready_v1(observations[0]).transaction_ready
 
 
 def test_c14_created_file_is_fresh_source_only_after_creation(tmp_path: Path) -> None:

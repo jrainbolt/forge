@@ -113,6 +113,23 @@ def test_exact_state_transitions_are_not_collapsed() -> None:
     assert not malformed.mechanically_materializable
 
 
+def test_exact_text_terminal_newline_range_matches_production_semantics() -> None:
+    metadata = _metadata()
+    candidate = replace(metadata.candidates[0], authorized_end_line=6)
+    child = replace(metadata.children[0], representation="exact_text", end_line=7)
+    value = replace(
+        metadata,
+        candidates=(candidate, metadata.candidates[1]),
+        children=(child, metadata.children[1]),
+        mutation_representation="exact_text",
+    )
+    value = replace(
+        value,
+        children=(child, replace(value.children[1], representation="exact_text")),
+    )
+    assert evaluate_mutation_ready_v1(value).transaction_ready
+
+
 @pytest.mark.parametrize(
     ("metadata", "classification", "valid"),
     [
@@ -193,6 +210,12 @@ def test_missing_and_legacy_metadata_fail_closed_without_upgrade() -> None:
         is MutationReadyClassification.LEGACY_MUTATION_READY_METADATA_INCOMPLETE
     )
     assert historical == before
+    invalid_range = source_free_metadata(_metadata())
+    invalid_range["candidates"][0]["authorized_end_line"] = None  # type: ignore[index]
+    assert (
+        evaluate_mutation_ready_v1(invalid_range).classification
+        is MutationReadyClassification.MUTATION_READY_METADATA_INCOMPLETE
+    )
 
 
 def test_source_free_checkpoint_resume_is_exact_and_does_not_regenerate(

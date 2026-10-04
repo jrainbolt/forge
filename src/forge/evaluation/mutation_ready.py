@@ -123,6 +123,32 @@ def evaluate_mutation_ready_v1(
             MutationReadyClassification.MUTATION_READY_METADATA_INCOMPLETE,
             mechanical=False,
         )
+    if (
+        isinstance(metadata.workspace_generation, bool)
+        or not isinstance(metadata.workspace_generation, int)
+        or any(
+            isinstance(candidate.authorized_start_line, bool)
+            or not isinstance(candidate.authorized_start_line, int)
+            or isinstance(candidate.authorized_end_line, bool)
+            or not isinstance(candidate.authorized_end_line, int)
+            or isinstance(candidate.generation, bool)
+            or not isinstance(candidate.generation, int)
+            for candidate in metadata.candidates
+        )
+        or any(
+            isinstance(child.start_line, bool)
+            or not isinstance(child.start_line, int)
+            or isinstance(child.end_line, bool)
+            or not isinstance(child.end_line, int)
+            or isinstance(child.generation, bool)
+            or not isinstance(child.generation, int)
+            for child in metadata.children
+        )
+    ):
+        return _reject(
+            MutationReadyClassification.MUTATION_READY_METADATA_INCOMPLETE,
+            mechanical=False,
+        )
     paths = tuple(child.path for child in metadata.children)
     canonical = tuple(sorted(paths))
     if (
@@ -140,14 +166,24 @@ def evaluate_mutation_ready_v1(
         return _reject(
             MutationReadyClassification.CANONICALIZATION_MISMATCH, mechanical=False
         )
-    if any(child.operation_type != "edit" for child in metadata.children):
+    if any(
+        child.operation_type not in {"edit", "create"} for child in metadata.children
+    ):
         return _reject(
             MutationReadyClassification.OPERATION_TYPE_MISMATCH, mechanical=False
         )
-    if any(
-        child.representation != metadata.mutation_representation
+    representations_valid = (
+        metadata.mutation_representation == "mixed"
+        and {child.operation_type for child in metadata.children} == {"edit", "create"}
+        and all(
+            child.representation in {"exact_text", "line_range", "create_text"}
+            for child in metadata.children
+        )
+    ) or all(
+        child.representation == metadata.mutation_representation
         for child in metadata.children
-    ):
+    )
+    if not representations_valid:
         return _reject(
             MutationReadyClassification.REPRESENTATION_MISMATCH, mechanical=False
         )
@@ -172,9 +208,12 @@ def evaluate_mutation_ready_v1(
             return _reject(MutationReadyClassification.GENERATION_MISMATCH)
         if child.source_sha256 != candidate.trusted_source_sha256:
             return _reject(MutationReadyClassification.SOURCE_IDENTITY_MISMATCH)
+        authorized_end = candidate.authorized_end_line + (
+            1 if child.representation == "exact_text" else 0
+        )
         if (
             child.start_line < candidate.authorized_start_line
-            or child.end_line > candidate.authorized_end_line
+            or child.end_line > authorized_end
             or child.end_line < child.start_line
         ):
             return _reject(MutationReadyClassification.RANGE_IDENTITY_MISMATCH)

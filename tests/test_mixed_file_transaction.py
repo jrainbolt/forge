@@ -416,6 +416,7 @@ def test_m15_production_session_one_generation_one_mutation(tmp_path: Path) -> N
     )
     model = MockModel((proposal, json.dumps({"type": "final", "answer": "Done"})))
     previews = []
+    observations = []
     session = RepositoryChatSession(
         "test",
         model,
@@ -428,6 +429,7 @@ def test_m15_production_session_one_generation_one_mutation(tmp_path: Path) -> N
         mutation_representation=MutationRepresentationPolicy.LINE_RANGE,
         approval_callback=lambda _invocation, preview: previews.append(preview) or True,
         require_relevant_source=False,
+        proposal_observation_callback=observations.append,
     )
     response = session.execute_task("Update a.py and create b.py")
     assert (tmp_path / "a.py").read_text() == "VALUE = 2\n"
@@ -436,6 +438,10 @@ def test_m15_production_session_one_generation_one_mutation(tmp_path: Path) -> N
     assert response.coding_task is not None and response.coding_task.mutation_count == 1
     assert len(previews) == 1
     assert previews[0].paths == ("a.py", "b.py")
+    from forge.evaluation.mutation_ready import evaluate_mutation_ready_v1
+
+    assert len(observations) == 1
+    assert evaluate_mutation_ready_v1(observations[0]).transaction_ready
 
 
 def test_m16_repair_freshly_edits_primary_created_file(tmp_path: Path) -> None:
