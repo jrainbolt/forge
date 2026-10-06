@@ -18,6 +18,8 @@ from benchmarks.transaction_readiness_v1.suite import (
 SUITE = "transaction-readiness-v2"
 VERSION = 2
 SCHEMA_VERSION = 2
+EVALUATOR_IDENTITY = "transaction-readiness-v2-association-v2"
+RUN_IDENTITY = "a72-authoritative-20261005"
 CONTEXT_SIZE = 8192
 MAX_TOKENS = 512
 TEMPERATURE = 0.0
@@ -55,6 +57,8 @@ def frozen_matrix_identity() -> str:
     frozen = {
         "suite": SUITE,
         "version": VERSION,
+        "evaluator_identity": EVALUATOR_IDENTITY,
+        "run_identity": RUN_IDENTITY,
         "profiles": PROFILES,
         "seed": SEED,
         "temperature": TEMPERATURE,

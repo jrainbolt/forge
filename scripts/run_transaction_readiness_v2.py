@@ -16,7 +16,9 @@ from benchmarks.transaction_readiness_v2.runner import (
 )
 from benchmarks.transaction_readiness_v2.suite import (
     CONTEXT_SIZE,
+    EVALUATOR_IDENTITY,
     PROFILES,
+    RUN_IDENTITY,
     SEED,
     SUITE,
     frozen_matrix_identity,
@@ -72,6 +74,8 @@ def main() -> int:
             path,
             {
                 "suite": SUITE,
+                "evaluator_identity": EVALUATOR_IDENTITY,
+                "run_identity": RUN_IDENTITY,
                 "task_id": definition.task_id,
                 "model_profile": args.profile,
                 "model_artifact": artifact,

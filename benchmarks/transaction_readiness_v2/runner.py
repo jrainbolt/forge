@@ -18,6 +18,8 @@ from benchmarks.transaction_readiness_v2.protocol import (
     transaction_failure_subtype,
 )
 from benchmarks.transaction_readiness_v2.suite import (
+    EVALUATOR_IDENTITY,
+    RUN_IDENTITY,
     SCHEMA_VERSION,
     SEED,
     SUITE,
@@ -56,6 +58,7 @@ class CellResult:
     suite_version: int
     schema_version: int
     evaluator_identity: str
+    run_identity: str
     task_id: str
     task_version: int
     operation_class: str
@@ -225,6 +228,7 @@ def run_cell(
                 apply_result=raw.metrics.mutation_group_apply_result,
                 failure_message=raw.failure_message,
             )
+        failure_layer = subtype or funnel.failure_layer
         proposals.append(
             ProposalResult(
                 index + 1,
@@ -232,7 +236,7 @@ def run_cell(
                 recorded,
                 funnel.transitions,
                 funnel.first_failed_stage,
-                funnel.failure_layer,
+                failure_layer,
                 funnel.metadata_classification,
                 str(recorded["proposal_observation_id"]),
                 observation,
@@ -244,7 +248,8 @@ def run_cell(
         SUITE,
         VERSION,
         SCHEMA_VERSION,
-        SUITE,
+        EVALUATOR_IDENTITY,
+        RUN_IDENTITY,
         definition.task_id,
         definition.version,
         definition.operation_class.value,
