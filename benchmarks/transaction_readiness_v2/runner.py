@@ -24,12 +24,15 @@ from benchmarks.transaction_readiness_v2.suite import (
     VERSION,
 )
 from forge.evaluation.mutation_ready import atomic_checkpoint, resume_checkpoint
-from forge.evaluation.realworld import EvaluationOutcome, RealWorldEvaluationRunner
+from forge.evaluation.realworld import RealWorldEvaluationRunner
 from forge.models import Model, MutationRepresentationPolicy
 
 
 class InstrumentationError(RuntimeError):
     """A fatal matrix-integrity failure; the run must stop."""
+
+
+EVIDENCE_IDENTITY_MISMATCH = "PROPOSAL_EVIDENCE_IDENTITY_MISMATCH"
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +47,7 @@ class ProposalResult:
     observation_id: str | None
     observation_metadata_classification: str | None
     transaction_failure_subtype: str | None
+    downstream_evidence: dict[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +113,58 @@ def _assert_observations(
         raise InstrumentationError("OBSERVATION_METADATA_INCOMPLETE")
 
 
+def bind_proposal_evidence(
+    metadata: tuple[dict[str, object], ...],
+    evidence: tuple[dict[str, object], ...],
+) -> dict[str, dict[str, object]]:
+    """Bind downstream evidence by explicit proposal ID and fail closed."""
+    proposal_ids = {str(item["proposal_observation_id"]) for item in metadata}
+    bound: dict[str, dict[str, object]] = {
+        proposal_id: {
+            "transaction_attempts": [],
+            "transaction_applied": False,
+            "verification_pass": False,
+            "semantic_pass": False,
+        }
+        for proposal_id in proposal_ids
+    }
+    attempt_ids: set[str] = set()
+    for item in evidence:
+        proposal_id = item.get("proposal_observation_id")
+        if not isinstance(proposal_id, str) or proposal_id not in bound:
+            raise InstrumentationError(EVIDENCE_IDENTITY_MISMATCH)
+        event = item.get("event")
+        target = bound[proposal_id]
+        if event == "transaction_result":
+            attempt_id = item.get("transaction_attempt_id")
+            if not isinstance(attempt_id, str) or attempt_id in attempt_ids:
+                raise InstrumentationError(EVIDENCE_IDENTITY_MISMATCH)
+            attempt_ids.add(attempt_id)
+            attempts = target["transaction_attempts"]
+            assert isinstance(attempts, list)
+            attempts.append(
+                {
+                    "transaction_attempt_id": attempt_id,
+                    "transaction_outcome": item.get("transaction_outcome"),
+                    "group_identity": item.get("group_identity"),
+                    "workspace_generation": item.get("workspace_generation"),
+                }
+            )
+            if item.get("transaction_outcome") == "success":
+                target["transaction_applied"] = True
+        elif event == "verification_result":
+            if not target["transaction_applied"]:
+                raise InstrumentationError(EVIDENCE_IDENTITY_MISMATCH)
+            target["verification_pass"] = item.get("verification_outcome") == "pass"
+        elif event == "semantic_result":
+            if not target["transaction_applied"]:
+                raise InstrumentationError(EVIDENCE_IDENTITY_MISMATCH)
+            target["semantic_pass"] = item.get("semantic_outcome") == "PASS"
+        else:
+            raise InstrumentationError(EVIDENCE_IDENTITY_MISMATCH)
+    return bound
+
+
 def run_cell(
     definition: FrozenTask,
     backend: Model,
@@ -143,25 +199,25 @@ def run_cell(
         raise InstrumentationError(
             f"proposal/observation count mismatch: {len(envelopes)} != {len(metadata)}"
         )
-    verification = (
-        raw.metrics.verification_plan_result == "pass"
-        or raw.metrics.reverification_result == "pass"
-    )
-    semantic = raw.oracle is EvaluationOutcome.PASS
+    binding = bind_proposal_evidence(metadata, raw.proposal_evidence)
     proposals = []
     for index, (envelope, recorded, observation) in enumerate(
         zip(envelopes, metadata, classifications, strict=True)
     ):
         schema_valid = _schema_valid(definition, envelope)
-        applied = bool(raw.metrics.mutations) and index == len(envelopes) - 1
+        proposal_id = str(recorded["proposal_observation_id"])
+        downstream = binding[proposal_id]
+        applied = bool(downstream["transaction_applied"])
+        verification = bool(downstream["verification_pass"])
+        semantic = bool(downstream["semantic_pass"])
         funnel = evaluate_funnel(
             model_output=True,
             schema_valid=schema_valid,
             metadata=recorded,
             observation_classification=observation,
             transaction_applied=applied,
-            verification_pass=applied and verification,
-            semantic_pass=applied and verification and semantic,
+            verification_pass=verification,
+            semantic_pass=verification and semantic,
         )
         subtype = None
         if funnel.failure_layer == FailureLayer.TRANSACTION_FAILURE.value:
@@ -181,6 +237,7 @@ def run_cell(
                 str(recorded["proposal_observation_id"]),
                 observation,
                 subtype,
+                downstream,
             )
         )
     return CellResult(
@@ -200,9 +257,9 @@ def run_cell(
         tuple(proposals),
         recorder.calls > 0,
         len(metadata) == len(envelopes),
-        bool(raw.metrics.mutations),
-        verification,
-        semantic,
+        any(bool(item["transaction_applied"]) for item in binding.values()),
+        any(bool(item["verification_pass"]) for item in binding.values()),
+        any(bool(item["semantic_pass"]) for item in binding.values()),
         raw.final_status,
     )
 

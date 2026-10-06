@@ -538,6 +538,9 @@ class RepositoryChatSession:
         proposal_observation_callback: (
             Callable[[Mapping[str, object]], None] | None
         ) = None,
+        proposal_evidence_callback: (
+            Callable[[Mapping[str, object]], None] | None
+        ) = None,
         approval_callback: (
             Callable[
                 [
@@ -802,7 +805,10 @@ class RepositoryChatSession:
         self._verification_plan = verification_plan
         self._activity_callback = activity_callback
         self._proposal_observation_callback = proposal_observation_callback
+        self._proposal_evidence_callback = proposal_evidence_callback
         self._proposal_observation_index = 0
+        self._active_proposal_observation_id: str | None = None
+        self._active_proposal_group_identity: str | None = None
         self._approval_callback = approval_callback
         self._repository_index = repository_index
         self._semantic_index = semantic_index
@@ -837,22 +843,48 @@ class RepositoryChatSession:
         payload: Mapping[str, object],
         *,
         production_metadata_available: bool = True,
-    ) -> None:
+    ) -> str | None:
         """Emit one source-free observation for one parsed proposal attempt."""
-        if self._proposal_observation_callback is None:
-            return
+        if (
+            self._proposal_observation_callback is None
+            and self._proposal_evidence_callback is None
+        ):
+            return None
         self._proposal_observation_index += 1
+        observation_id = f"proposal-observation-{self._proposal_observation_index}"
         enriched = {
             **payload,
-            "proposal_observation_id": (
-                f"proposal-observation-{self._proposal_observation_index}"
-            ),
+            "proposal_observation_id": observation_id,
             "observation_metadata_status": "complete",
             "production_metadata_status": (
                 "available" if production_metadata_available else "unavailable"
             ),
         }
-        self._proposal_observation_callback(enriched)
+        self._active_proposal_observation_id = observation_id
+        group_identity = payload.get("group_identity")
+        self._active_proposal_group_identity = (
+            str(group_identity) if isinstance(group_identity, str) else None
+        )
+        if self._proposal_observation_callback is not None:
+            self._proposal_observation_callback(enriched)
+        return observation_id
+
+    def _emit_transaction_evidence(
+        self, invocation: ToolInvocation, result: ToolResult
+    ) -> None:
+        """Observe a source-free transaction result bound to its proposal."""
+        if self._proposal_evidence_callback is None:
+            return
+        self._proposal_evidence_callback(
+            {
+                "event": "transaction_result",
+                "proposal_observation_id": self._active_proposal_observation_id,
+                "group_identity": self._active_proposal_group_identity,
+                "workspace_generation": self._mutation_generation,
+                "transaction_attempt_id": invocation.invocation_id,
+                "transaction_outcome": result.status.value,
+            }
+        )
 
     def _observe_rejected_composed_proposal(
         self,
@@ -3636,6 +3668,7 @@ class RepositoryChatSession:
                         observed_hashes,
                         observed_directories,
                     )
+                self._emit_transaction_evidence(invocation, result)
                 if (
                     coding_task is not None
                     and call.tool_name

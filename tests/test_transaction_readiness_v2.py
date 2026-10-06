@@ -13,8 +13,10 @@ from benchmarks.transaction_readiness_v2.protocol import (
     transaction_failure_subtype,
 )
 from benchmarks.transaction_readiness_v2.runner import (
+    EVIDENCE_IDENTITY_MISMATCH,
     InstrumentationError,
     _assert_observations,
+    bind_proposal_evidence,
     checkpoint_path,
     read_cell,
 )
@@ -61,6 +63,21 @@ def _metadata() -> dict[str, object]:
     }
 
 
+def _proposal(proposal_id: str) -> dict[str, object]:
+    return {**_metadata(), "proposal_observation_id": proposal_id}
+
+
+def _transaction(proposal_id: str, attempt_id: str, outcome: str) -> dict[str, object]:
+    return {
+        "event": "transaction_result",
+        "proposal_observation_id": proposal_id,
+        "group_identity": "group",
+        "workspace_generation": 2,
+        "transaction_attempt_id": attempt_id,
+        "transaction_outcome": outcome,
+    }
+
+
 def test_corrected_observation_boundary_and_exactly_once() -> None:
     metadata = (_metadata(),)
     _assert_observations(metadata, ("OBSERVATION_METADATA_COMPLETE",))
@@ -101,6 +118,94 @@ def test_transaction_rejection_subtypes() -> None:
         transaction_failure_subtype(apply_result="failed", failure_message=None)
         == TransactionFailureSubtype.TRANSACTION_APPLICATION_FAILURE.value
     )
+
+
+def test_rejected_then_applied_proposal_binds_only_applied_identity() -> None:
+    metadata = (_proposal("p1"), _proposal("p2"))
+    evidence = (
+        _transaction("p1", "attempt-1", "failure"),
+        _transaction("p2", "attempt-2", "success"),
+        {
+            "event": "verification_result",
+            "proposal_observation_id": "p2",
+            "verification_outcome": "pass",
+        },
+        {
+            "event": "semantic_result",
+            "proposal_observation_id": "p2",
+            "semantic_outcome": "PASS",
+        },
+    )
+    bound = bind_proposal_evidence(metadata, evidence)
+    assert not bound["p1"]["transaction_applied"]
+    assert not bound["p1"]["verification_pass"]
+    assert not bound["p1"]["semantic_pass"]
+    assert bound["p2"]["transaction_applied"]
+    assert bound["p2"]["verification_pass"]
+    assert bound["p2"]["semantic_pass"]
+
+
+def test_c08_legacy_last_proposal_association_bug_is_reproduced() -> None:
+    proposal_ids = ("applied-first", "rejected-last")
+    legacy = {
+        proposal_id: index == len(proposal_ids) - 1
+        for index, proposal_id in enumerate(proposal_ids)
+    }
+    assert legacy == {"applied-first": False, "rejected-last": True}
+    corrected = bind_proposal_evidence(
+        tuple(_proposal(value) for value in proposal_ids),
+        (
+            _transaction("applied-first", "attempt-1", "success"),
+            _transaction("rejected-last", "attempt-2", "failure"),
+        ),
+    )
+    assert corrected["applied-first"]["transaction_applied"]
+    assert not corrected["rejected-last"]["transaction_applied"]
+
+
+def test_applied_then_rejected_and_multiple_rejected_proposals() -> None:
+    metadata = (_proposal("p1"), _proposal("p2"), _proposal("p3"))
+    bound = bind_proposal_evidence(
+        metadata,
+        (
+            _transaction("p1", "attempt-1", "success"),
+            _transaction("p2", "attempt-2", "failure"),
+            _transaction("p3", "attempt-3", "failure"),
+        ),
+    )
+    assert bound["p1"]["transaction_applied"]
+    assert not bound["p2"]["transaction_applied"]
+    assert not bound["p3"]["transaction_applied"]
+    assert len({*bound}) == 3
+
+
+def test_wrong_proposal_downstream_evidence_fails_closed() -> None:
+    with pytest.raises(InstrumentationError, match=EVIDENCE_IDENTITY_MISMATCH):
+        bind_proposal_evidence(
+            (_proposal("p1"), _proposal("p2")),
+            (
+                _transaction("p1", "attempt-1", "failure"),
+                {
+                    "event": "verification_result",
+                    "proposal_observation_id": "p2",
+                    "verification_outcome": "pass",
+                },
+            ),
+        )
+
+
+def test_correction_or_repair_proposals_keep_distinct_transaction_bindings() -> None:
+    bound = bind_proposal_evidence(
+        (_proposal("primary"), _proposal("repair")),
+        (
+            _transaction("primary", "primary-attempt", "success"),
+            _transaction("repair", "repair-attempt", "success"),
+        ),
+    )
+    assert (
+        bound["primary"]["transaction_attempts"]
+        != bound["repair"]["transaction_attempts"]
+    )
     assert (
         transaction_failure_subtype(
             apply_result="failed", failure_message="source changed"
@@ -121,7 +226,24 @@ def test_checkpoint_resume_source_free_and_package_exclusion(tmp_path: Path) -> 
         "suite": SUITE,
         "task_id": "C01",
         "model_profile": "qwen-small",
-        "proposals": [{"mutation_ready_metadata": _metadata()}],
+        "proposals": [
+            {
+                "mutation_ready_metadata": _metadata(),
+                "downstream_evidence": {
+                    "transaction_attempts": [
+                        {
+                            "transaction_attempt_id": "attempt-1",
+                            "transaction_outcome": "success",
+                            "group_identity": "group",
+                            "workspace_generation": 2,
+                        }
+                    ],
+                    "transaction_applied": True,
+                    "verification_pass": True,
+                    "semantic_pass": True,
+                },
+            }
+        ],
     }
     atomic_checkpoint(path, payload)
     assert read_cell(path, {"suite": SUITE, "task_id": "C01"}) == json.loads(

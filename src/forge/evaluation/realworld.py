@@ -314,6 +314,7 @@ class RealWorldTaskResult:
     mutation_ready_metadata: tuple[dict[str, object], ...] = ()
     mutation_ready_evaluations: tuple[dict[str, object], ...] = ()
     mutation_observation_classifications: tuple[str, ...] = ()
+    proposal_evidence: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,6 +371,9 @@ class RealWorldEvaluationRunner:
         mutation_ready_callback: (
             Callable[[RealWorldTask, Path, Mapping[str, object]], None] | None
         ) = None,
+        proposal_evidence_callback: (
+            Callable[[RealWorldTask, Path, Mapping[str, object]], None] | None
+        ) = None,
         authorize_discovered_sources: bool = False,
     ) -> None:
         self._profile = model_profile
@@ -382,6 +386,7 @@ class RealWorldEvaluationRunner:
         self._result_callback = result_callback
         self._primary_mutation_callback = primary_mutation_callback
         self._mutation_ready_callback = mutation_ready_callback
+        self._proposal_evidence_callback = proposal_evidence_callback
         self._authorize_discovered_sources = authorize_discovered_sources
 
     def run(
@@ -449,6 +454,7 @@ class RealWorldEvaluationRunner:
             mutation_ready_metadata: list[dict[str, object]] = []
             mutation_ready_evaluations: list[dict[str, object]] = []
             mutation_observation_classifications: list[str] = []
+            proposal_evidence: list[dict[str, object]] = []
             primary_observed = False
 
             def observe_proposal(payload: Mapping[str, object]) -> None:
@@ -490,6 +496,12 @@ class RealWorldEvaluationRunner:
                     primary_observed = True
                     self._primary_mutation_callback(task, workspace)
 
+            def observe_proposal_evidence(payload: Mapping[str, object]) -> None:
+                recorded = dict(payload)
+                proposal_evidence.append(recorded)
+                if self._proposal_evidence_callback is not None:
+                    self._proposal_evidence_callback(task, workspace, recorded)
+
             session = RepositoryChatSession(
                 self._profile,
                 self._model,
@@ -513,6 +525,7 @@ class RealWorldEvaluationRunner:
                 require_mutation_relevance=True,
                 activity_callback=observe_activity,
                 proposal_observation_callback=observe_proposal,
+                proposal_evidence_callback=observe_proposal_evidence,
                 mutation_representation=self._mutation_representation,
                 verification_baseline=self._verification_baseline,
                 verification_plan=commands.verification_plan,
@@ -570,6 +583,34 @@ class RealWorldEvaluationRunner:
                     mutation_observation_classifications
                 ),
             )
+            applied = tuple(
+                item
+                for item in proposal_evidence
+                if item.get("event") == "transaction_result"
+                and item.get("transaction_outcome") == "success"
+            )
+            if applied:
+                proposal_id = applied[-1].get("proposal_observation_id")
+                proposal_evidence.extend(
+                    (
+                        {
+                            "event": "verification_result",
+                            "proposal_observation_id": proposal_id,
+                            "verification_outcome": (
+                                "pass"
+                                if result.metrics.verification_plan_result == "pass"
+                                or result.metrics.reverification_result == "pass"
+                                else "fail"
+                            ),
+                        },
+                        {
+                            "event": "semantic_result",
+                            "proposal_observation_id": proposal_id,
+                            "semantic_outcome": result.oracle.value,
+                        },
+                    )
+                )
+            result = replace(result, proposal_evidence=tuple(proposal_evidence))
             if self._result_callback is not None:
                 self._result_callback(task, workspace, result)
             return result
