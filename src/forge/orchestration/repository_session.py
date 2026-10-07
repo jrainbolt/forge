@@ -886,6 +886,40 @@ class RepositoryChatSession:
             }
         )
 
+    def _emit_verification_evidence(
+        self, invocation: ToolInvocation, result: ToolResult
+    ) -> None:
+        """Observe bounded verification evidence for the active proposal."""
+        if self._proposal_evidence_callback is None:
+            return
+        output = result.output if isinstance(result.output, Mapping) else {}
+        streams = tuple(str(output.get(name, "")) for name in ("stdout", "stderr"))
+        targets = tuple(
+            dict.fromkeys(
+                match
+                for stream in streams
+                for match in re.findall(r"\btest_[A-Za-z0-9_.-]+", stream)
+            )
+        )[:8]
+        self._proposal_evidence_callback(
+            {
+                "event": "verification_result",
+                "proposal_observation_id": self._active_proposal_observation_id,
+                "verification_outcome": (
+                    "pass" if result.status is ToolResultStatus.SUCCESS else "fail"
+                ),
+                "verification_stage": invocation.tool_name,
+                "verification_attempt_id": invocation.invocation_id,
+                "process_outcome": output.get("outcome"),
+                "exit_code": output.get("exit_code"),
+                "timed_out": output.get("timed_out"),
+                "strict_failure_class": output.get("strict_failure_class"),
+                "diagnostic_targets": targets,
+                "stdout_sha256": hashlib.sha256(streams[0].encode()).hexdigest(),
+                "stderr_sha256": hashlib.sha256(streams[1].encode()).hexdigest(),
+            }
+        )
+
     def _observe_rejected_composed_proposal(
         self,
         operations: tuple[Mapping[str, object], ...],
@@ -4328,6 +4362,9 @@ class RepositoryChatSession:
                                     None
                                     if gate_result.status is ToolResultStatus.SUCCESS
                                     else gate_invocation.tool_name,
+                                )
+                                self._emit_verification_evidence(
+                                    gate_invocation, gate_result
                                 )
                                 LOGGER.debug(
                                     "verification_plan_%s id=%s",

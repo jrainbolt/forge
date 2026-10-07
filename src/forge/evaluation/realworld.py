@@ -591,24 +591,12 @@ class RealWorldEvaluationRunner:
             )
             if applied:
                 proposal_id = applied[-1].get("proposal_observation_id")
-                proposal_evidence.extend(
-                    (
-                        {
-                            "event": "verification_result",
-                            "proposal_observation_id": proposal_id,
-                            "verification_outcome": (
-                                "pass"
-                                if result.metrics.verification_plan_result == "pass"
-                                or result.metrics.reverification_result == "pass"
-                                else "fail"
-                            ),
-                        },
-                        {
-                            "event": "semantic_result",
-                            "proposal_observation_id": proposal_id,
-                            "semantic_outcome": result.oracle.value,
-                        },
-                    )
+                proposal_evidence.append(
+                    {
+                        "event": "semantic_result",
+                        "proposal_observation_id": proposal_id,
+                        "semantic_outcome": result.oracle.value,
+                    }
                 )
             result = replace(result, proposal_evidence=tuple(proposal_evidence))
             if self._result_callback is not None:
