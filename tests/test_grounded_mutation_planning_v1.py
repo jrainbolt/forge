@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
 
+from benchmarks.grounded_mutation_planning_v1.paired_identity import (
+    PairedInputCaptureModel,
+    PairMismatch,
+    capture_paired_input,
+    compare_paired_inputs,
+)
 from benchmarks.grounded_mutation_planning_v1.planning import (
     PLAN_SCHEMA,
     PlanClassification,
@@ -88,6 +95,34 @@ def _mutation_request() -> ModelRequest:
     )
 
 
+def _grounded_request(source: str = "value = 1") -> ModelRequest:
+    base = _mutation_request()
+    return replace(
+        base,
+        messages=(
+            Message(
+                MessageRole.SYSTEM,
+                "Current authorized mutation targets:\nsrc/a.py\n\n"
+                "Current trusted source follows.",
+            ),
+            Message(MessageRole.USER, "PATH: src/a.py"),
+            Message(MessageRole.ASSISTANT, "repository.read_file"),
+            Message(MessageRole.USER, source),
+            Message(MessageRole.USER, "END FILE: src/a.py"),
+        ),
+    )
+
+
+def _identity(source: str = "value = 1"):  # type: ignore[no-untyped-def]
+    return capture_paired_input(
+        _grounded_request(source),
+        task_identity="task",
+        model_config_identity="model",
+        context_size=8192,
+        representation="line_range",
+    )
+
+
 def test_bounded_plan_schema_and_corpus_distribution() -> None:
     assert PLAN_SCHEMA["properties"]["required_behavior"]["maxItems"] == 3
     assert PLAN_SCHEMA["properties"]["required_changes"]["maxItems"] == 4
@@ -146,6 +181,64 @@ def test_malformed_plan_does_not_fall_back_to_direct_mutation() -> None:
     assert len(backend.requests) == 1
     assert adapter.record is not None
     assert adapter.record.classification == PlanClassification.PLAN_INVALID.value
+
+
+def test_same_request_inputs_have_same_identity_and_condition_is_excluded() -> None:
+    direct = _identity()
+    planned = _identity()
+    assert direct.common_identity == planned.common_identity
+    assert compare_paired_inputs(direct, planned) == ()
+    assert "condition" not in asdict(direct)
+
+
+def test_proposal_ids_do_not_affect_pair_equivalence() -> None:
+    direct = {**asdict(_identity()), "proposal_observation_id": "p0"}
+    planned = {**asdict(_identity()), "proposal_observation_id": "p1"}
+    assert compare_paired_inputs(direct, planned) == ()
+
+
+def test_invalid_plan_still_preserves_request_time_identity() -> None:
+    backend = CapturingModel(["not json"])
+    planning = PlanningModel(backend, TRUSTED)
+    capture = PairedInputCaptureModel(
+        planning,
+        task_identity="task",
+        model_config_identity="model",
+        context_size=8192,
+        representation="line_range",
+    )
+    capture.generate(_grounded_request())
+    assert capture.record == _identity()
+    assert planning.record is not None
+    assert planning.record.classification == PlanClassification.PLAN_INVALID.value
+
+
+@pytest.mark.parametrize(
+    ("field", "reason"),
+    [
+        ("source_hash_identity", PairMismatch.SOURCE_HASH_MISMATCH),
+        ("authorized_range_identity", PairMismatch.AUTHORIZED_RANGE_MISMATCH),
+        ("create_authority_identity", PairMismatch.CREATE_AUTHORITY_MISMATCH),
+        (
+            "workspace_generation_identity",
+            PairMismatch.WORKSPACE_GENERATION_MISMATCH,
+        ),
+        ("representation_identity", PairMismatch.REPRESENTATION_MISMATCH),
+    ],
+)
+def test_component_changes_break_equivalence(field: str, reason: PairMismatch) -> None:
+    original = _identity()
+    changed = replace(original, **{field: "changed"}, common_identity="changed")
+    assert reason in compare_paired_inputs(original, changed)
+
+
+def test_source_change_breaks_equivalence_and_is_source_free() -> None:
+    original = _identity("secret source value")
+    changed = _identity("different source value")
+    assert PairMismatch.SOURCE_HASH_MISMATCH in compare_paired_inputs(original, changed)
+    encoded = json.dumps(asdict(original))
+    assert "secret source value" not in encoded
+    assert standard_result_is_source_free(asdict(original))
 
 
 def test_plan_identity_is_separate_and_durable_record_is_source_free() -> None:

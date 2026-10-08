@@ -16,6 +16,7 @@ from benchmarks.grounded_mutation_planning_v1.runner import (
 from benchmarks.grounded_mutation_planning_v1.suite import (
     CASES,
     CONTEXT_SIZE,
+    CORRECTION_RUN_ID,
     PROFILES,
     Condition,
     corpus_identity,
@@ -57,6 +58,7 @@ def main() -> int:
     for case in (item for item in CASES if item.profile == args.profile):
         for condition in Condition:
             expected = {
+                "run_identity": CORRECTION_RUN_ID,
                 "case_id": case.case_id,
                 "condition": condition.value,
                 "corpus_identity": corpus,

@@ -7,8 +7,16 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from benchmarks.grounded_mutation_planning_v1.paired_identity import (
+    compare_paired_inputs,
+)
 from benchmarks.grounded_mutation_planning_v1.runner import checkpoint_path
-from benchmarks.grounded_mutation_planning_v1.suite import CASES, SUITE, Condition
+from benchmarks.grounded_mutation_planning_v1.suite import (
+    CASES,
+    CORRECTION_RUN_ID,
+    SUITE,
+    Condition,
+)
 from benchmarks.transaction_readiness_v1.runner import standard_result_is_source_free
 from forge.evaluation.mutation_ready import atomic_checkpoint
 
@@ -53,10 +61,10 @@ def main() -> int:
     for case in CASES:
         direct = cells[(case.case_id, Condition.P0)]
         planned = cells[(case.case_id, Condition.P1)]
-        if direct["grounding_identity"] != planned["grounding_identity"]:
-            mismatches.append(f"{case.case_id}:grounding")
-        if direct["authority_identity"] != planned["authority_identity"]:
-            mismatches.append(f"{case.case_id}:authority")
+        reasons = compare_paired_inputs(
+            direct["paired_input_identity"], planned["paired_input_identity"]
+        )
+        mismatches.extend(f"{case.case_id}:{reason.value}" for reason in reasons)
     if mismatches:
         raise RuntimeError(f"A74 paired-input mismatch: {mismatches}")
     grouped = {
@@ -65,6 +73,8 @@ def main() -> int:
     }
     summary = {
         "suite": SUITE,
+        "run_identity": CORRECTION_RUN_ID,
+        "authoritative_pairs": len(CASES),
         "paired_cases": len(CASES),
         "cells": len(cells),
         "conditions": {name: _metrics(items) for name, items in grouped.items()},

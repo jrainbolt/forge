@@ -7,8 +7,13 @@ import json
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from benchmarks.grounded_mutation_planning_v1.paired_identity import (
+    PairedInputCaptureModel,
+)
 from benchmarks.grounded_mutation_planning_v1.planning import PlanningModel
 from benchmarks.grounded_mutation_planning_v1.suite import (
+    CONTEXT_SIZE,
+    CORRECTION_RUN_ID,
     SCHEMA_VERSION,
     SEED,
     SUITE,
@@ -57,6 +62,7 @@ class Outcome:
 @dataclass(frozen=True, slots=True)
 class CellResult:
     suite: str
+    run_identity: str
     suite_version: int
     schema_version: int
     case_id: str
@@ -71,6 +77,7 @@ class CellResult:
     model_artifact: str
     model_config_identity: str
     plan: dict[str, object] | None
+    paired_input_identity: dict[str, object]
     grounding_identity: str | None
     authority_identity: str | None
     primary: Outcome
@@ -142,7 +149,27 @@ def run_cell(
 ) -> CellResult:
     trusted = frozenset(definition.production_task.allowed_paths)
     planning = PlanningModel(backend, trusted) if condition is Condition.P1 else None
-    recorder = RecordingModel(planning or backend, trusted)
+    task_identity = hashlib.sha256(
+        json.dumps(
+            {
+                "case_id": case.case_id,
+                "task_id": definition.task_id,
+                "task_version": definition.version,
+                "prompt": definition.production_task.prompt,
+                "allowed_paths": definition.production_task.allowed_paths,
+                "operation_class": definition.operation_class.value,
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    paired_capture = PairedInputCaptureModel(
+        planning or backend,
+        task_identity=task_identity,
+        model_config_identity=model_config_identity,
+        context_size=CONTEXT_SIZE,
+        representation=representation.value,
+    )
+    recorder = RecordingModel(paired_capture, trusted)
     observed: list[dict[str, object]] = []
     primary_semantic: dict[str, str] = {}
 
@@ -234,6 +261,9 @@ def run_cell(
     primary = outcome(0 if primary_id else None, primary_id)
     repair = outcome(1, repair_id) if repair_id else None
     plan_payload = asdict(planning.record) if planning and planning.record else None
+    if paired_capture.record is None:
+        raise RuntimeError("A74 request-time paired identity was not captured")
+    paired_input = asdict(paired_capture.record)
     plan_valid = plan_payload is not None and plan_payload["classification"] == "VALID"
     if condition is Condition.P1 and not plan_valid:
         failure = str(
@@ -268,6 +298,7 @@ def run_cell(
     authority_identity = _authority_identity(first_metadata) if first_metadata else None
     return CellResult(
         SUITE,
+        CORRECTION_RUN_ID,
         VERSION,
         SCHEMA_VERSION,
         case.case_id,
@@ -282,6 +313,7 @@ def run_cell(
         artifact,
         model_config_identity,
         plan_payload,
+        paired_input,
         grounding_identity,
         authority_identity,
         primary,

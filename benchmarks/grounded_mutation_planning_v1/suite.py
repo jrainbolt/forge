@@ -11,7 +11,8 @@ from benchmarks.transaction_readiness_v1.suite import tasks as frozen_tasks
 
 SUITE = "grounded-mutation-planning-v1"
 VERSION = 1
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+CORRECTION_RUN_ID = "a74-paired-input-v2"
 SEED = 42
 CONTEXT_SIZE = 8192
 PROFILES = ("qwen-small", "qwen-large", "codestral-22b")
