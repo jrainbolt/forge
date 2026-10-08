@@ -72,18 +72,30 @@ def _path_blocks(request: ModelRequest) -> tuple[tuple[str, tuple[str, ...]], ..
 
 
 def _authorized_paths(request: ModelRequest) -> tuple[str, ...]:
+    create_marker = "Authorized new paths: "
+    for message in request.messages:
+        if create_marker in message.content:
+            return tuple(
+                sorted(
+                    path.strip()
+                    for path in message.content.split(create_marker, 1)[1].split(",")
+                    if path.strip()
+                )
+            )
     marker = "Current authorized mutation targets:\n"
     for message in request.messages:
         if marker not in message.content:
             continue
         targets = message.content.split(marker, 1)[1].split("\n\n", 1)[0]
-        return tuple(
+        paths = tuple(
             sorted(
                 line.removeprefix("MODIFY ").removeprefix("CREATE ").strip()
                 for line in targets.splitlines()
                 if line.strip()
             )
         )
+        if paths:
+            return paths
     return ()
 
 
@@ -92,11 +104,23 @@ def _create_paths(request: ModelRequest) -> tuple[str, ...]:
     for message in request.messages:
         if marker in message.content:
             targets = message.content.split(marker, 1)[1].split("\n\n", 1)[0]
-            return tuple(
+            paths = tuple(
                 sorted(
                     line.removeprefix("CREATE ").strip()
                     for line in targets.splitlines()
                     if line.startswith("CREATE ")
+                )
+            )
+            if paths:
+                return paths
+    create_marker = "Authorized new paths: "
+    for message in request.messages:
+        if create_marker in message.content:
+            return tuple(
+                sorted(
+                    path.strip()
+                    for path in message.content.split(create_marker, 1)[1].split(",")
+                    if path.strip()
                 )
             )
     return ()
@@ -105,11 +129,18 @@ def _create_paths(request: ModelRequest) -> tuple[str, ...]:
 def _schema_generation(value: object) -> tuple[object, ...]:
     found: list[object] = []
 
+    def thaw(item: object) -> object:
+        if isinstance(item, Mapping):
+            return {key: thaw(child) for key, child in item.items()}
+        if isinstance(item, (list, tuple)):
+            return tuple(thaw(child) for child in item)
+        return item
+
     def visit(item: object) -> None:
         if isinstance(item, Mapping):
             for key, child in item.items():
                 if key in {"workspace_generation", "generation"}:
-                    found.append(child)
+                    found.append(thaw(child))
                 visit(child)
         elif isinstance(item, (list, tuple)):
             for child in item:
