@@ -8,9 +8,13 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from benchmarks.default_candidate_confirmation_v1.qualification import (
+    qualify_workflow_reachability,
+)
 from benchmarks.default_candidate_confirmation_v1.suite import (
     PROFILES,
     QUALIFICATION_RUN_ID,
+    REPRESENTATION,
     corpus_identity,
     tasks,
     validate_corpus,
@@ -89,9 +93,20 @@ def main() -> int:
             "chat_format": config.chat_format or "backend_auto",
             "config_identity": hashlib.sha256(repr(profile).encode()).hexdigest(),
         }
-    health = {definition.task_id: _health(definition) for definition in tasks()}
+    definitions = tasks()
+    health = {definition.task_id: _health(definition) for definition in definitions}
     if not all(item["eligible"] for item in health.values()):
         raise RuntimeError(f"A78 qualification failed: {health}")
+    reachability = {
+        definition.task_id: qualify_workflow_reachability(
+            definition, representation=REPRESENTATION
+        ).payload()
+        for definition in definitions
+    }
+    if not all(
+        item["classification"] == "WORKFLOW_REACHABLE" for item in reachability.values()
+    ):
+        raise RuntimeError(f"A78 workflow reachability failed: {reachability}")
     atomic_checkpoint(
         args.output,
         {
@@ -99,6 +114,7 @@ def main() -> int:
             "corpus_identity": corpus_identity(),
             "inventory": inventory,
             "task_health": health,
+            "workflow_reachability": reachability,
         },
     )
     return 0

@@ -19,11 +19,11 @@ from forge.evaluation.realworld import SetupReplacement
 from forge.models import MutationRepresentationPolicy
 
 SUITE = "default-candidate-confirmation-v1"
-VERSION = 1
+VERSION = 2
 SCHEMA_VERSION = 1
-QUALIFICATION_RUN_ID = "a78-qwen-large-default-candidate-confirmation-v1"
-RUN_ID = "a78-qwen-large-default-candidate-confirmation-v3-workflow-identity"
-CHECKPOINT_NAMESPACE = "a78-default-candidate-confirmation-v3-workflow-identity"
+QUALIFICATION_RUN_ID = "a78-held-out-corpus-v2-workflow-qualified"
+RUN_ID = "a78-qwen-large-default-candidate-confirmation-v4-qualified-workflow"
+CHECKPOINT_NAMESPACE = "a78-default-candidate-confirmation-v4-qualified-workflow"
 PROFILES = ("qwen-small", "qwen-large", "codestral-22b")
 PRIMARY_PROFILES = ("qwen-small", "qwen-large")
 REPRESENTATION = MutationRepresentationPolicy.LINE_RANGE
@@ -42,9 +42,13 @@ def _base(
     *,
     setup: tuple[SetupReplacement, ...] = (),
 ):  # type: ignore[no-untyped-def]
+    task = _task(task_id, prompt, expected, edits, creates, setup=setup)
     return replace(
-        _task(task_id, prompt, expected, edits, creates, setup=setup),
+        task,
         oracle_commands=(("python3", str(ORACLE), task_id),),
+        # A creation target may be a configure prerequisite. Requiring configure
+        # before the model can create it makes the workflow unreachable.
+        setup_commands=() if creates else task.setup_commands,
     )
 
 
@@ -290,6 +294,7 @@ def tasks() -> tuple[FrozenTask, ...]:
 def corpus_identity() -> str:
     payload = {
         "suite": SUITE,
+        "version": VERSION,
         "settings": {
             "seed": SEED,
             "temperature": 0,
@@ -315,6 +320,7 @@ def corpus_identity() -> str:
                     for x in item.production_task.setup
                 ],
                 "creates": item.create_paths,
+                "setup_commands": item.production_task.setup_commands,
             }
             for item in tasks()
         ],

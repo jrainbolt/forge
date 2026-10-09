@@ -20,7 +20,7 @@ from forge.evaluation.mutation_ready import atomic_checkpoint, resume_checkpoint
 from forge.evaluation.replay import source_state_identity
 from forge.models import LlamaCppConfig, default_backend_registry, load_model_catalog
 
-SMOKE_RUN_ID = "a78-h09-complete-workflow-identity-smoke-v1"
+SMOKE_RUN_ID = "a78-h09-workflow-qualified-smoke-v2"
 
 
 def main() -> int:
@@ -74,6 +74,10 @@ def main() -> int:
         raise RuntimeError("H09 smoke workflow outcome is incomplete")
     if not workflow["workflow_attempt_id"] or not workflow["equivalence_identity"]:
         raise RuntimeError("H09 smoke workflow identity is incomplete")
+    if payload["workflow_trace"].get("model_calls", 0) < 1:
+        raise RuntimeError("H09 smoke did not reach the model invocation boundary")
+    if payload["generation_calls"] < 1:
+        raise RuntimeError("H09 smoke did not record a model generation")
     if not standard_result_is_source_free(payload):
         raise RuntimeError("H09 smoke is not source-free")
     atomic_checkpoint(args.output, payload)
