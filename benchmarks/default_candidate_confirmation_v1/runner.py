@@ -47,6 +47,8 @@ class CellResult:
     model_artifact_size: int
     model_config_identity: str
     paired_input_identity: dict[str, object]
+    mutation_requests: tuple[dict[str, object], ...]
+    proposal_request_lineage: dict[str, str]
     proposal: dict[str, object]
     primary_semantic_pass: bool
     repair: dict[str, object] | None
@@ -110,6 +112,8 @@ def run_cell(
         artifact_size,
         model_config_identity,
         inner.paired_input_identity,
+        inner.mutation_requests,
+        inner.proposal_request_lineage,
         inner.proposal,
         semantic,
         inner.repair,

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from benchmarks.default_candidate_confirmation_v1.suite import (
     PROFILES,
-    RUN_ID,
+    QUALIFICATION_RUN_ID,
     corpus_identity,
     tasks,
     validate_corpus,
@@ -95,7 +95,7 @@ def main() -> int:
     atomic_checkpoint(
         args.output,
         {
-            "run_identity": RUN_ID,
+            "run_identity": QUALIFICATION_RUN_ID,
             "corpus_identity": corpus_identity(),
             "inventory": inventory,
             "task_health": health,

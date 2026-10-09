@@ -19,6 +19,7 @@ from benchmarks.grounded_mutation_contract_v1.suite import (
 )
 from benchmarks.grounded_mutation_planning_v1.paired_identity import (
     PairedInputCaptureModel,
+    bind_request_proposals,
 )
 from benchmarks.grounded_mutation_planning_v1.suite import PlanningCase
 from benchmarks.realistic_coding_v2.runner import (
@@ -78,6 +79,8 @@ class CellResult:
     model_artifact: str
     model_config_identity: str
     paired_input_identity: dict[str, object]
+    mutation_requests: tuple[dict[str, object], ...]
+    proposal_request_lineage: dict[str, str]
     contract: dict[str, object] | None
     primary: Outcome
     repair: Outcome | None
@@ -221,6 +224,20 @@ def run_cell(
         )
 
     proposal_ids = [str(item["proposal_observation_id"]) for item in metadata]
+    groups: list[tuple[str, ...]] = []
+    for index in range(len(paired_capture.records)):
+        if index == len(paired_capture.records) - 1:
+            groups.append(tuple(proposal_ids[index:]))
+        else:
+            groups.append(tuple(proposal_ids[index : index + 1]))
+    request_records = bind_request_proposals(
+        tuple(paired_capture.records), tuple(groups)
+    )
+    lineage = {
+        proposal_id: record.mutation_request_id
+        for record in request_records
+        for proposal_id in record.proposal_observation_ids
+    }
     primary_id = proposal_ids[0] if proposal_ids else None
     repair_id = proposal_ids[1] if len(proposal_ids) > 1 else None
     primary = outcome(0 if primary_id else None, primary_id)
@@ -273,6 +290,8 @@ def run_cell(
         artifact,
         model_config_identity,
         asdict(paired_capture.record),
+        tuple(asdict(record) for record in request_records),
+        lineage,
         contract,
         primary,
         repair,

@@ -21,7 +21,9 @@ from forge.models import MutationRepresentationPolicy
 SUITE = "default-candidate-confirmation-v1"
 VERSION = 1
 SCHEMA_VERSION = 1
-RUN_ID = "a78-qwen-large-default-candidate-confirmation-v1"
+QUALIFICATION_RUN_ID = "a78-qwen-large-default-candidate-confirmation-v1"
+RUN_ID = "a78-qwen-large-default-candidate-confirmation-v2-request-identity"
+CHECKPOINT_NAMESPACE = "a78-default-candidate-confirmation-v2-request-identity"
 PROFILES = ("qwen-small", "qwen-large", "codestral-22b")
 PRIMARY_PROFILES = ("qwen-small", "qwen-large")
 REPRESENTATION = MutationRepresentationPolicy.LINE_RANGE

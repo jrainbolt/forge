@@ -16,6 +16,7 @@ from benchmarks.default_candidate_confirmation_v1.runner import (
 from benchmarks.default_candidate_confirmation_v1.suite import (
     CONTEXT_SIZE,
     PROFILES,
+    QUALIFICATION_RUN_ID,
     REPRESENTATION,
     RUN_ID,
     corpus_identity,
@@ -41,7 +42,7 @@ def main() -> int:
         raise RuntimeError("A78 qualification checkpoint is missing")
     corpus = corpus_identity()
     if (
-        qualification.get("run_identity") != RUN_ID
+        qualification.get("run_identity") != QUALIFICATION_RUN_ID
         or qualification.get("corpus_identity") != corpus
     ):
         raise RuntimeError("A78 qualification identity mismatch")

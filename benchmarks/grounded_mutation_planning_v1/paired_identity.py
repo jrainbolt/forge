@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 from typing import Any
 
@@ -32,6 +32,16 @@ class PairMismatch(StrEnum):
     OTHER_PAIRED_INPUT_MISMATCH = "OTHER_PAIRED_INPUT_MISMATCH"
 
 
+class MutationRequestOutcome(StrEnum):
+    IN_FLIGHT = "REQUEST_IN_FLIGHT"
+    COMPLETED_WITH_PROPOSAL = "REQUEST_COMPLETED_WITH_PROPOSAL"
+    COMPLETED_NO_PROPOSAL = "REQUEST_COMPLETED_NO_PROPOSAL"
+    OUTPUT_MALFORMED = "REQUEST_OUTPUT_MALFORMED"
+    MODEL_ERROR = "REQUEST_MODEL_ERROR"
+    CONTEXT_FAILURE = "REQUEST_CONTEXT_FAILURE"
+    CANCELLED_OR_INTERRUPTED = "REQUEST_CANCELLED_OR_INTERRUPTED"
+
+
 @dataclass(frozen=True, slots=True)
 class PairedInputIdentity:
     identity_version: int
@@ -47,6 +57,19 @@ class PairedInputIdentity:
     workspace_generation_identity: str
     representation_identity: str
     evidence_plan_identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class MutationRequestRecord:
+    identity_version: int
+    mutation_request_id: str
+    equivalence_identity: str
+    profile_identity: str
+    request_kind: str
+    repair_parent_request_id: str | None
+    paired_input: PairedInputIdentity
+    outcome: MutationRequestOutcome
+    proposal_observation_ids: tuple[str, ...] = ()
 
 
 def _hash(value: object) -> str:
@@ -242,6 +265,31 @@ def compare_paired_inputs(
     )
 
 
+def bind_request_proposals(
+    records: tuple[MutationRequestRecord, ...],
+    proposal_groups: tuple[tuple[str, ...], ...],
+) -> tuple[MutationRequestRecord, ...]:
+    """Bind proposals in invocation order without fabricating missing proposals."""
+    if len(proposal_groups) > len(records):
+        raise ValueError("proposal observation has no originating mutation request")
+    bound = []
+    for index, record in enumerate(records):
+        proposal_ids = proposal_groups[index] if index < len(proposal_groups) else ()
+        outcome = (
+            MutationRequestOutcome.COMPLETED_WITH_PROPOSAL
+            if proposal_ids
+            else record.outcome
+        )
+        bound.append(
+            replace(
+                record,
+                outcome=outcome,
+                proposal_observation_ids=proposal_ids,
+            )
+        )
+    return tuple(bound)
+
+
 class PairedInputCaptureModel(Model):
     """Capture the immutable primary request before an experimental adapter."""
 
@@ -260,6 +308,7 @@ class PairedInputCaptureModel(Model):
         self.context_size = context_size
         self.representation = representation
         self.record: PairedInputIdentity | None = None
+        self.records: list[MutationRequestRecord] = []
 
     @property
     def identity(self) -> ModelIdentity:
@@ -275,21 +324,80 @@ class PairedInputCaptureModel(Model):
 
     def generate(self, request: ModelRequest) -> ModelResponse:
         text = "\n".join(message.content for message in request.messages)
-        primary = (
-            request.output.schema is not None
-            and "Current authorized mutation targets:" in text
-            and "previous mutation failed verification" not in text
-            and "Repair evidence is ready" not in text
+        mutation_request = request.output.schema is not None
+        if not mutation_request:
+            return self.backend.generate(request)
+        paired = capture_paired_input(
+            request,
+            task_identity=self.task_identity,
+            model_config_identity=self.model_config_identity,
+            context_size=self.context_size,
+            representation=self.representation,
         )
-        if primary and self.record is None:
-            self.record = capture_paired_input(
-                request,
-                task_identity=self.task_identity,
-                model_config_identity=self.model_config_identity,
-                context_size=self.context_size,
-                representation=self.representation,
+        repair = (
+            "previous mutation failed verification" in text
+            or "Repair evidence is ready" in text
+        )
+        kind = "REPAIR_MUTATION" if repair else "PRIMARY_MUTATION"
+        parent = (
+            self.records[0].mutation_request_id if repair and self.records else None
+        )
+        ordinal = len(self.records) + 1
+        equivalence = _hash(
+            {
+                key: value
+                for key, value in asdict(paired).items()
+                if key not in {"common_identity", "model_config_identity"}
+            }
+            | {"request_kind": kind, "ordinal": ordinal}
+        )
+        request_id = _hash(
+            {
+                "equivalence_identity": equivalence,
+                "profile_identity": self.model_config_identity,
+                "repair_parent_request_id": parent,
+            }
+        )
+        self.records.append(
+            MutationRequestRecord(
+                1,
+                request_id,
+                equivalence,
+                self.model_config_identity,
+                kind,
+                parent,
+                paired,
+                MutationRequestOutcome.IN_FLIGHT,
             )
-        return self.backend.generate(request)
+        )
+        index = len(self.records) - 1
+        if not repair and self.record is None:
+            self.record = paired
+        try:
+            response = self.backend.generate(request)
+        except KeyboardInterrupt:
+            self.records[index] = replace(
+                self.records[index],
+                outcome=MutationRequestOutcome.CANCELLED_OR_INTERRUPTED,
+            )
+            raise
+        except Exception as error:
+            outcome = (
+                MutationRequestOutcome.CONTEXT_FAILURE
+                if "context" in str(error).casefold()
+                else MutationRequestOutcome.MODEL_ERROR
+            )
+            self.records[index] = replace(self.records[index], outcome=outcome)
+            raise
+        self.records[index] = replace(
+            self.records[index],
+            outcome=(
+                MutationRequestOutcome.COMPLETED_NO_PROPOSAL
+                if response.text.strip()
+                else MutationRequestOutcome.OUTPUT_MALFORMED
+            ),
+        )
+        return response
 
     def close(self) -> None:
         self.backend.close()

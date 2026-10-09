@@ -47,6 +47,8 @@ class CellResult:
     full_task_oracle_identity: str
     authority_paths: tuple[str, ...]
     paired_input_identity: dict[str, object]
+    mutation_requests: tuple[dict[str, object], ...]
+    proposal_request_lineage: dict[str, str]
     proposal: dict[str, object]
     obligation_oracle_pass: bool | None
     full_task_semantic_pass: bool
@@ -120,6 +122,8 @@ def run_cell(
         full_oracle,
         task.allowed_paths,
         inner.paired_input_identity,
+        inner.mutation_requests,
+        inner.proposal_request_lineage,
         asdict(inner.primary),
         obligation_pass,
         inner.primary.semantic_pass,
