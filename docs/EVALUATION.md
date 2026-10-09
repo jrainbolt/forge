@@ -2005,3 +2005,25 @@ chat, evaluation selections, or explicit profile overrides. Existing grounding,
 permissions, transaction, verification, and repair gates remain the safeguards for
 weak create and mixed cases; no routing, fallback, retry, or task-class switching
 was introduced. Configure `[defaults] coding_profile = "qwen-small"` to revert.
+## A80 coding-default operational validation
+
+A80 exercised the production coding-role default on a frozen ten-task complete-
+workflow corpus: two single edits, two multi-file edits, three creates, and three
+mixed edit/create tasks. All ten implicit selections resolved qwen-large, reached
+model execution, produced schema-valid and production-validatable proposals, and
+applied transactions. Eight passed verification and four passed the primary
+semantic oracle.
+
+The two single edits passed; one of two multi-file edits passed. Create results
+were 1/3 semantic despite 3/3 verification: the two failures were valid applied
+files with wrong behavior, not protocol, authority, construction, or integration
+failures. All three mixed proposals contained the required edit and create roles,
+materialized, validated, and applied, but none passed semantics; their dominant
+failure was partial implementation rather than operation-set incompleteness.
+
+Four representative implicit/explicit qwen-large pairs had equivalent task,
+grounding, authority, representation, generation, verification, and oracle
+identities and identical protocol/application/semantic outcomes. One explicit
+qwen-small smoke confirmed the override remains available. Repair ran once without
+verification or semantic recovery. No default-selection, instrumentation, context,
+or model-load defect was observed, so production behavior remains unchanged.

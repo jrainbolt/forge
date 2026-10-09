@@ -2496,3 +2496,16 @@ can set `[defaults] coding_profile = "qwen-small"` to roll back. No automatic
 fallback or model routing exists. Create reliability remains limited at 1/3 and
 mixed edit/create remains unproven at 0/3, so existing generic safety and
 verification gates remain mandatory.
+## A80 — Coding-default operational validation
+
+A80 validates the A79 qwen-large coding default through ten frozen realistic
+workflows plus four explicit-qwen-large equivalence controls and one explicit-
+qwen-small escape-hatch smoke. Default resolution succeeded in 10/10 cells, every
+primary proposal was schema-valid and applied, verification passed 8/10, and the
+semantic result was 4/10. Implicit and explicit qwen-large behavior matched on all
+four representative controls.
+
+The remaining weakness is semantic rather than selection or transaction plumbing.
+Create passed 1/3 despite 3/3 verification, and mixed edit/create passed 0/3 even
+though every required operation role was present and applied. A80 therefore adds no
+routing, fallback, retry, prompt, budget, or production-orchestration change.
