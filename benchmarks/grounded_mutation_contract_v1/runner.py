@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -115,6 +116,8 @@ def run_cell(
     repository_identity: str,
     corpus_identity: str,
     representation: MutationRepresentationPolicy,
+    primary_workspace_callback: Callable[[Path], None] | None = None,
+    final_workspace_callback: Callable[[Path], None] | None = None,
 ) -> CellResult:
     trusted = frozenset(definition.production_task.allowed_paths)
     contract_model = (
@@ -147,6 +150,12 @@ def run_cell(
             primary_semantic[str(applied[-1]["proposal_observation_id"])] = run_oracle(
                 workspace, task.oracle_commands
             ).value
+            if primary_workspace_callback is not None:
+                primary_workspace_callback(workspace)
+
+    def result_callback(_task, workspace: Path, _result) -> None:  # type: ignore[no-untyped-def]
+        if final_workspace_callback is not None:
+            final_workspace_callback(workspace)
 
     raw = (
         RealWorldEvaluationRunner(
@@ -156,6 +165,7 @@ def run_cell(
             mutation_representation=representation,
             primary_mutation_callback=primary_callback,
             proposal_evidence_callback=evidence_callback,
+            result_callback=result_callback,
         )
         .run(
             (replace(definition.production_task, seeds=(SEED,)),),

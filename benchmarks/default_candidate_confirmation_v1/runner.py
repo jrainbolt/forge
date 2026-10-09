@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import statistics
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -102,6 +103,8 @@ def run_cell(
     corpus_identity: str,
     representation: MutationRepresentationPolicy,
     run_identity: str = RUN_ID,
+    primary_workspace_callback: Callable[[Path], None] | None = None,
+    final_workspace_callback: Callable[[Path], None] | None = None,
 ) -> CellResult:
     workflow = begin_workflow_attempt(
         definition,
@@ -132,6 +135,8 @@ def run_cell(
         repository_identity=repository_identity,
         corpus_identity=corpus_identity,
         representation=representation,
+        primary_workspace_callback=primary_workspace_callback,
+        final_workspace_callback=final_workspace_callback,
     )
     semantic = bool(inner.full_task_semantic_pass)
     failure = classify_failure(

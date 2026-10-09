@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -70,6 +71,8 @@ def run_cell(
     repository_identity: str,
     corpus_identity: str,
     representation: MutationRepresentationPolicy,
+    primary_workspace_callback: Callable[[Path], None] | None = None,
+    final_workspace_callback: Callable[[Path], None] | None = None,
 ) -> CellResult:
     if condition is Condition.F1 and (obligation is None or not obligation.isolatable):
         raise ValueError("F1 requires one isolatable production obligation")
@@ -93,6 +96,8 @@ def run_cell(
         repository_identity=repository_identity,
         corpus_identity=corpus_identity,
         representation=representation,
+        primary_workspace_callback=primary_workspace_callback,
+        final_workspace_callback=final_workspace_callback,
     )
     full_oracle = _full_oracle(definition)
     goal_identity = (
