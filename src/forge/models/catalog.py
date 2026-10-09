@@ -36,6 +36,30 @@ class MutationRepresentationPolicy(Enum):
     LINE_RANGE = "line_range"
 
 
+class ModelRole(Enum):
+    """Application role used to resolve an optional configured default profile."""
+
+    CHAT = "chat"
+    REPOSITORY = "repository"
+    CODING = "coding"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelDefaults:
+    """Profile names selected when a role has no explicit CLI override."""
+
+    chat_profile: str | None = None
+    repository_profile: str | None = None
+    coding_profile: str | None = "qwen-large"
+
+    def profile_for(self, role: ModelRole) -> str | None:
+        return {
+            ModelRole.CHAT: self.chat_profile,
+            ModelRole.REPOSITORY: self.repository_profile,
+            ModelRole.CODING: self.coding_profile,
+        }[role]
+
+
 @dataclass(frozen=True, slots=True)
 class BackendDefinition:
     """The parsing and construction functions owned by one backend."""
@@ -103,6 +127,7 @@ class ModelCatalog:
         profiles: Iterable[ModelProfile],
         registry: BackendRegistry,
         project_commands: ProjectCommands | None = None,
+        defaults: ModelDefaults | None = None,
     ) -> None:
         copied: dict[str, ModelProfile] = {}
         for profile in profiles:
@@ -118,6 +143,7 @@ class ModelCatalog:
         self._profiles = MappingProxyType(copied)
         self._registry = registry
         self._project_commands = project_commands or ProjectCommands()
+        self._defaults = defaults or ModelDefaults()
 
     @property
     def project_commands(self) -> ProjectCommands:
@@ -139,6 +165,25 @@ class ModelCatalog:
     def create(self, name: str) -> Model:
         """Construct only the explicitly selected profile."""
         return self._registry.build(self.profile(name))
+
+    def resolve_profile(self, explicit: str | None, role: ModelRole) -> str:
+        """Resolve an explicit selection or the configured default for one role."""
+        if explicit is not None:
+            self.profile(explicit)
+            return explicit
+        selected = self._defaults.profile_for(role)
+        if selected is None:
+            raise ModelSelectionError(
+                f"no default model profile is configured for {role.value}"
+            )
+        try:
+            self.profile(selected)
+        except ModelSelectionError as error:
+            raise ModelSelectionError(
+                f"default {role.value} model profile {selected!r} is unavailable: "
+                f"{error}"
+            ) from error
+        return selected
 
 
 def default_backend_registry() -> BackendRegistry:
@@ -164,7 +209,7 @@ def load_model_catalog(path: Path, registry: BackendRegistry) -> ModelCatalog:
             f"cannot load model configuration {config_path}: {error}"
         ) from error
 
-    unknown_root = set(document) - {"models", "project"}
+    unknown_root = set(document) - {"models", "project", "defaults"}
     if unknown_root:
         raise ModelConfigurationError(
             f"unknown top-level configuration keys: {_format_keys(unknown_root)}"
@@ -186,7 +231,35 @@ def load_model_catalog(path: Path, registry: BackendRegistry) -> ModelCatalog:
         raise ModelConfigurationError(
             f"invalid project configuration: {error}"
         ) from error
-    return ModelCatalog(profiles, registry, project_commands)
+    return ModelCatalog(
+        profiles,
+        registry,
+        project_commands,
+        _parse_defaults(document.get("defaults")),
+    )
+
+
+def _parse_defaults(raw: object) -> ModelDefaults:
+    if raw is None:
+        return ModelDefaults()
+    if not isinstance(raw, dict):
+        raise ModelConfigurationError("[defaults] must be a TOML table")
+    allowed = {"chat_profile", "repository_profile", "coding_profile"}
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ModelConfigurationError(
+            f"[defaults] has unknown keys: {_format_keys(unknown)}"
+        )
+    values: dict[str, str | None] = {
+        "chat_profile": None,
+        "repository_profile": None,
+        "coding_profile": "qwen-large",
+    }
+    for key, value in raw.items():
+        if not isinstance(value, str) or not value.strip():
+            raise ModelConfigurationError(f"defaults.{key} must be non-empty text")
+        values[key] = value.strip()
+    return ModelDefaults(**values)
 
 
 def _parse_profile(

@@ -200,11 +200,26 @@ individually approved file mutations and configured project verification:
 
 ```bash
 forge chat \
-  --model qwen-large \
   --config ~/Models/forge/forge.toml \
   --workspace . \
   --assist
 ```
+
+Coding modes (`assist`, `agent`, and `repair`) use the configured coding-profile
+default when `--model` is omitted. The built-in coding default is `qwen-large`;
+ordinary chat, read-only repository chat, and evaluations still require an explicit
+profile. Any explicit `--model` selection wins. To choose a different coding default,
+including reverting to qwen-small, add this machine-local configuration:
+
+```toml
+[defaults]
+coding_profile = "qwen-small"
+```
+
+This selects only a profile name; GGUF paths remain in the user-owned model tables.
+There is no automatic fallback if the selected default is absent or fails to load.
+Qwen-large is stronger overall in accepted coding evaluations, but create reliability
+remains limited and mixed edit/create behavior remains weak.
 
 Normal `--workspace` mode remains read-only. In assist mode, reads are allowed,
 Forge may inspect source, propose at most one successful code mutation for each user

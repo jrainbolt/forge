@@ -224,11 +224,20 @@ def test_eval_loads_model_once_writes_only_explicit_report(
     assert "Evaluation workspace:" in capsys.readouterr().out
 
 
-def test_chat_requires_explicit_model(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as exit_info:
-        main(["chat", "--config", "forge.toml"])
-    assert exit_info.value.code == 2
-    assert "--model" in capsys.readouterr().err
+def test_normal_chat_still_requires_explicit_model(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Catalog:
+        def resolve_profile(self, _explicit: None, role: object) -> str:
+            raise ModelSelectionError(
+                f"no default model profile is configured for {role.value}"
+            )
+
+    monkeypatch.setattr("forge.cli.load_model_catalog", lambda *_args: Catalog())
+    assert main(["chat", "--config", str(tmp_path / "forge.toml")]) == 2
+    assert "no default model profile is configured for chat" in caplog.text
 
 
 def test_chat_requires_configuration_path(

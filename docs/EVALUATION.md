@@ -1983,3 +1983,25 @@ changed. Source-free diagnostics remain outside the package under
 `/tmp/forge-a69-group-validation-boundary-v1`. Canonical Foundation's
 source-only identity remained
 `f68c32e4eca8e15735ac526b294408621525bdbd6cf52d0f7b8c3c1f834f75ad`.
+## A79 production coding default review
+
+A79 reviewed qwen-large using accepted evidence rather than rerunning broad
+benchmarks. A77 atomic semantic results were 11/12 for qwen-large and 4/12 for
+qwen-small. A78 complete-workflow primary results were 5/12 and 1/12, followed by
+2/4 and 0/4 on the seed-43 confirmation. Qwen-large was strongest on single-file
+edits (3/3), remained partial on multi-file edits (1/3), passed only 1/3 create
+tasks, and passed 0/3 mixed edit/create tasks.
+
+On the reviewed local hardware, unchanged 8192-context artifacts loaded
+successfully. Qwen-small's 4,683,073,536-byte artifact loaded in 2.58 seconds with
+5.23 GB peak resident memory; qwen-large's 18,632,186,176-byte artifact loaded in
+5.78 seconds with 19.48 GB peak resident memory. Neither fresh-process measurement
+swapped. A78 median cell generation latency was 8.547 seconds for qwen-small and
+8.488 seconds for qwen-large.
+
+The accepted capability gain and practical local operation justify qwen-large as
+the coding-role default. This does not change general chat, read-only repository
+chat, evaluation selections, or explicit profile overrides. Existing grounding,
+permissions, transaction, verification, and repair gates remain the safeguards for
+weak create and mixed cases; no routing, fallback, retry, or task-class switching
+was introduced. Configure `[defaults] coding_profile = "qwen-small"` to revert.

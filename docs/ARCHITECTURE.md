@@ -74,6 +74,18 @@ and opaque backend-owned configuration. `ModelCatalog` provides immutable
 lookup and constructs only the selected profile. Listing profiles and reading
 their metadata never loads model weights.
 
+`ModelDefaults` maps application roles to optional profile names. CLI composition
+resolves an explicit profile first, then the selected role default; orchestration
+receives only the resulting generic `Model`. Coding roles default to `qwen-large`.
+General chat and read-only repository roles intentionally have no implicit default,
+and evaluation commands remain explicitly model-selected. A missing or unloadable
+default is surfaced normally—selection never falls back to another profile.
+
+The role mapping is configuration-only and reversible. A user-owned
+`[defaults] coding_profile = "qwen-small"` entry restores the former coding choice
+without migrations or state changes. Model artifact paths remain backend-owned,
+machine-local configuration and never enter orchestration.
+
 `BackendRegistry` is an explicit immutable dependency, not a process-global
 service locator. Each `BackendDefinition` owns both validation of its native
 settings and construction of its `Model` implementation. The default registry

@@ -2481,3 +2481,18 @@ Evaluator-only V1 mirrors these production prerequisites. It rejects Codestral
 F06/F08/F09 as `PROVENANCE_MISMATCH` and accepts the qwen-small F05 G1,
 qwen-small F09 G0, and synthetic transaction controls. Production behavior and
 strictness remain unchanged. A70 has not begun.
+## A79 — Qwen-large production coding default review
+
+A79 accepts qwen-large as the default profile for coding roles after A77 showed an
+11/12 versus 4/12 atomic advantage and A78 showed a 5/12 versus 1/12 full-workflow
+advantage, retained at 2/4 versus 0/4 under seed-43 confirmation. Local operational
+review found the larger 18.63 GB artifact practical on the target hardware, with a
+5.78-second fresh load, 19.48 GB peak resident memory, no swapping, and no A78
+interactive-latency regression.
+
+The change is deliberately narrow and reversible: ordinary chat, read-only
+repository chat, evaluations, and explicit profile choices remain unchanged; users
+can set `[defaults] coding_profile = "qwen-small"` to roll back. No automatic
+fallback or model routing exists. Create reliability remains limited at 1/3 and
+mixed edit/create remains unproven at 0/3, so existing generic safety and
+verification gates remain mandatory.

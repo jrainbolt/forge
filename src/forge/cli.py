@@ -31,6 +31,7 @@ from forge.models import (
     GenerationConfig,
     ModelConfigurationError,
     ModelError,
+    ModelRole,
     ModelSelectionError,
     MutationRepresentationPolicy,
     default_backend_registry,
@@ -68,7 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command")
     chat = commands.add_parser("chat", help="start an interactive local chat")
-    chat.add_argument("--model", required=True, help="configured model profile name")
+    chat.add_argument(
+        "--model",
+        help=(
+            "configured model profile name (coding modes use their configured default)"
+        ),
+    )
     chat.add_argument(
         "--config",
         type=Path,
@@ -271,9 +277,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 seed=args.seed,
             )
             catalog = load_model_catalog(config_path, default_backend_registry())
-            LOGGER.info("Selected model profile %s", args.model)
+            profile_name = _resolve_model_profile(catalog, args.model, mode)
+            LOGGER.info("Selected model profile %s", profile_name)
             load_started = time.perf_counter()
-            model = catalog.create(args.model)
+            model = catalog.create(profile_name)
             if bool(args.embedding_config) != bool(args.embedding_profile):
                 raise ValueError(
                     "--embedding-config and --embedding-profile must be "
@@ -291,12 +298,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             LOGGER.debug(
                 "Loaded model profile %s in %.2f seconds",
-                args.model,
+                profile_name,
                 time.perf_counter() - load_started,
             )
             if mode is AutonomyMode.CHAT:
                 session = ChatSession(
-                    args.model,
+                    profile_name,
                     model,
                     generation=generation,
                     system_message=(None if args.no_system else DEFAULT_SYSTEM_MESSAGE),
@@ -305,10 +312,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 repository_index = RepositoryIndex(args.workspace)
                 lexical_index = RepositoryLexicalIndex(args.workspace)
                 profile = (
-                    catalog.profile(args.model) if hasattr(catalog, "profile") else None
+                    catalog.profile(profile_name)
+                    if hasattr(catalog, "profile")
+                    else None
                 )
                 session = RepositoryChatSession(
-                    args.model,
+                    profile_name,
                     model,
                     args.workspace,
                     generation=generation,
@@ -443,3 +452,23 @@ def _resolve_chat_mode(args: argparse.Namespace) -> AutonomyMode:
     if args.assist:
         return AutonomyMode.ASSIST
     return AutonomyMode.READ if args.workspace is not None else AutonomyMode.CHAT
+
+
+def _resolve_model_profile(
+    catalog: object, explicit: str | None, mode: AutonomyMode
+) -> str:
+    if explicit is not None:
+        return explicit
+    role = (
+        ModelRole.CODING
+        if mode.coding_mode
+        else ModelRole.REPOSITORY
+        if mode.repository_mode
+        else ModelRole.CHAT
+    )
+    resolver = getattr(catalog, "resolve_profile", None)
+    if resolver is None:
+        raise ModelSelectionError(
+            f"no default model profile is configured for {role.value}; use --model"
+        )
+    return resolver(None, role)
