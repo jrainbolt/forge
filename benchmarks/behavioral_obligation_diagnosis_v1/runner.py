@@ -46,14 +46,16 @@ class CellResult:
     oracle_identity: str
     full_task_oracle_identity: str
     authority_paths: tuple[str, ...]
-    paired_input_identity: dict[str, object]
+    paired_input_identity: dict[str, object] | None
     mutation_requests: tuple[dict[str, object], ...]
     proposal_request_lineage: dict[str, str]
+    proposal_transaction_lineage: dict[str, tuple[str, ...]]
     proposal: dict[str, object]
     obligation_oracle_pass: bool | None
     full_task_semantic_pass: bool
     repair: dict[str, object] | None
     failure: str
+    workflow_trace: dict[str, object]
 
 
 def run_cell(
@@ -124,11 +126,13 @@ def run_cell(
         inner.paired_input_identity,
         inner.mutation_requests,
         inner.proposal_request_lineage,
+        inner.proposal_transaction_lineage,
         asdict(inner.primary),
         obligation_pass,
         inner.primary.semantic_pass,
         asdict(inner.repair) if inner.repair else None,
         inner.failure,
+        inner.workflow_trace,
     )
 
 

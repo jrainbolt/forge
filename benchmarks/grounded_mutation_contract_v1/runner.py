@@ -78,9 +78,10 @@ class CellResult:
     repository_identity: str
     model_artifact: str
     model_config_identity: str
-    paired_input_identity: dict[str, object]
+    paired_input_identity: dict[str, object] | None
     mutation_requests: tuple[dict[str, object], ...]
     proposal_request_lineage: dict[str, str]
+    proposal_transaction_lineage: dict[str, tuple[str, ...]]
     contract: dict[str, object] | None
     primary: Outcome
     repair: Outcome | None
@@ -88,6 +89,7 @@ class CellResult:
     contract_diagnosis: str | None
     observation_count: int
     final_status: str
+    workflow_trace: dict[str, object]
 
 
 def _task_identity(case: PlanningCase, definition: FrozenTask) -> str:
@@ -238,12 +240,16 @@ def run_cell(
         for record in request_records
         for proposal_id in record.proposal_observation_ids
     }
+    transaction_lineage: dict[str, list[str]] = {}
+    for item in raw.proposal_evidence:
+        proposal_id = item.get("proposal_observation_id")
+        attempt_id = item.get("transaction_attempt_id")
+        if isinstance(proposal_id, str) and isinstance(attempt_id, str):
+            transaction_lineage.setdefault(proposal_id, []).append(attempt_id)
     primary_id = proposal_ids[0] if proposal_ids else None
     repair_id = proposal_ids[1] if len(proposal_ids) > 1 else None
     primary = outcome(0 if primary_id else None, primary_id)
     repair = outcome(1, repair_id) if repair_id else None
-    if paired_capture.record is None:
-        raise RuntimeError("A75 request-time paired identity was not captured")
     contract = (
         asdict(contract_model.record)
         if contract_model and contract_model.record
@@ -289,9 +295,10 @@ def run_cell(
         repository_identity,
         artifact,
         model_config_identity,
-        asdict(paired_capture.record),
+        asdict(paired_capture.record) if paired_capture.record is not None else None,
         tuple(asdict(record) for record in request_records),
         lineage,
+        {key: tuple(value) for key, value in transaction_lineage.items()},
         contract,
         primary,
         repair,
@@ -299,6 +306,18 @@ def run_cell(
         diagnosis,
         len(metadata),
         raw.final_status,
+        {
+            "status": raw.status.value,
+            "failure": raw.failure.value if raw.failure is not None else None,
+            "model_calls": raw.metrics.model_calls,
+            "tool_executions": raw.metrics.tool_executions,
+            "discovery_calls": raw.metrics.discovery_calls,
+            "source_reads": raw.metrics.source_reads,
+            "mutation_ready_reached": raw.metrics.mutation_ready_reached,
+            "structured_mutation_attempts": raw.metrics.structured_mutation_attempts,
+            "mutation_proposed": raw.metrics.mutation_proposed,
+            "final_status": raw.final_status,
+        },
     )
 
 

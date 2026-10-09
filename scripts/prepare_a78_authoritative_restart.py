@@ -44,6 +44,7 @@ def main() -> int:
             "planned_cells": len(tasks()) * len(PROFILES),
             "executed_cells": 0,
             "historical_cells_reused": 0,
+            "workflow_identity_version": 1,
             "request_identity_version": 1,
         },
     )
