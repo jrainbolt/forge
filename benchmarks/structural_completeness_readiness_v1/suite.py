@@ -16,8 +16,8 @@ from benchmarks.realistic_coding_v2.suite import tasks as realistic_tasks
 from benchmarks.structural_completeness_shadow_v1.suite import CASES as A83_CASES
 
 SUITE = "structural-completeness-readiness-v1"
-VERSION = 1
-RUN_ID = "a84-structural-completeness-readiness-v1"
+VERSION = 5
+RUN_ID = "a84-structural-completeness-readiness-v5-checker-correction"
 MAX_MEDIAN_CHECKER_LATENCY_SECONDS = 0.25
 MAX_WORST_CHECKER_LATENCY_SECONDS = 2.0
 COMPILER_TIMEOUT_SECONDS = 2
@@ -296,7 +296,9 @@ ADDITIONAL = {
 def _truth(task_id: str, prior: str) -> str:
     if task_id in {"H11", "C11"}:
         return "KNOWN_STRUCTURAL_MISS"
-    if task_id in {"H07", "H09", "H10", "H12", "C09"}:
+    if task_id == "H12":
+        return "SEMANTIC_NEGATIVE_STRUCTURAL_MISS"
+    if task_id in {"H07", "H09", "H10", "C09"}:
         return "SEMANTIC_NEGATIVE_STRUCTURAL_PASS"
     if task_id in {"H02", "C01"}:
         return "NO_STRUCTURAL_OBLIGATION"

@@ -29,7 +29,10 @@ def main() -> int:
         cells.append(cell)
     model_cells = [cell for cell in cells if cell["model_call"]]
     misses = [
-        cell for cell in cells if cell["structural_truth"] == "KNOWN_STRUCTURAL_MISS"
+        cell
+        for cell in cells
+        if cell["structural_truth"]
+        in {"KNOWN_STRUCTURAL_MISS", "SEMANTIC_NEGATIVE_STRUCTURAL_MISS"}
     ]
     controls = [
         cell
@@ -46,6 +49,8 @@ def main() -> int:
         cell
         for cell in controls
         if cell["primary_shadow"]["decision"] == "STRUCTURAL_SHADOW_FAIL"
+        and cell["verification_pass"] is True
+        and cell["semantic_pass"] is True
     ]
     missed = [
         cell
@@ -74,7 +79,10 @@ def main() -> int:
         cell
         for cell in cells
         if cell["offline_policy_action"] == "BLOCK"
-        and cell["structural_truth"] != "KNOWN_STRUCTURAL_MISS"
+        and cell["structural_truth"]
+        not in {"KNOWN_STRUCTURAL_MISS", "SEMANTIC_NEGATIVE_STRUCTURAL_MISS"}
+        and cell["verification_pass"] is True
+        and cell["semantic_pass"] is True
     ]
     criteria = {
         "zero_false_fails": not false_fails,

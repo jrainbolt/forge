@@ -45,6 +45,33 @@ def _python_tree(source: str) -> ast.Module | None:
         return None
 
 
+def _python_has_invalid_indentation(source: str) -> bool:
+    try:
+        ast.parse(source)
+    except IndentationError:
+        return True
+    except SyntaxError:
+        return False
+    return False
+
+
+def _c_include_relation(
+    workspace: Path, source_path: str, target_path: str, source: str
+) -> EvaluationDetail:
+    root = workspace.resolve()
+    including = (root / source_path).resolve()
+    target = (root / target_path).resolve()
+    for match in re.finditer(r'^\s*#\s*include\s*"([^"]+)"', source, re.MULTILINE):
+        resolved = (including.parent / match.group(1)).resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            return EvaluationDetail(NOT_CHECKABLE, "INCLUDE_WORKSPACE_ESCAPE")
+        if resolved == target:
+            return EvaluationDetail(COMPLETE if resolved.is_file() else INCOMPLETE)
+    return EvaluationDetail(INCOMPLETE)
+
+
 def _python_symbol(tree: ast.Module, symbol: str) -> bool:
     return any(
         isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
@@ -159,12 +186,16 @@ def evaluate_detailed(check: CompletenessCheck, workspace: Path) -> EvaluationDe
     if not is_python and not is_c:
         return EvaluationDetail(NOT_CHECKABLE, "UNSUPPORTED_LANGUAGE")
     tree = _python_tree(source) if is_python else None
+    if is_python and tree is None and _python_has_invalid_indentation(source):
+        return EvaluationDetail(INCOMPLETE)
     if is_python and tree is None:
         return EvaluationDetail(NOT_CHECKABLE, "PARSER_FAILURE")
 
     if check.kind is CheckKind.REQUIRED_SYMBOL_PRESENCE:
         if check.symbol is None:
             return EvaluationDetail(NOT_CHECKABLE, "CHECK_DEFINITION_INCOMPLETE")
+        if is_python and tree is None:
+            return EvaluationDetail(NOT_CHECKABLE, "PARSER_FAILURE")
         found = (
             _python_symbol(tree, check.symbol)
             if tree is not None
@@ -175,6 +206,8 @@ def evaluate_detailed(check: CompletenessCheck, workspace: Path) -> EvaluationDe
     if check.kind is CheckKind.REQUIRED_COMPONENT_ROLE:
         if check.symbol is None:
             return EvaluationDetail(NOT_CHECKABLE, "CHECK_DEFINITION_INCOMPLETE")
+        if is_python and tree is None:
+            return EvaluationDetail(NOT_CHECKABLE, "PARSER_FAILURE")
         if tree is not None:
             return EvaluationDetail(
                 COMPLETE if _python_symbol(tree, check.symbol) else INCOMPLETE
@@ -189,12 +222,8 @@ def evaluate_detailed(check: CompletenessCheck, workspace: Path) -> EvaluationDe
         if is_python:
             found = _python_import(tree, check.target_path, check.symbol)  # type: ignore[arg-type]
         else:
-            found = bool(
-                re.search(
-                    rf'^\s*#\s*include\s*["<]{re.escape(Path(check.target_path).name)}[">]',
-                    source,
-                    re.MULTILINE,
-                )
+            return _c_include_relation(
+                workspace, check.source_path, check.target_path, source
             )
         return EvaluationDetail(COMPLETE if found else INCOMPLETE)
 
