@@ -13,7 +13,7 @@ from benchmarks.production_detectable_completeness_v1.checker import (
     COMPLETE,
     INCOMPLETE,
     NOT_CHECKABLE,
-    evaluate,
+    evaluate_detailed,
 )
 from benchmarks.realistic_coding_v2.suite import FrozenTask
 from benchmarks.transaction_readiness_v1.runner import standard_result_is_source_free
@@ -33,6 +33,8 @@ class ShadowCheckResult:
     status: str
     latency_seconds: float
     compiler_subprocess: bool
+    operational_failure: str | None = None
+    subprocess_exit: str = "NOT_INVOKED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,9 +92,14 @@ def _once(case: ShadowCase, workspace: Path) -> tuple[ShadowCheckResult, ...]:
             and check.source_path.endswith(".c")
         )
         try:
-            status = evaluate(check, workspace)
+            detail = evaluate_detailed(check, workspace)
+            status = detail.status
+            operational_failure = detail.operational_failure
+            subprocess_exit = detail.subprocess_exit
         except Exception:  # Shadow observation must never alter the workflow.
             status = NOT_CHECKABLE
+            operational_failure = "CHECKER_INTERNAL_ERROR"
+            subprocess_exit = "NOT_INVOKED"
         results.append(
             ShadowCheckResult(
                 check.check_id,
@@ -105,6 +112,8 @@ def _once(case: ShadowCase, workspace: Path) -> tuple[ShadowCheckResult, ...]:
                 status,
                 time.perf_counter() - started,
                 compiler,
+                operational_failure,
+                subprocess_exit,
             )
         )
     return tuple(results)
@@ -171,6 +180,7 @@ def run_cell(
     repository_identity: str,
     corpus_identity: str,
     representation: MutationRepresentationPolicy,
+    run_identity: str = RUN_ID,
 ) -> ShadowCell:
     primary: list[ShadowSnapshot] = []
     final: list[ShadowSnapshot] = []
@@ -191,7 +201,7 @@ def run_cell(
         repository_identity=repository_identity,
         corpus_identity=corpus_identity,
         representation=representation,
-        run_identity=RUN_ID,
+        run_identity=run_identity,
         primary_workspace_callback=inspect_primary,
         final_workspace_callback=inspect_final,
     )
@@ -205,7 +215,7 @@ def run_cell(
     return ShadowCell(
         SUITE,
         VERSION,
-        RUN_ID,
+        run_identity,
         corpus_identity,
         definition.task_id,
         definition.operation_class.value,

@@ -73,7 +73,7 @@ def test_shadow_mode_never_blocks_on_checker_exception(
     def fail(*_args, **_kwargs):  # type: ignore[no-untyped-def]
         raise RuntimeError("observer failure")
 
-    monkeypatch.setattr(runner, "evaluate", fail)
+    monkeypatch.setattr(runner, "evaluate_detailed", fail)
     snapshot = observe(_case(), tmp_path)
     assert snapshot.decision == "STRUCTURAL_SHADOW_PARTIAL"
 

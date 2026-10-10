@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from .suite import CheckKind, CompletenessCheck
@@ -13,6 +15,15 @@ COMPLETE = "COMPLETE"
 INCOMPLETE = "INCOMPLETE"
 NOT_CHECKABLE = "NOT_CHECKABLE"
 AMBIGUOUS = "AMBIGUOUS"
+ALLOWED_EXECUTABLES = frozenset({"/usr/bin/cc"})
+COMPILER_TIMEOUT_SECONDS = 2
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationDetail:
+    status: str
+    operational_failure: str | None = None
+    subprocess_exit: str = "NOT_INVOKED"
 
 
 def _read(workspace: Path, relative: str) -> str | None:
@@ -87,12 +98,26 @@ def _c_symbol(source: str, symbol: str, *, definition: bool) -> bool:
     return bool(re.search(rf"\b{re.escape(symbol)}\s*\([^;{{}}]*\){ending}", source))
 
 
-def _c_component_role(workspace: Path, source_path: str) -> bool:
-    source = workspace / source_path
+def _c_component_role(
+    workspace: Path, source_path: str, *, executable: str = "/usr/bin/cc"
+) -> EvaluationDetail:
+    if executable not in ALLOWED_EXECUTABLES:
+        return EvaluationDetail(NOT_CHECKABLE, "EXECUTABLE_NOT_ALLOWLISTED")
+    source = (workspace / source_path).resolve()
+    try:
+        source.relative_to(workspace.resolve())
+    except ValueError:
+        return EvaluationDetail(NOT_CHECKABLE, "WORKSPACE_CONFINEMENT_FAILURE")
+    environment = {
+        "PATH": "/usr/bin:/bin",
+        "LC_ALL": "C",
+        "LANG": "C",
+        "TMPDIR": os.environ.get("TMPDIR", "/tmp"),
+    }
     try:
         completed = subprocess.run(
             (
-                "/usr/bin/cc",
+                executable,
                 "-std=c17",
                 "-Wall",
                 "-Werror",
@@ -105,53 +130,62 @@ def _c_component_role(workspace: Path, source_path: str) -> bool:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=30,
+            timeout=COMPILER_TIMEOUT_SECONDS,
             check=False,
+            shell=False,
+            env=environment,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return completed.returncode == 0
+    except subprocess.TimeoutExpired:
+        return EvaluationDetail(NOT_CHECKABLE, "COMPILER_TIMEOUT", "TIMEOUT")
+    except OSError:
+        return EvaluationDetail(NOT_CHECKABLE, "COMPILER_UNAVAILABLE")
+    if completed.returncode == 0:
+        return EvaluationDetail(COMPLETE, subprocess_exit="EXIT_ZERO")
+    return EvaluationDetail(INCOMPLETE, subprocess_exit="EXIT_NONZERO")
 
 
-def evaluate(check: CompletenessCheck, workspace: Path) -> str:
+def evaluate_detailed(check: CompletenessCheck, workspace: Path) -> EvaluationDetail:
     if any(
         path.startswith("/") or ".." in Path(path).parts
         for path in check.authorized_scope
     ):
-        return NOT_CHECKABLE
+        return EvaluationDetail(NOT_CHECKABLE, "WORKSPACE_CONFINEMENT_FAILURE")
     source = _read(workspace, check.source_path)
     if source is None:
-        return INCOMPLETE
+        return EvaluationDetail(INCOMPLETE)
     target = _read(workspace, check.target_path) if check.target_path else None
     is_python = check.source_path.endswith(".py")
+    is_c = check.source_path.endswith((".c", ".h"))
+    if not is_python and not is_c:
+        return EvaluationDetail(NOT_CHECKABLE, "UNSUPPORTED_LANGUAGE")
     tree = _python_tree(source) if is_python else None
     if is_python and tree is None:
-        return INCOMPLETE
+        return EvaluationDetail(NOT_CHECKABLE, "PARSER_FAILURE")
 
     if check.kind is CheckKind.REQUIRED_SYMBOL_PRESENCE:
         if check.symbol is None:
-            return NOT_CHECKABLE
+            return EvaluationDetail(NOT_CHECKABLE, "CHECK_DEFINITION_INCOMPLETE")
         found = (
             _python_symbol(tree, check.symbol)
             if tree is not None
             else _c_symbol(source, check.symbol, definition=True)
         )
-        return COMPLETE if found else INCOMPLETE
+        return EvaluationDetail(COMPLETE if found else INCOMPLETE)
 
     if check.kind is CheckKind.REQUIRED_COMPONENT_ROLE:
         if check.symbol is None:
-            return NOT_CHECKABLE
-        found = (
-            _python_symbol(tree, check.symbol)
-            if tree is not None
-            else _c_symbol(source, check.symbol, definition=True)
-            and _c_component_role(workspace, check.source_path)
-        )
-        return COMPLETE if found else INCOMPLETE
+            return EvaluationDetail(NOT_CHECKABLE, "CHECK_DEFINITION_INCOMPLETE")
+        if tree is not None:
+            return EvaluationDetail(
+                COMPLETE if _python_symbol(tree, check.symbol) else INCOMPLETE
+            )
+        if not _c_symbol(source, check.symbol, definition=True):
+            return EvaluationDetail(INCOMPLETE)
+        return _c_component_role(workspace, check.source_path)
 
     if check.kind is CheckKind.IMPORT_INCLUDE_RELATION:
         if check.target_path is None:
-            return NOT_CHECKABLE
+            return EvaluationDetail(NOT_CHECKABLE, "CHECK_DEFINITION_INCOMPLETE")
         if is_python:
             found = _python_import(tree, check.target_path, check.symbol)  # type: ignore[arg-type]
         else:
@@ -162,26 +196,35 @@ def evaluate(check: CompletenessCheck, workspace: Path) -> str:
                     re.MULTILINE,
                 )
             )
-        return COMPLETE if found else INCOMPLETE
+        return EvaluationDetail(COMPLETE if found else INCOMPLETE)
 
     if check.kind in {
         CheckKind.CALLER_CALLEE_RELATION,
         CheckKind.REGISTRATION_OR_USAGE_RELATION,
     }:
         if check.symbol is None:
-            return NOT_CHECKABLE
+            return EvaluationDetail(NOT_CHECKABLE, "CHECK_DEFINITION_INCOMPLETE")
         if is_python:
-            return COMPLETE if _calls(tree, check.caller, check.symbol) else INCOMPLETE  # type: ignore[arg-type]
+            return EvaluationDetail(
+                COMPLETE if _calls(tree, check.caller, check.symbol) else INCOMPLETE  # type: ignore[arg-type]
+            )
         found = bool(re.search(rf"\b{re.escape(check.symbol)}\s*\(", source))
-        return COMPLETE if found else INCOMPLETE
+        return EvaluationDetail(COMPLETE if found else INCOMPLETE)
 
     if check.kind is CheckKind.DECLARATION_IMPLEMENTATION_RELATION:
         if check.symbol is None or target is None:
-            return NOT_CHECKABLE if check.symbol is None else INCOMPLETE
+            return EvaluationDetail(
+                NOT_CHECKABLE if check.symbol is None else INCOMPLETE,
+                "CHECK_DEFINITION_INCOMPLETE" if check.symbol is None else None,
+            )
         declaration = _c_symbol(source, check.symbol, definition=False)
         implementation = _c_symbol(target, check.symbol, definition=True)
         if not declaration or not implementation:
-            return INCOMPLETE
-        return COMPLETE
+            return EvaluationDetail(INCOMPLETE)
+        return EvaluationDetail(COMPLETE)
 
-    return AMBIGUOUS
+    return EvaluationDetail(AMBIGUOUS, "UNSUPPORTED_CHECK_KIND")
+
+
+def evaluate(check: CompletenessCheck, workspace: Path) -> str:
+    return evaluate_detailed(check, workspace).status
