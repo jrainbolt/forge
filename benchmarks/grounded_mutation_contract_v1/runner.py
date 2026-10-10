@@ -46,6 +46,10 @@ from forge.evaluation.realworld import (
     run_oracle,
 )
 from forge.models import Model, MutationRepresentationPolicy
+from forge.structural_completeness import (
+    StructuralCompletenessEvaluator,
+    StructuralCompletenessMode,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +122,10 @@ def run_cell(
     representation: MutationRepresentationPolicy,
     primary_workspace_callback: Callable[[Path], None] | None = None,
     final_workspace_callback: Callable[[Path], None] | None = None,
+    structural_completeness_mode: StructuralCompletenessMode = (
+        StructuralCompletenessMode.SHADOW
+    ),
+    structural_completeness_evaluator: StructuralCompletenessEvaluator | None = None,
 ) -> CellResult:
     trusted = frozenset(definition.production_task.allowed_paths)
     contract_model = (
@@ -166,6 +174,8 @@ def run_cell(
             primary_mutation_callback=primary_callback,
             proposal_evidence_callback=evidence_callback,
             result_callback=result_callback,
+            structural_completeness_mode=structural_completeness_mode,
+            structural_completeness_evaluator=structural_completeness_evaluator,
         )
         .run(
             (replace(definition.production_task, seeds=(SEED,)),),

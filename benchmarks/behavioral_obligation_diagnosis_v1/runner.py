@@ -23,6 +23,10 @@ from benchmarks.realistic_coding_v2.suite import FrozenTask
 from benchmarks.transaction_readiness_v1.runner import standard_result_is_source_free
 from forge.evaluation.mutation_ready import atomic_checkpoint, resume_checkpoint
 from forge.models import Model, MutationRepresentationPolicy
+from forge.structural_completeness import (
+    StructuralCompletenessEvaluator,
+    StructuralCompletenessMode,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +77,10 @@ def run_cell(
     representation: MutationRepresentationPolicy,
     primary_workspace_callback: Callable[[Path], None] | None = None,
     final_workspace_callback: Callable[[Path], None] | None = None,
+    structural_completeness_mode: StructuralCompletenessMode = (
+        StructuralCompletenessMode.SHADOW
+    ),
+    structural_completeness_evaluator: StructuralCompletenessEvaluator | None = None,
 ) -> CellResult:
     if condition is Condition.F1 and (obligation is None or not obligation.isolatable):
         raise ValueError("F1 requires one isolatable production obligation")
@@ -98,6 +106,8 @@ def run_cell(
         representation=representation,
         primary_workspace_callback=primary_workspace_callback,
         final_workspace_callback=final_workspace_callback,
+        structural_completeness_mode=structural_completeness_mode,
+        structural_completeness_evaluator=structural_completeness_evaluator,
     )
     full_oracle = _full_oracle(definition)
     goal_identity = (

@@ -112,6 +112,11 @@ from forge.retrieval_bootstrap import (
 )
 from forge.retrieval_strategy import RetrievalMetrics, RetrievalState, RetrievalStrategy
 from forge.semantic_index import SemanticIndex, SemanticIndexError
+from forge.structural_completeness import (
+    StructuralCompletenessEvaluator,
+    StructuralCompletenessMode,
+    evaluate_structural_completeness,
+)
 from forge.tools import (
     ExecutionContext,
     InvocationApproval,
@@ -568,6 +573,12 @@ class RepositoryChatSession:
         ephemeral_review_callback: (
             Callable[[EphemeralAcceptancePreview], bool] | None
         ) = None,
+        structural_completeness_mode: StructuralCompletenessMode = (
+            StructuralCompletenessMode.SHADOW
+        ),
+        structural_completeness_evaluator: (
+            StructuralCompletenessEvaluator | None
+        ) = None,
     ) -> None:
         if not isinstance(model, Model):
             raise TypeError("model must implement Model")
@@ -658,6 +669,9 @@ class RepositoryChatSession:
         if not isinstance(include_repair_mutation_history, bool):
             raise TypeError("include_repair_mutation_history must be a Boolean")
         ephemeral_acceptance_mode = EphemeralAcceptanceMode(ephemeral_acceptance_mode)
+        structural_completeness_mode = StructuralCompletenessMode(
+            structural_completeness_mode
+        )
         self._profile_name = profile_name
         self._include_repair_mutation_history = include_repair_mutation_history
         self._ephemeral_mode = ephemeral_acceptance_mode
@@ -667,6 +681,8 @@ class RepositoryChatSession:
         self._ephemeral_gate: EphemeralAcceptanceGate | None = None
         self._ephemeral_generation_calls = 0
         self._ephemeral_task_text = ""
+        self._structural_completeness_mode = structural_completeness_mode
+        self._structural_completeness_evaluator = structural_completeness_evaluator
         self._model = model
         self._generation = generation or GenerationConfig(
             max_tokens=256, temperature=0.4
@@ -4048,13 +4064,19 @@ class RepositoryChatSession:
                         coding_task.ephemeral_acceptance_metrics = gate.metrics
                         if acceptance is not EphemeralAcceptanceState.POSTMUTATION_PASS:
                             coding_task.ephemeral_acceptance_failed(gate.metrics)
+                    structural_record = evaluate_structural_completeness(
+                        self._structural_completeness_mode,
+                        self._context.workspace,
+                        self._structural_completeness_evaluator,
+                    )
+                    coding_task.structural_completeness_finished(structural_record)
                     verification_operation = (
                         self._verification_plan.steps[0].removeprefix("project.")
                         if self._verification_plan is not None
                         else _configured_verification_operation(self._registry)
                     )
                     if coding_task.terminal:
-                        LOGGER.info("ephemeral_acceptance_blocked_full_verification")
+                        LOGGER.info("post_transaction_gate_blocked_full_verification")
                     elif self._skip_verification:
                         coding_task.verification_skipped()
                         LOGGER.debug("verification_skipped reason=caller")

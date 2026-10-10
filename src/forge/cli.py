@@ -347,6 +347,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "verification_plan",
                         None,
                     ),
+                    structural_completeness_mode=(
+                        getattr(catalog, "project_commands", None) or ProjectCommands()
+                    ).structural_completeness_mode,
                     ephemeral_acceptance_mode=ephemeral_mode,
                     ephemeral_acceptance_paths=tuple(args.acceptance_context_file),
                     ephemeral_acceptance_import_root=args.acceptance_import_root,

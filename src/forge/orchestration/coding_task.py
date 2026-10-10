@@ -13,6 +13,7 @@ from forge.orchestration.verification_attribution import (
     VerificationBaselineEvidence,
     VerificationPlanBaseline,
 )
+from forge.structural_completeness import StructuralCompletenessRecord
 
 
 class CodingTaskPhase(Enum):
@@ -50,6 +51,7 @@ class CodingTaskStatus(Enum):
     REPAIR_FAILED = "repair_failed"
     WORKSPACE_INTEGRITY_FAILED = "workspace_integrity_failed"
     EPHEMERAL_ACCEPTANCE_FAILED = "ephemeral_acceptance_failed"
+    STRUCTURAL_COMPLETENESS_REJECTED = "structural_completeness_rejected"
 
 
 class VerificationDecision(Enum):
@@ -290,6 +292,9 @@ class CodingTaskResult:
     ephemeral_acceptance_metrics: EphemeralAcceptanceMetrics = (
         EphemeralAcceptanceMetrics()
     )
+    structural_completeness: StructuralCompletenessRecord = (
+        StructuralCompletenessRecord()
+    )
 
     @property
     def footer(self) -> str:
@@ -357,6 +362,7 @@ class CodingTaskState:
         )
         self.verification_gate_metrics = VerificationGateMetrics()
         self.ephemeral_acceptance_metrics = EphemeralAcceptanceMetrics()
+        self.structural_completeness = StructuralCompletenessRecord()
         self.repair_evidence: RepairEvidence | None = None
         self.repair_grounding_metrics = RepairGroundingMetrics()
         self.verification_baseline: VerificationBaselineEvidence | None = None
@@ -1328,6 +1334,16 @@ class CodingTaskState:
         self.phase = CodingTaskPhase.FAILED
         self._terminal_status = CodingTaskStatus.EPHEMERAL_ACCEPTANCE_FAILED
 
+    def structural_completeness_finished(
+        self, record: StructuralCompletenessRecord
+    ) -> None:
+        """Record the post-transaction gate and stop only on proven enforcement."""
+        self.structural_completeness = record
+        if record.enforced_rejection:
+            self.repair_eligible = False
+            self.phase = CodingTaskPhase.REJECTED
+            self._terminal_status = CodingTaskStatus.STRUCTURAL_COMPLETENESS_REJECTED
+
     def decline_verification(self) -> None:
         if self.verification_decision is VerificationDecision.NOT_DECIDED:
             self.verification_decision = VerificationDecision.DECLINED
@@ -1398,6 +1414,7 @@ class CodingTaskState:
             tuple(self.required_candidates),
             self.source_acquisition_metrics,
             self.ephemeral_acceptance_metrics,
+            self.structural_completeness,
         )
 
     def _verification(self, operation: str) -> VerificationRecord:

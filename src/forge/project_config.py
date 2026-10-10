@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from forge.process_isolation import ExecutionIsolationMode, ExecutionIsolationPolicy
+from forge.structural_completeness import StructuralCompletenessMode
 
 DEFAULT_BUILD_TIMEOUT_SECONDS = 120.0
 DEFAULT_CONFIGURE_TIMEOUT_SECONDS = 120.0
@@ -93,11 +94,20 @@ class ProjectCommands:
     verification_plan: VerificationPlan | None = None
     configure: ProjectCommand | None = None
     execution_isolation: ExecutionIsolationPolicy = ExecutionIsolationPolicy()
+    structural_completeness_mode: StructuralCompletenessMode = (
+        StructuralCompletenessMode.SHADOW
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.execution_isolation, ExecutionIsolationPolicy):
             raise ProjectConfigurationError(
                 "execution_isolation must be an ExecutionIsolationPolicy"
+            )
+        if not isinstance(
+            self.structural_completeness_mode, StructuralCompletenessMode
+        ):
+            raise ProjectConfigurationError(
+                "structural_completeness_mode must be off, shadow, or enforce"
             )
         if self.verification_plan is not None and not isinstance(
             self.verification_plan, VerificationPlan
@@ -120,7 +130,12 @@ def parse_project_commands(document: Mapping[str, object]) -> ProjectCommands:
         return ProjectCommands()
     if not isinstance(raw_project, dict):
         raise ProjectConfigurationError("project must be a TOML table")
-    unknown = set(raw_project) - {"commands", "verification", "execution"}
+    unknown = set(raw_project) - {
+        "commands",
+        "verification",
+        "execution",
+        "structural_completeness_mode",
+    }
     if unknown:
         raise ProjectConfigurationError(
             f"project has unknown keys: {_format_keys(unknown)}"
@@ -141,7 +156,20 @@ def parse_project_commands(document: Mapping[str, object]) -> ProjectCommands:
         verification_plan=_parse_verification_plan(raw_project.get("verification")),
         configure=_parse_command(raw_commands.get("configure"), "configure"),
         execution_isolation=_parse_execution_isolation(raw_project.get("execution")),
+        structural_completeness_mode=_parse_structural_mode(
+            raw_project.get("structural_completeness_mode")
+        ),
     )
+
+
+def _parse_structural_mode(raw: object) -> StructuralCompletenessMode:
+    value = StructuralCompletenessMode.SHADOW.value if raw is None else raw
+    try:
+        return StructuralCompletenessMode(value)
+    except (TypeError, ValueError) as error:
+        raise ProjectConfigurationError(
+            "project.structural_completeness_mode must be off, shadow, or enforce"
+        ) from error
 
 
 def _parse_execution_isolation(raw: object) -> ExecutionIsolationPolicy:

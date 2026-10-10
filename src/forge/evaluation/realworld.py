@@ -33,6 +33,10 @@ from forge.process_isolation import ExecutionIsolationPolicy
 from forge.project_config import ProjectCommand, ProjectCommands, VerificationPlan
 from forge.repository_index import RepositoryIndex
 from forge.semantic_index import SemanticIndex
+from forge.structural_completeness import (
+    StructuralCompletenessEvaluator,
+    StructuralCompletenessMode,
+)
 from forge.tools import (
     MultiFileMutationPreview,
     MutationPreview,
@@ -375,6 +379,12 @@ class RealWorldEvaluationRunner:
             Callable[[RealWorldTask, Path, Mapping[str, object]], None] | None
         ) = None,
         authorize_discovered_sources: bool = False,
+        structural_completeness_mode: StructuralCompletenessMode = (
+            StructuralCompletenessMode.SHADOW
+        ),
+        structural_completeness_evaluator: (
+            StructuralCompletenessEvaluator | None
+        ) = None,
     ) -> None:
         self._profile = model_profile
         self._model = model
@@ -388,6 +398,8 @@ class RealWorldEvaluationRunner:
         self._mutation_ready_callback = mutation_ready_callback
         self._proposal_evidence_callback = proposal_evidence_callback
         self._authorize_discovered_sources = authorize_discovered_sources
+        self._structural_completeness_mode = structural_completeness_mode
+        self._structural_completeness_evaluator = structural_completeness_evaluator
 
     def run(
         self, tasks: Iterable[RealWorldTask], repository: RepositorySnapshot
@@ -541,6 +553,10 @@ class RealWorldEvaluationRunner:
                 create_candidate_paths=task.create_candidate_paths,
                 mixed_file_operations=task.mixed_file_operations,
                 include_repair_mutation_history=(self._include_repair_mutation_history),
+                structural_completeness_mode=self._structural_completeness_mode,
+                structural_completeness_evaluator=(
+                    self._structural_completeness_evaluator
+                ),
             )
             response = None
             coding_result = None
