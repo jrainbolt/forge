@@ -292,6 +292,16 @@ class RealWorldMetrics:
     reverification_result: str = "not_run"
     repair_attempts: int = 0
     post_coverage_tools: int = 0
+    structural_obligation_count: int = 0
+    structural_obligation_kinds: tuple[str, ...] = ()
+    structural_obligation_set_identity: str | None = None
+    structural_derivation_latency_seconds: float = 0.0
+    structural_source_operations: int = 0
+    structural_decision: str = "not_run"
+    structural_failed_check_ids: tuple[str, ...] = ()
+    structural_operational_failures: tuple[str, ...] = ()
+    structural_check_latency_seconds: float = 0.0
+    structural_subprocess_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -924,6 +934,62 @@ def score_task_result(
             getattr(agent, "model_calls", getattr(response, "orchestration_steps", 0))
             if response is not None
             else len(activities)
+        ),
+        structural_obligation_count=int(
+            getattr(coding, "structural_obligations", {}).get("obligation_count", 0)
+        ),
+        structural_obligation_kinds=tuple(
+            sorted(
+                str(item.get("kind"))
+                for item in getattr(coding, "structural_obligations", {}).get(
+                    "obligations", ()
+                )
+                if isinstance(item, dict) and item.get("kind")
+            )
+        ),
+        structural_obligation_set_identity=getattr(
+            coding, "structural_obligations", {}
+        ).get("obligation_set_identity"),
+        structural_derivation_latency_seconds=float(
+            getattr(coding, "structural_obligations", {}).get(
+                "derivation_latency_seconds", 0.0
+            )
+        ),
+        structural_source_operations=int(
+            getattr(coding, "structural_obligations", {}).get("source_operations", 0)
+        ),
+        structural_decision=getattr(
+            getattr(coding, "structural_completeness", None),
+            "decision",
+            "not_run",
+        ),
+        structural_failed_check_ids=tuple(
+            getattr(
+                getattr(coding, "structural_completeness", None),
+                "failed_check_ids",
+                (),
+            )
+        ),
+        structural_operational_failures=tuple(
+            getattr(
+                getattr(coding, "structural_completeness", None),
+                "operational_failures",
+                (),
+            )
+        ),
+        structural_check_latency_seconds=float(
+            getattr(
+                getattr(coding, "structural_completeness", None),
+                "latency_seconds",
+                0.0,
+            )
+        ),
+        structural_subprocess_count=int(
+            getattr(
+                getattr(coding, "structural_completeness", None),
+                "subprocess_count",
+                0,
+            )
         ),
         tool_executions=len(activities),
         bootstrap_executions=getattr(

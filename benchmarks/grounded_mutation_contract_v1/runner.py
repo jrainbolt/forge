@@ -337,6 +337,24 @@ def run_cell(
             "structured_mutation_attempts": raw.metrics.structured_mutation_attempts,
             "mutation_proposed": raw.metrics.mutation_proposed,
             "final_status": raw.final_status,
+            "structural_obligation_count": raw.metrics.structural_obligation_count,
+            "structural_obligation_kinds": raw.metrics.structural_obligation_kinds,
+            "structural_obligation_set_identity": (
+                raw.metrics.structural_obligation_set_identity
+            ),
+            "structural_derivation_latency_seconds": (
+                raw.metrics.structural_derivation_latency_seconds
+            ),
+            "structural_source_operations": raw.metrics.structural_source_operations,
+            "structural_decision": raw.metrics.structural_decision,
+            "structural_failed_check_ids": raw.metrics.structural_failed_check_ids,
+            "structural_operational_failures": (
+                raw.metrics.structural_operational_failures
+            ),
+            "structural_check_latency_seconds": (
+                raw.metrics.structural_check_latency_seconds
+            ),
+            "structural_subprocess_count": raw.metrics.structural_subprocess_count,
         },
     )
 

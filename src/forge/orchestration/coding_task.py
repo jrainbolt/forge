@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 
 from forge.ephemeral_acceptance import EphemeralAcceptanceMetrics
@@ -295,6 +295,7 @@ class CodingTaskResult:
     structural_completeness: StructuralCompletenessRecord = (
         StructuralCompletenessRecord()
     )
+    structural_obligations: Mapping[str, object] = field(default_factory=dict)
 
     @property
     def footer(self) -> str:
@@ -363,6 +364,7 @@ class CodingTaskState:
         self.verification_gate_metrics = VerificationGateMetrics()
         self.ephemeral_acceptance_metrics = EphemeralAcceptanceMetrics()
         self.structural_completeness = StructuralCompletenessRecord()
+        self.structural_obligations: Mapping[str, object] = {}
         self.repair_evidence: RepairEvidence | None = None
         self.repair_grounding_metrics = RepairGroundingMetrics()
         self.verification_baseline: VerificationBaselineEvidence | None = None
@@ -1344,6 +1346,12 @@ class CodingTaskState:
             self.phase = CodingTaskPhase.REJECTED
             self._terminal_status = CodingTaskStatus.STRUCTURAL_COMPLETENESS_REJECTED
 
+    def structural_obligations_frozen(self, record: Mapping[str, object]) -> None:
+        """Persist the source-free pre-generation obligation boundary."""
+        if self.mutation_count:
+            raise RuntimeError("structural obligations must be frozen before mutation")
+        self.structural_obligations = dict(record)
+
     def decline_verification(self) -> None:
         if self.verification_decision is VerificationDecision.NOT_DECIDED:
             self.verification_decision = VerificationDecision.DECLINED
@@ -1415,6 +1423,7 @@ class CodingTaskState:
             self.source_acquisition_metrics,
             self.ephemeral_acceptance_metrics,
             self.structural_completeness,
+            self.structural_obligations,
         )
 
     def _verification(self, operation: str) -> VerificationRecord:

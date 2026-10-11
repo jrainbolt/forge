@@ -113,9 +113,16 @@ from forge.retrieval_bootstrap import (
 from forge.retrieval_strategy import RetrievalMetrics, RetrievalState, RetrievalStrategy
 from forge.semantic_index import SemanticIndex, SemanticIndexError
 from forge.structural_completeness import (
+    StructuralCompletenessEvaluation,
     StructuralCompletenessEvaluator,
     StructuralCompletenessMode,
     evaluate_structural_completeness,
+)
+from forge.structural_obligations import (
+    StructuralObligation,
+    StructuralObligationSet,
+    derive_structural_obligations,
+    evaluate_obligations,
 )
 from forge.tools import (
     ExecutionContext,
@@ -579,6 +586,7 @@ class RepositoryChatSession:
         structural_completeness_evaluator: (
             StructuralCompletenessEvaluator | None
         ) = None,
+        structural_obligations: tuple[StructuralObligation, ...] = (),
     ) -> None:
         if not isinstance(model, Model):
             raise TypeError("model must implement Model")
@@ -683,6 +691,8 @@ class RepositoryChatSession:
         self._ephemeral_task_text = ""
         self._structural_completeness_mode = structural_completeness_mode
         self._structural_completeness_evaluator = structural_completeness_evaluator
+        self._registered_structural_obligations = tuple(structural_obligations)
+        self._active_structural_obligations = StructuralObligationSet()
         self._model = model
         self._generation = generation or GenerationConfig(
             max_tokens=256, temperature=0.4
@@ -1215,6 +1225,24 @@ class RepositoryChatSession:
             self._active_coding_task.establish_required_candidates(
                 self._required_candidate_paths
             )
+        self._active_structural_obligations = derive_structural_obligations(
+            user_text,
+            self._context.workspace,
+            mutation_authority=tuple(
+                sorted(
+                    set(
+                        (
+                            *self._required_candidate_paths,
+                            *self._create_paths,
+                        )
+                    )
+                )
+            ),
+            registered=self._registered_structural_obligations,
+        )
+        self._active_coding_task.structural_obligations_frozen(
+            self._active_structural_obligations.source_free_record()
+        )
         self._last_coding_task = None
         self._ephemeral_task_text = user_text
         self._ephemeral_generation_calls = 0
@@ -4064,10 +4092,24 @@ class RepositoryChatSession:
                         coding_task.ephemeral_acceptance_metrics = gate.metrics
                         if acceptance is not EphemeralAcceptanceState.POSTMUTATION_PASS:
                             coding_task.ephemeral_acceptance_failed(gate.metrics)
+                    evaluator = self._structural_completeness_evaluator
+                    if (
+                        evaluator is None
+                        and self._active_structural_obligations.obligations
+                    ):
+
+                        def evaluate_derived_obligations(
+                            workspace: Path,
+                        ) -> StructuralCompletenessEvaluation:
+                            return evaluate_obligations(
+                                self._active_structural_obligations, workspace
+                            )
+
+                        evaluator = evaluate_derived_obligations
                     structural_record = evaluate_structural_completeness(
                         self._structural_completeness_mode,
                         self._context.workspace,
-                        self._structural_completeness_evaluator,
+                        evaluator,
                     )
                     coding_task.structural_completeness_finished(structural_record)
                     verification_operation = (
