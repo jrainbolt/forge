@@ -30,6 +30,8 @@ PYTHON_CHECKS = {
     "accept-zero": "from pyservice.metrics import Counter; c=Counter(); c.increment(0); assert c.value==0",
     "header-normalize": "from pyservice.headers import normalize_header_name; assert normalize_header_name(' X-Trace ')=='x-trace'",
     "header-validate": "from pyservice.headers import normalize_header_name;\ntry: normalize_header_name('bad name'); assert False\nexcept ValueError: pass",
+    "queue-fifo": "from pyservice.queue import RequestQueue; from pyservice.models import Request; q=RequestQueue(); a=Request('a',b'1'); b=Request('b',b'2'); q.push(a); q.push(b); assert q.pop()==a; assert q.pop()==b",
+    "missing-before-empty": "from pyservice.service import handle; from pyservice.models import Request; assert handle(Request('',b'')).status==400",
 }
 
 
@@ -58,4 +60,25 @@ def check(check_id: str, workspace: Path) -> bool | None:
             else '#include "window.h"\n#include <assert.h>\nint main(void){assert(window_accepts(2,3));assert(!window_accepts(3,3));return 0;}'
         )
         return _c(workspace, ("window.c",), probe)
+    c_probes = {
+        "clock-forward": (
+            "clock.c",
+            '#include "clock.h"\n#include <assert.h>\nint main(void){assert(clock_elapsed(3,8)==5);return 0;}',
+        ),
+        "clock-backward": (
+            "clock.c",
+            '#include "clock.h"\n#include <assert.h>\nint main(void){assert(clock_elapsed(8,3)==0);return 0;}',
+        ),
+        "port-zero": (
+            "parser.c",
+            '#include "parser.h"\n#include <assert.h>\nint main(void){int p=1;assert(!parse_port("0",&p));return 0;}',
+        ),
+        "quota-exact-fill": (
+            "quota.c",
+            '#include "quota.h"\n#include <assert.h>\nint main(void){struct quota q={4,10};assert(quota_reserve(&q,6));assert(q.used==10);return 0;}',
+        ),
+    }
+    if name in c_probes:
+        source, probe = c_probes[name]
+        return _c(workspace, (source,), probe)
     return None
