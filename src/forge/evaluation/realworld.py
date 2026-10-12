@@ -294,6 +294,7 @@ class RealWorldMetrics:
     post_coverage_tools: int = 0
     structural_obligation_count: int = 0
     structural_obligation_kinds: tuple[str, ...] = ()
+    structural_obligation_metadata: tuple[dict[str, object], ...] = ()
     structural_obligation_set_identity: str | None = None
     structural_derivation_latency_seconds: float = 0.0
     structural_source_operations: int = 0
@@ -946,6 +947,13 @@ def score_task_result(
                 )
                 if isinstance(item, dict) and item.get("kind")
             )
+        ),
+        structural_obligation_metadata=tuple(
+            dict(item)
+            for item in getattr(coding, "structural_obligations", {}).get(
+                "obligations", ()
+            )
+            if isinstance(item, dict)
         ),
         structural_obligation_set_identity=getattr(
             coding, "structural_obligations", {}

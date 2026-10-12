@@ -339,6 +339,9 @@ def run_cell(
             "final_status": raw.final_status,
             "structural_obligation_count": raw.metrics.structural_obligation_count,
             "structural_obligation_kinds": raw.metrics.structural_obligation_kinds,
+            "structural_obligation_metadata": (
+                raw.metrics.structural_obligation_metadata
+            ),
             "structural_obligation_set_identity": (
                 raw.metrics.structural_obligation_set_identity
             ),

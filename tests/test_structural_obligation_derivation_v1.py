@@ -157,3 +157,53 @@ def test_missing_required_symbol_fails_closed_after_mutation(tmp_path: Path) -> 
     evaluation = evaluate_obligations(derived, tmp_path)
     assert evaluation.decision is StructuralCompletenessDecision.FAIL
     assert evaluation.failed_check_ids
+
+
+def test_trusted_python_import_and_test_usage_derive_relationships(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/state.py").write_text(
+        "def can_transition():\n    return True\n", encoding="utf-8"
+    )
+    (tmp_path / "tests/test_state.py").write_text(
+        "from src.state import can_transition\n"
+        "def test_state():\n    assert can_transition()\n",
+        encoding="utf-8",
+    )
+    result = derive_structural_obligations(
+        "Update src/state.py and tests/test_state.py, then verify both files.",
+        tmp_path,
+        mutation_authority=("src/state.py", "tests/test_state.py"),
+    )
+    assert {item.kind for item in result.obligations} == {
+        StructuralObligationKind.IMPORT_INCLUDE_RELATION,
+        StructuralObligationKind.REGISTRATION_OR_USAGE_RELATION,
+    }
+
+
+def test_trusted_c_header_and_test_caller_derive_relationships(tmp_path: Path) -> None:
+    (tmp_path / "src/tests").mkdir(parents=True)
+    (tmp_path / "src/window.h").write_text(
+        "int window_accepts(int value);\n", encoding="utf-8"
+    )
+    (tmp_path / "src/window.c").write_text(
+        '#include "window.h"\nint window_accepts(int value) { return value; }\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "src/tests/test_window.c").write_text(
+        '#include "../window.h"\nint main(void) { return window_accepts(1); }\n',
+        encoding="utf-8",
+    )
+    result = derive_structural_obligations(
+        "Update src/window.c and src/tests/test_window.c, then verify both files.",
+        tmp_path,
+        mutation_authority=("src/window.c", "src/tests/test_window.c"),
+    )
+    assert {item.kind for item in result.obligations} == {
+        StructuralObligationKind.DECLARATION_IMPLEMENTATION_RELATION,
+        StructuralObligationKind.IMPORT_INCLUDE_RELATION,
+        StructuralObligationKind.REQUIRED_COMPONENT_ROLE,
+        StructuralObligationKind.CALLER_CALLEE_RELATION,
+    }

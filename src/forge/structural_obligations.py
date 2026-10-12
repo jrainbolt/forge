@@ -81,6 +81,10 @@ class StructuralObligationSet:
                     "obligation_id": item.obligation_id,
                     "identity": item.identity,
                     "kind": item.kind.value,
+                    "source_identity": _hash(item.source_path),
+                    "target_identity": _hash(item.target_path),
+                    "symbol_identity": _hash(item.symbol),
+                    "caller_identity": _hash(item.caller),
                     "provenance_identity": item.provenance_identity,
                     "provenance_class": item.provenance_class,
                     "inspection_scope_identity": hashlib.sha256(
@@ -232,12 +236,14 @@ def derive_structural_obligations(
                     symbol=symbol,
                 )
         elif suffix == ".c":
-            if relative not in explicit_paths:
-                continue
             header = str(Path(relative).with_suffix(".h"))
             header_text = sources.get(header)
             declared = set(_C_DECL.findall(header_text or ""))
             relevant = declared & task_symbols
+            if not relevant and relative in explicit_paths and len(declared) == 1:
+                relevant = declared
+            if relative not in explicit_paths and not relevant:
+                continue
             if header_text is not None and relevant:
                 add(StructuralObligationKind.IMPORT_INCLUDE_RELATION, relative, header)
             for symbol in sorted(relevant):
@@ -253,6 +259,84 @@ def derive_structural_obligations(
                     header,
                     symbol,
                 )
+
+    python_definitions: dict[str, set[str]] = {}
+    for path, source in sources.items():
+        if not path.endswith(".py"):
+            continue
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+        python_definitions[path] = {
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        }
+    for source_path, source in sorted(sources.items()):
+        if source_path not in authority or not source_path.endswith(".py"):
+            continue
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or not node.module:
+                continue
+            target = f"{node.module.replace('.', '/')}.py"
+            if target not in authority or target not in python_definitions:
+                continue
+            for imported in node.names:
+                symbol = imported.name
+                if symbol not in python_definitions[target]:
+                    continue
+                add(
+                    StructuralObligationKind.IMPORT_INCLUDE_RELATION,
+                    source_path,
+                    target,
+                    symbol,
+                )
+                if source_path.startswith("tests/"):
+                    add(
+                        StructuralObligationKind.REGISTRATION_OR_USAGE_RELATION,
+                        source_path,
+                        target,
+                        symbol,
+                    )
+
+    c_implementations: dict[str, tuple[str, str]] = {}
+    for target in authority:
+        if not target.endswith(".c"):
+            continue
+        header = str(Path(target).with_suffix(".h"))
+        declarations = set(_C_DECL.findall(sources.get(header, "")))
+        for symbol in declarations:
+            c_implementations[symbol] = (target, header)
+    for source_path, source in sorted(sources.items()):
+        if source_path not in authority or not source_path.endswith(".c"):
+            continue
+        including = (root / source_path).resolve()
+        for include in re.findall(r'^\s*#\s*include\s*"([^"]+)"', source, re.MULTILINE):
+            included = (including.parent / include).resolve()
+            try:
+                included_path = str(included.relative_to(root))
+            except ValueError:
+                continue
+            for symbol, (target, header) in c_implementations.items():
+                if included_path != header or target == source_path:
+                    continue
+                add(
+                    StructuralObligationKind.IMPORT_INCLUDE_RELATION,
+                    source_path,
+                    header,
+                )
+                if re.search(rf"\b{re.escape(symbol)}\s*\(", source):
+                    add(
+                        StructuralObligationKind.CALLER_CALLEE_RELATION,
+                        source_path,
+                        target,
+                        symbol,
+                    )
     for target in authority:
         if Path(target).suffix != ".py" or target in sources:
             continue

@@ -693,6 +693,7 @@ class RepositoryChatSession:
         self._structural_completeness_evaluator = structural_completeness_evaluator
         self._registered_structural_obligations = tuple(structural_obligations)
         self._active_structural_obligations = StructuralObligationSet()
+        self._structural_obligations_finalized = False
         self._model = model
         self._generation = generation or GenerationConfig(
             max_tokens=256, temperature=0.4
@@ -1243,6 +1244,7 @@ class RepositoryChatSession:
         self._active_coding_task.structural_obligations_frozen(
             self._active_structural_obligations.source_free_record()
         )
+        self._structural_obligations_finalized = False
         self._last_coding_task = None
         self._ephemeral_task_text = user_text
         self._ephemeral_generation_calls = 0
@@ -2035,6 +2037,27 @@ class RepositoryChatSession:
                 else candidate_files
             )
             mutation_ready = coding_task is not None and coding_task.mutation_ready
+            if mutation_ready and not self._structural_obligations_finalized:
+                assert coding_task is not None
+                self._active_structural_obligations = derive_structural_obligations(
+                    user_text,
+                    self._context.workspace,
+                    mutation_authority=tuple(
+                        sorted(
+                            set(
+                                (
+                                    *coding_task.mutation_candidate_paths,
+                                    *self._create_paths,
+                                )
+                            )
+                        )
+                    ),
+                    registered=self._registered_structural_obligations,
+                )
+                coding_task.structural_obligations_frozen(
+                    self._active_structural_obligations.source_free_record()
+                )
+                self._structural_obligations_finalized = True
             grounding_ready = not coverage_required or coverage.complete
             structured_edit_ready = (
                 coding_task is not None
