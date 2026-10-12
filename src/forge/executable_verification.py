@@ -67,6 +67,7 @@ class CFunctionDeclaration:
     return_type: str
     parameter_types: tuple[str, ...]
     header_identity: str
+    declaration_identity: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +190,30 @@ class CByteArrayInvocation:
 
 
 @dataclass(frozen=True, slots=True)
+class CTextBufferInvocation:
+    header: str
+    sources: tuple[str, ...]
+    symbol: str
+    value: str
+    expected: int
+
+    def __post_init__(self) -> None:
+        if not _safe_relative(self.header) or not self.header.endswith(".h"):
+            raise ValueError("C header must be a confined relative header")
+        if not self.sources or any(
+            not _safe_relative(source) or not source.endswith(".c")
+            for source in self.sources
+        ):
+            raise ValueError("C sources must be confined relative C files")
+        if _IDENTIFIER.fullmatch(self.symbol) is None:
+            raise ValueError("invalid public C symbol identity")
+        if not self.value or len(self.value.encode()) > 4096 or "\0" in self.value:
+            raise ValueError("C text input must be nonempty and bounded")
+        if isinstance(self.expected, bool) or not isinstance(self.expected, int):
+            raise ValueError("C text probe expected result must be an integer")
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutableCheck:
     check_id: str
     kind: ExecutableCheckKind
@@ -201,6 +226,7 @@ class ExecutableCheck:
     python_scenario: PythonObjectScenario | None = None
     c_case: CInvocation | None = None
     c_byte_array_case: CByteArrayInvocation | None = None
+    c_text_buffer_case: CTextBufferInvocation | None = None
     c_declaration: CFunctionDeclaration | None = None
     compiler: CCompiler = CCompiler.CC
     derivation_latency_seconds: float = 0.0
@@ -226,6 +252,7 @@ class ExecutableCheck:
                     self.python_scenario is not None,
                     self.c_case is not None,
                     self.c_byte_array_case is not None,
+                    self.c_text_buffer_case is not None,
                 )
             )
             != 1
@@ -408,7 +435,7 @@ def derive_c_check(
     kind: ExecutableCheckKind | str,
     provenance: CheckProvenance | str,
     component_identity: str,
-    invocation: CInvocation | CByteArrayInvocation,
+    invocation: CInvocation | CByteArrayInvocation | CTextBufferInvocation,
     compiler: CCompiler = CCompiler.CC,
     timeout_seconds: float = 5.0,
 ) -> tuple[ExecutableCheck | None, ExecutableCheckOutcome | None]:
@@ -433,7 +460,7 @@ def derive_c_check(
         inputs = (
             {"arguments": invocation.arguments}
             if isinstance(invocation, CInvocation)
-            else {"byte_count": len(invocation.values)}
+            else {"input_length": _c_buffer_length(invocation)}
         )
         check = ExecutableCheck(
             check_id,
@@ -446,6 +473,9 @@ def derive_c_check(
             c_case=invocation if isinstance(invocation, CInvocation) else None,
             c_byte_array_case=(
                 invocation if isinstance(invocation, CByteArrayInvocation) else None
+            ),
+            c_text_buffer_case=(
+                invocation if isinstance(invocation, CTextBufferInvocation) else None
             ),
             c_declaration=declaration,
             compiler=compiler,
@@ -462,7 +492,8 @@ def extract_c_declaration(header: str, symbol: str) -> CFunctionDeclaration | No
         return None
     cleaned = re.sub(r"/\*.*?\*/|//[^\n]*", " ", header, flags=re.DOTALL)
     pattern = re.compile(
-        rf"\b(?P<return>unsigned|int|size_t|uint64_t|bool)\s+{re.escape(symbol)}"
+        rf"\b(?P<return>unsigned(?:\s+int)?|signed(?:\s+int)?|int|size_t|"
+        rf"u?int(?:8|16|32|64)_t|bool)\s+{re.escape(symbol)}"
         r"\s*\((?P<parameters>[^();]*)\)\s*;"
     )
     matches = tuple(pattern.finditer(cleaned))
@@ -477,10 +508,17 @@ def extract_c_declaration(header: str, symbol: str) -> CFunctionDeclaration | No
         if any(item is None for item in parsed):
             return None
         types = tuple(item for item in parsed if item is not None)
+    resolved_types = (matches[0].group("return"), *types)
+    if (
+        any(re.fullmatch(r"u?int(?:8|16|32|64)_t", item) for item in resolved_types)
+        and re.search(r"#\s*include\s*[<\"]stdint\.h[>\"]", cleaned) is None
+    ):
+        return None
     return CFunctionDeclaration(
         symbol,
-        matches[0].group("return"),
+        _normalize_c_scalar(matches[0].group("return")),
         types,
+        "",
         identity({"declaration": matches[0].group(0)}),
     )
 
@@ -490,31 +528,48 @@ def _c_parameter_type(parameter: str) -> str | None:
     supported = (
         "const unsigned char *",
         "unsigned char const *",
+        "const char *",
+        "char const *",
+        "unsigned int",
+        "signed int",
+        "signed",
         "unsigned",
         "int",
         "size_t",
+        "uint8_t",
+        "uint16_t",
+        "uint32_t",
         "uint64_t",
+        "int8_t",
+        "int16_t",
+        "int32_t",
+        "int64_t",
         "bool",
     )
     for value in supported:
         if normalized == value or normalized.startswith(value + " "):
             remainder = normalized[len(value) :].strip()
             if not remainder or _IDENTIFIER.fullmatch(remainder):
-                return "const unsigned char *" if "char" in value else value
+                if value in {"const unsigned char *", "unsigned char const *"}:
+                    return "const unsigned char *"
+                if value in {"const char *", "char const *"}:
+                    return "const char *"
+                return _normalize_c_scalar(value)
     return None
 
 
 def _invocation_matches(
     declaration: CFunctionDeclaration,
-    invocation: CInvocation | CByteArrayInvocation,
+    invocation: CInvocation | CByteArrayInvocation | CTextBufferInvocation,
 ) -> bool:
-    if declaration.return_type not in {"unsigned", "int", "size_t", "uint64_t", "bool"}:
+    if declaration.return_type not in _C_SCALARS:
         return False
     if isinstance(invocation, CByteArrayInvocation):
         return declaration.parameter_types == ("const unsigned char *", "size_t")
+    if isinstance(invocation, CTextBufferInvocation):
+        return declaration.parameter_types == ("const char *", "size_t")
     return len(declaration.parameter_types) == len(invocation.arguments) and all(
-        item in {"unsigned", "int", "size_t", "uint64_t", "bool"}
-        for item in declaration.parameter_types
+        item in _C_SCALARS for item in declaration.parameter_types
     )
 
 
@@ -548,7 +603,7 @@ def source_free_record(record: ExecutableVerificationRecord) -> dict[str, object
 
 
 def _execute(check: ExecutableCheck, workspace: Path) -> ExecutableCheckResult:
-    if check.c_case is not None or check.c_byte_array_case is not None:
+    if any((check.c_case, check.c_byte_array_case, check.c_text_buffer_case)):
         return _execute_c(check, workspace)
     started = time.monotonic()
     execution_started = started
@@ -598,6 +653,16 @@ def _execute(check: ExecutableCheck, workspace: Path) -> ExecutableCheckResult:
                 "input": check.input_identity,
                 "expected": check.expected_identity,
                 "timeout": check.timeout_seconds,
+                "c_header": (
+                    check.c_declaration.header_identity
+                    if check.c_declaration is not None
+                    else None
+                ),
+                "c_declaration": (
+                    check.c_declaration.declaration_identity
+                    if check.c_declaration is not None
+                    else None
+                ),
             }
         ),
         check.kind.value,
@@ -761,6 +826,16 @@ def _result(
                 "input": check.input_identity,
                 "expected": check.expected_identity,
                 "timeout": check.timeout_seconds,
+                "c_header": (
+                    check.c_declaration.header_identity
+                    if check.c_declaration is not None
+                    else None
+                ),
+                "c_declaration": (
+                    check.c_declaration.declaration_identity
+                    if check.c_declaration is not None
+                    else None
+                ),
             }
         ),
         check.kind.value,
@@ -853,13 +928,13 @@ def _python_harness(
 def _construct_c_harness(
     check: ExecutableCheck, workspace: Path
 ) -> tuple[
-    CInvocation | CByteArrayInvocation,
+    CInvocation | CByteArrayInvocation | CTextBufferInvocation,
     Path,
     Path,
     tuple[Path, ...],
 ]:
-    assert check.c_case is not None or check.c_byte_array_case is not None
-    case = check.c_case or check.c_byte_array_case
+    assert any((check.c_case, check.c_byte_array_case, check.c_text_buffer_case))
+    case = check.c_case or check.c_byte_array_case or check.c_text_buffer_case
     assert case is not None
     paths = tuple((workspace / source).resolve(strict=True) for source in case.sources)
     header = (workspace / case.header).resolve(strict=True)
@@ -884,6 +959,10 @@ def _construct_c_harness(
         values = ",".join(str(value) for value in case.values)
         array_declaration = f"const unsigned char data[]={{{values}}};"
         arguments = f"data,{len(case.values)}"
+    elif isinstance(case, CTextBufferInvocation):
+        encoded = ",".join(str(value) for value in case.value.encode())
+        array_declaration = f"const char data[]={{{encoded}}};"
+        arguments = f"data,{len(case.value.encode())}"
     else:
         array_declaration = ""
         arguments = ",".join(str(value) for value in case.arguments)
@@ -898,6 +977,43 @@ def _construct_c_harness(
 def _safe_relative(value: str) -> bool:
     path = Path(value)
     return bool(value) and not path.is_absolute() and ".." not in path.parts
+
+
+_C_SCALARS = frozenset(
+    {
+        "unsigned",
+        "int",
+        "size_t",
+        "uint8_t",
+        "uint16_t",
+        "uint32_t",
+        "uint64_t",
+        "int8_t",
+        "int16_t",
+        "int32_t",
+        "int64_t",
+        "bool",
+    }
+)
+
+
+def _normalize_c_scalar(value: str) -> str:
+    normalized = " ".join(value.split())
+    return {
+        "unsigned int": "unsigned",
+        "signed": "int",
+        "signed int": "int",
+    }.get(normalized, normalized)
+
+
+def _c_buffer_length(
+    invocation: CByteArrayInvocation | CTextBufferInvocation,
+) -> int:
+    return len(
+        invocation.values
+        if isinstance(invocation, CByteArrayInvocation)
+        else invocation.value.encode()
+    )
 
 
 def _json_value(value: object) -> None:

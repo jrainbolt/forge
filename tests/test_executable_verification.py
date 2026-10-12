@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from forge.executable_verification import (
     CCompiler,
     CheckProvenance,
     CInvocation,
+    CTextBufferInvocation,
     ExecutableCheck,
     ExecutableCheckKind,
     ExecutableCheckOutcome,
@@ -189,11 +191,92 @@ def test_trusted_header_type_extraction() -> None:
     assert scalar is not None
     assert scalar.return_type == "int"
     assert scalar.parameter_types == ("int", "int")
+    assert len(scalar.declaration_identity) == 64
     byte_array = extract_c_declaration(
         "unsigned checksum(const unsigned char *data, size_t size);", "checksum"
     )
     assert byte_array is not None
     assert byte_array.parameter_types == ("const unsigned char *", "size_t")
+
+
+@pytest.mark.parametrize(
+    "declaration,expected",
+    (
+        ("unsigned int value(unsigned int input);", ("unsigned", ("unsigned",))),
+        ("signed int value(signed input);", ("int", ("int",))),
+        ("size_t value(size_t input);", ("size_t", ("size_t",))),
+        (
+            "#include <stdint.h>\nuint32_t value(int32_t input);",
+            ("uint32_t", ("int32_t",)),
+        ),
+    ),
+)
+def test_supported_c_scalar_normalization(
+    declaration: str, expected: tuple[str, tuple[str, ...]]
+) -> None:
+    parsed = extract_c_declaration(declaration, "value")
+    assert parsed is not None
+    assert (parsed.return_type, parsed.parameter_types) == expected
+
+
+def test_ambiguous_fixed_width_typedef_is_not_parsed() -> None:
+    assert extract_c_declaration("word_t value(word_t input);", "value") is None
+    assert extract_c_declaration("uint32_t value(uint32_t input);", "value") is None
+
+
+def test_unsupported_c_declaration_shapes_are_not_parsed() -> None:
+    declarations = (
+        "struct opaque; int use(struct opaque *value);",
+        "int visit(int (*callback)(int));",
+        "int split(const char **values);",
+        "char *allocate(size_t size);",
+        "int format(const char *format, ...);",
+        "int mutate(char *output, size_t size);",
+    )
+    assert all(
+        extract_c_declaration(item, item.split("(")[0].split()[-1]) is None
+        for item in declarations
+    )
+
+
+def test_text_buffer_correct_and_wrong_controls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_c_test_execution(monkeypatch)
+    (tmp_path / "api.h").write_text(
+        "#include <stddef.h>\nunsigned count_a(const char *text, size_t size);\n"
+    )
+    invocation = CTextBufferInvocation("api.h", ("api.c",), "count_a", "banana", 3)
+    for source, outcome in (
+        (
+            (
+                '#include "api.h"\n'
+                "unsigned count_a(const char*t,size_t n){unsigned r=0;"
+                "for(size_t i=0;i<n;i++)r+=t[i]=='a';return r;}\n"
+            ),
+            "CHECK_PASS",
+        ),
+        (
+            (
+                '#include "api.h"\n'
+                "unsigned count_a(const char*t,size_t n){"
+                "(void)t;(void)n;return 0;}\n"
+            ),
+            "CHECK_FAIL",
+        ),
+    ):
+        (tmp_path / "api.c").write_text(source)
+        check, failure = derive_c_check(
+            tmp_path,
+            check_id="text-check",
+            kind=ExecutableCheckKind.EXPLICIT_EXAMPLE_ASSERTION,
+            provenance=CheckProvenance.TRUSTED_INTERFACE_CONTRACT,
+            component_identity="api.count_a",
+            invocation=invocation,
+        )
+        assert failure is None and check is not None
+        result = ExecutableVerificationPlan("text-plan", (check,)).execute(tmp_path, 1)
+        assert result.results[0].outcome == outcome
 
 
 def test_integer_and_byte_array_correct_controls_pass(
@@ -334,6 +417,21 @@ def test_c_operational_failures_fail_open(
     assert failure is None and check is not None
     result = ExecutableVerificationPlan("operational", (check,)).execute(tmp_path, 1)
     assert result.results[0].outcome == expected
+    assert not result.proven_failure
+
+
+def test_c_timeout_fails_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _enable_c_test_execution(monkeypatch)
+    _write_c_fixture(
+        tmp_path,
+        "int add(int left, int right);\n",
+        "int add(int left,int right){(void)left;(void)right;for(;;){}return 0;}\n",
+    )
+    check, failure = _derive_scalar(tmp_path)
+    assert failure is None and check is not None
+    check = replace(check, timeout_seconds=0.05)
+    result = ExecutableVerificationPlan("timeout", (check,)).execute(tmp_path, 1)
+    assert result.results[0].outcome == "CHECK_TIMEOUT"
     assert not result.proven_failure
 
 
@@ -498,9 +596,79 @@ def test_proven_failure_uses_existing_repair_eligibility_path(tmp_path: Path) ->
     assert state.repair_eligibility_outcome == "EXECUTABLE_CHECK_FAILURE"
 
 
+def test_eight_applied_c_candidates_match_production_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_c_test_execution(monkeypatch)
+    outcomes: list[str] = []
+    for index in range(8):
+        workspace = tmp_path / f"candidate-{index}"
+        workspace.mkdir()
+        (workspace / "api.h").write_text("int value(void);\n")
+        (workspace / "api.c").write_text(
+            '#include "api.h"\nint value(void){return 0;}\n'
+        )
+        check, failure = derive_c_check(
+            workspace,
+            check_id=f"candidate-{index}",
+            kind=ExecutableCheckKind.PUBLIC_API_INVOCATION,
+            provenance=CheckProvenance.TRUSTED_INTERFACE_CONTRACT,
+            component_identity="api.value",
+            invocation=CInvocation("api.h", ("api.c",), "value", (), 1),
+        )
+        assert failure is None and check is not None
+        commands = ProjectCommands(
+            test=ProjectCommand((sys.executable, "-c", "pass"), 5),
+            verification_plan=VerificationPlan("normal", ("project.test",)),
+        )
+        registry = create_assist_repository_registry(commands)
+        rules = {item.name: PermissionDecision.ALLOW for item in registry.metadata}
+        rules["repository.apply_patch"] = PermissionDecision.ASK
+        replacement = 1 if index % 2 == 0 else 2
+        model = MockModel(
+            (
+                json.dumps(
+                    {
+                        "type": "structured_edit",
+                        "path": "api.c",
+                        "old_text": "return 0",
+                        "new_text": f"return {replacement}",
+                    }
+                ),
+                json.dumps({"type": "final", "answer": "done"}),
+            )
+        )
+        response = RepositoryChatSession(
+            "test",
+            model,
+            workspace,
+            mode=AutonomyMode.ASSIST,
+            registry=registry,
+            policy=RuleBasedPolicy(rules),
+            approval_callback=lambda _invocation, _proposal: True,
+            verification_plan=commands.verification_plan,
+            executable_verification_plan=ExecutableVerificationPlan(
+                f"candidate-plan-{index}", (check,)
+            ),
+            required_candidate_paths=("api.c",),
+            require_relevant_source=False,
+        ).execute_task("Set the public value implementation.")
+        result = response.coding_task
+        assert result is not None
+        outcomes.append(result.executable_verification[-1].results[0].outcome)
+        expected_status = (
+            CodingTaskStatus.COMPLETED_VERIFIED
+            if replacement == 1
+            else CodingTaskStatus.MUTATED_VERIFICATION_FAILED
+        )
+        assert result.status is expected_status
+    assert outcomes == ["CHECK_PASS", "CHECK_FAIL"] * 4
+
+
 def test_a91_evaluator_and_results_remain_package_excluded() -> None:
     configuration = (Path(__file__).parents[1] / "pyproject.toml").read_text()
     assert 'package-dir = { "" = "src" }' in configuration
     assert 'where = ["src"]' in configuration
     assert "benchmarks.bounded_executable_verification" not in configuration
     assert "eval-results" not in configuration
+    assert "benchmarks.portable_c_verification" not in configuration
