@@ -403,6 +403,117 @@ class ToolCallOutcome(Enum):
     MULTI_FILE_CHANGE = "multi_file_change"
 
 
+class ModelOutputClassification(Enum):
+    """Source-free diagnosis of one model protocol response."""
+
+    VALID_PROTOCOL = "valid_protocol"
+    EMPTY = "empty"
+    OVERSIZED = "oversized"
+    MARKDOWN_CODE_FENCE = "markdown_code_fence"
+    PROSE_WRAPPED_JSON = "prose_before_or_after_json"
+    MULTIPLE_JSON_OBJECTS = "multiple_json_objects"
+    TRUNCATED_JSON = "truncated_json"
+    INVALID_JSON_SYNTAX = "invalid_json_syntax"
+    NON_OBJECT_JSON = "non_object_json"
+    WRONG_ACTION_TYPE = "wrong_action_type"
+    WRONG_FIELDS_OR_SCHEMA = "wrong_fields_or_schema"
+    UNEXPECTED_STRUCTURED_WRAPPER = "unexpected_structured_output_wrapper"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelOutputDiagnostic:
+    """Safe response metadata that never retains generated content."""
+
+    classification: ModelOutputClassification
+    byte_count: int
+
+
+def diagnose_model_output(text: str) -> ModelOutputDiagnostic:
+    """Classify a response without retaining or returning arbitrary model text."""
+    if not isinstance(text, str):
+        raise TypeError("model output must be text")
+    byte_count = len(text.encode("utf-8"))
+    stripped = text.strip()
+    if not stripped:
+        return ModelOutputDiagnostic(ModelOutputClassification.EMPTY, byte_count)
+    if byte_count > MAX_MODEL_RESPONSE_BYTES:
+        return ModelOutputDiagnostic(ModelOutputClassification.OVERSIZED, byte_count)
+    if stripped.startswith("```"):
+        return ModelOutputDiagnostic(
+            ModelOutputClassification.MARKDOWN_CODE_FENCE, byte_count
+        )
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as error:
+        classification = _classify_json_decode_failure(stripped, error)
+        return ModelOutputDiagnostic(classification, byte_count)
+    if not isinstance(payload, dict):
+        return ModelOutputDiagnostic(
+            ModelOutputClassification.NON_OBJECT_JSON, byte_count
+        )
+    if "type" not in payload and any(
+        key in payload for key in ("response", "output", "content", "message")
+    ):
+        return ModelOutputDiagnostic(
+            ModelOutputClassification.UNEXPECTED_STRUCTURED_WRAPPER, byte_count
+        )
+    if payload.get("type") not in {
+        "tool_call",
+        "final",
+        "structured_edit",
+        "line_range_edit",
+        "multi_file_structured_edit",
+        "multi_file_line_range_edit",
+        "create_file",
+        "multi_file_create",
+        "multi_file_change",
+    }:
+        return ModelOutputDiagnostic(
+            ModelOutputClassification.WRONG_ACTION_TYPE, byte_count
+        )
+    try:
+        parse_model_output(text)
+    except ProtocolError:
+        return ModelOutputDiagnostic(
+            ModelOutputClassification.WRONG_FIELDS_OR_SCHEMA, byte_count
+        )
+    return ModelOutputDiagnostic(ModelOutputClassification.VALID_PROTOCOL, byte_count)
+
+
+def _classify_json_decode_failure(
+    stripped: str, error: json.JSONDecodeError
+) -> ModelOutputClassification:
+    decoder = json.JSONDecoder()
+    first_object = stripped.find("{")
+    if first_object >= 0:
+        try:
+            _, end = decoder.raw_decode(stripped[first_object:])
+        except json.JSONDecodeError:
+            pass
+        else:
+            prefix = stripped[:first_object].strip()
+            suffix = stripped[first_object + end :].strip()
+            if suffix:
+                try:
+                    second, second_end = decoder.raw_decode(suffix)
+                except json.JSONDecodeError:
+                    second = None
+                    second_end = 0
+                if isinstance(second, dict) and not suffix[second_end:].strip():
+                    return ModelOutputClassification.MULTIPLE_JSON_OBJECTS
+            if prefix or suffix:
+                return ModelOutputClassification.PROSE_WRAPPED_JSON
+    if error.msg.startswith("Unterminated string") or (
+        error.pos >= len(stripped) - 1
+        and (
+            stripped.count("{") > stripped.count("}")
+            or stripped.count("[") > stripped.count("]")
+        )
+    ):
+        return ModelOutputClassification.TRUNCATED_JSON
+    return ModelOutputClassification.INVALID_JSON_SYNTAX
+
+
 @dataclass(frozen=True, slots=True)
 class ToolCall:
     invocation_id: str

@@ -51,6 +51,30 @@ def test_exact_materialization_preserves_bytes_and_supports_text_edges(
     assert path.read_bytes() == "α\told\r\nkeep\r\n".encode()
 
 
+def test_exact_materialization_cannot_transform_neighboring_source_bytes(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "source.txt"
+    source = "before\n`PYTHONPATH` setting. A regular installation works.\nafter\n"
+    path.write_text(source)
+    proposal = StructuredEditProposal(
+        "source.txt",
+        "A regular installation works.",
+        "A regular local installation also works.",
+    )
+
+    result = validate_structured_edit(proposal, (_candidate(path),), tmp_path, 0)
+
+    assert result.valid
+    assert result.arguments is not None
+    edit = result.arguments["edits"][0]
+    materialized = source.replace(edit["old"], edit["new"], 1)
+    assert materialized == (
+        "before\n`PYTHONPATH` setting. A regular local installation also works.\n"
+        "after\n"
+    )
+
+
 def test_deletion_duplicate_range_and_bounds_are_deterministic(tmp_path: Path) -> None:
     path = tmp_path / "source.txt"
     path.write_text("first\nduplicate\nduplicate\noutside\n")

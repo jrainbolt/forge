@@ -48,9 +48,12 @@ class EvidenceGoal:
     def __post_init__(self) -> None:
         if not self.goal_id or not self.goal_id.isascii():
             raise ValueError("goal_id must be non-empty ASCII")
-        if not self.description.strip() or len(self.description) > MAX_GOAL_DESCRIPTION:
+        if not self.description.strip():
+            raise ValueError("goal description must be non-empty")
+        if len(self.description) > MAX_GOAL_DESCRIPTION:
             raise ValueError(
-                "goal description must be non-empty and at most 240 characters"
+                f"Goal is {len(self.description)} characters; maximum is "
+                f"{MAX_GOAL_DESCRIPTION}."
             )
         if not isinstance(self.kind, EvidenceGoalKind):
             raise TypeError("goal kind must be EvidenceGoalKind")
@@ -508,7 +511,9 @@ def _semantic_facets(task: str) -> TaskEvidencePlan | None:
     owners = [item for item in owners if len(_semantic_tokens(item)) >= 2]
     if not owners:
         return None
-    owners = owners[:3]
+    # Evidence goals are bounded internal summaries. The complete user request
+    # remains in repository-session conversation planning and model requests.
+    owners = [item[:MAX_GOAL_DESCRIPTION] for item in owners[:3]]
     goals = [
         EvidenceGoal(f"G{index}", item, EvidenceGoalKind.IMPLEMENTATION)
         for index, item in enumerate(owners, 1)

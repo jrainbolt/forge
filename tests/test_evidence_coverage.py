@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from forge.evidence_coverage import (
+    MAX_GOAL_DESCRIPTION,
     EvidenceCoverageState,
     EvidenceGoal,
     EvidenceGoalKind,
@@ -30,6 +31,28 @@ def test_plan_validates_bounds_dependencies_and_cycles() -> None:
                 EvidenceGoal("G2", "two", depends_on=("G1",)),
             )
         )
+
+
+def test_goal_overflow_reports_actual_and_maximum_lengths() -> None:
+    description = "x" * (MAX_GOAL_DESCRIPTION + 7)
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            rf"Goal is {len(description)} characters; maximum is "
+            rf"{MAX_GOAL_DESCRIPTION}"
+        ),
+    ):
+        EvidenceGoal("G1", description)
+
+
+def test_long_user_request_is_represented_by_bounded_internal_goal() -> None:
+    request = "Change " + "ordinary coding requirement " * 20
+
+    plan = decompose_evidence_plan(request)
+
+    assert all(0 < len(goal.description) <= MAX_GOAL_DESCRIPTION for goal in plan.goals)
+    assert len(request) > MAX_GOAL_DESCRIPTION
 
 
 def test_wrong_kind_and_wrong_goal_do_not_create_coverage() -> None:

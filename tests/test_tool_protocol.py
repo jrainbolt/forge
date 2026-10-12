@@ -9,9 +9,11 @@ from forge.models import ResponseFormat
 from forge.orchestration.protocol import (
     MAX_MODEL_RESPONSE_BYTES,
     REPOSITORY_RESPONSE_OUTPUT,
+    ModelOutputClassification,
     ProtocolError,
     ToolCallOutcome,
     build_repository_output,
+    diagnose_model_output,
     parse_model_output,
     render_tool_definitions,
     render_tool_result,
@@ -110,6 +112,53 @@ def test_parser_rejects_oversized_response() -> None:
     text = encoded({"type": "final", "answer": "x" * MAX_MODEL_RESPONSE_BYTES})
     with pytest.raises(ProtocolError, match="exceeds"):
         parse_model_output(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "classification"),
+    (
+        ("", ModelOutputClassification.EMPTY),
+        (
+            '```json\n{"type":"final","answer":"x"}\n```',
+            ModelOutputClassification.MARKDOWN_CODE_FENCE,
+        ),
+        (
+            'before {"type":"final","answer":"x"}',
+            ModelOutputClassification.PROSE_WRAPPED_JSON,
+        ),
+        (
+            '{"type":"final","answer":"x"} {"type":"final","answer":"y"}',
+            ModelOutputClassification.MULTIPLE_JSON_OBJECTS,
+        ),
+        ('{"type":"final","answer":"x', ModelOutputClassification.TRUNCATED_JSON),
+        ("{bad}", ModelOutputClassification.INVALID_JSON_SYNTAX),
+        ("[]", ModelOutputClassification.NON_OBJECT_JSON),
+        (
+            '{"type":"unexpected"}',
+            ModelOutputClassification.WRONG_ACTION_TYPE,
+        ),
+        (
+            '{"type":"final"}',
+            ModelOutputClassification.WRONG_FIELDS_OR_SCHEMA,
+        ),
+        (
+            '{"response":{"type":"final","answer":"x"}}',
+            ModelOutputClassification.UNEXPECTED_STRUCTURED_WRAPPER,
+        ),
+        (
+            '{"type":"final","answer":"x"}',
+            ModelOutputClassification.VALID_PROTOCOL,
+        ),
+    ),
+)
+def test_model_output_diagnostic_is_bounded_and_source_free(
+    text: str, classification: ModelOutputClassification
+) -> None:
+    diagnostic = diagnose_model_output(text)
+
+    assert diagnostic.classification is classification
+    assert diagnostic.byte_count == len(text.encode())
+    assert not hasattr(diagnostic, "text")
 
 
 def test_repository_output_spec_is_generic_json_with_immutable_schema() -> None:

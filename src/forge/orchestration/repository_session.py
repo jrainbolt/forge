@@ -82,6 +82,7 @@ from forge.orchestration.protocol import (
     ToolCallOutcome,
     build_mutation_ready_output,
     build_repository_output,
+    diagnose_model_output,
     parse_model_output,
     render_tool_result,
 )
@@ -2436,6 +2437,15 @@ class RepositoryChatSession:
             try:
                 parsed = parse_model_output(response.text)
             except ValueError as error:
+                diagnostic = diagnose_model_output(response.text)
+                LOGGER.info(
+                    "model_response_rejected classification=%s bytes=%d "
+                    "finish_reason=%s output_tokens=%s",
+                    diagnostic.classification.value,
+                    diagnostic.byte_count,
+                    response.finish_reason.value,
+                    response.usage.output_tokens,
+                )
                 if task_phase is RepositoryTaskPhase.FINALIZING:
                     if finalization_corrections:
                         raise RepositoryOrchestrationError(str(error)) from error
