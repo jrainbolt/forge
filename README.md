@@ -1,5 +1,51 @@
 # Forge
 
+Forge is a local-first assistant for ordinary chat, repository questions, and
+approval-gated coding work. All model inference stays with the configured local
+profiles.
+
+## Start here
+
+Install the project and optional local inference support:
+
+```bash
+python -m pip install -e '.[llama]'
+export FORGE_CONFIG="$HOME/Models/forge/forge.toml"
+forge
+```
+
+A bare `forge` opens a compact mode chooser. The preferred direct commands are:
+
+```bash
+forge chat --model qwen-small       # tool-free conversation
+forge repo . --model qwen-small     # read-only repository questions
+forge assist .                      # one approval-gated coding mutation
+forge agent .                       # bounded multi-step coding work
+```
+
+`repo`, `assist`, and `agent` are thin shortcuts over the existing `forge chat`
+session path. Coding modes resolve the configured coding default (`qwen-large` in
+the standard configuration). Chat and read-only repository modes require an
+explicit model unless the local configuration defines the corresponding default.
+An explicit `--model` always wins; Forge never falls back silently.
+
+Repository startup shows the resolved root, model profile, mode, permission
+profile, read/write/build/test policy, and structural-check mode. Read-only mode
+cannot mutate or execute project commands. Assist and agent writes remain
+default-no and show the target plus exact diff before approval. Build and test
+commands show their fixed argv, workspace, and timeout separately.
+
+Sessions keep follow-up context and repository selection until exit. `/clear`
+starts a fresh in-memory conversation without reloading the model; `/exit`, Ctrl-D,
+or Ctrl-C closes the session. Sessions are not persisted and cannot currently be
+resumed after the process exits.
+
+Common startup failures are deliberate: verify `FORGE_CONFIG`, the selected model
+profile and GGUF path, and the repository path. Use `forge --verbose ...` for
+diagnostics; normal output emphasizes responses, tool actions, approvals,
+verification, and final status. See [the practical user guide](docs/USER_GUIDE.md)
+for copyable workflows and troubleshooting.
+
 Forge is an early-stage, local-first AI coding assistant and software-development
 agent. Its long-term design keeps language models interchangeable and keeps the
 core useful without cloud services. The current implementation provides the

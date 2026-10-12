@@ -304,14 +304,13 @@ def test_tool_call_id_scope_is_session_local(tmp_path: Path) -> None:
         assert response.tool_activity[0].invocation_id == "shared"
 
 
-def test_tool_call_ids_remain_reserved_across_turn_compaction(tmp_path: Path) -> None:
+def test_tool_call_ids_are_scoped_to_each_user_turn(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("A = 1\n")
     model = MockModel(
         (
             _read("shared", "a.py"),
             json.dumps({"type": "final", "answer": "first"}),
             _read("shared", "a.py"),
-            _read("fresh", "a.py"),
             json.dumps({"type": "final", "answer": "second"}),
         )
     )
@@ -325,8 +324,8 @@ def test_tool_call_ids_remain_reserved_across_turn_compaction(tmp_path: Path) ->
     )
     session.ask("Inspect a.py once")
     second = session.ask("Inspect a.py again")
-    assert second.protocol_corrections == 1
-    assert tuple(item.invocation_id for item in second.tool_activity) == ("fresh",)
+    assert second.protocol_corrections == 0
+    assert tuple(item.invocation_id for item in second.tool_activity) == ("shared",)
 
 
 def test_same_tool_call_with_different_ids_is_legal(tmp_path: Path) -> None:

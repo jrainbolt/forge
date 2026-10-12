@@ -56,6 +56,7 @@ def run_repl(
         output_fn(f"Repository access: {legacy_access}")
         output_fn(f"Mode: {info.autonomy_mode.value.upper()}")
         output_fn(f"Permissions: {info.permission_profile}")
+        output_fn(f"Structural checks: {info.structural_completeness_mode.upper()}")
         output_fn(
             "Reads: "
             + _permission_label(info.read_permission)
@@ -79,6 +80,7 @@ def run_repl(
                     _ephemeral_review_prompt(input_fn=input_fn, output_fn=output_fn)
                 )
     output_fn("Type /help for commands.")
+    output_fn("Session history is in memory only; /clear starts a fresh conversation.")
     while True:
         try:
             text = input_fn("\n> ").strip()
@@ -102,7 +104,7 @@ def run_repl(
                 output_fn(f"\n{session.last_agent_task.footer}")
             continue
         except (ModelError, ValueError, RuntimeError) as error:
-            output_fn(f"Error: {error}")
+            output_fn(f"Error: {_present_error(error)}")
             if isinstance(session, RepositoryChatSession):
                 for activity in session.last_activity:
                     if activity.status == "success" and activity.evidence in {
@@ -180,8 +182,10 @@ def _run_command(
                 f"\nbuild configured: {'yes' if info.build_configured else 'no'}"
                 f"\ntest configured: {'yes' if info.test_configured else 'no'}"
                 f"\nmutation generation: {info.mutation_generation}"
-                "\nwrites: approval required"
-                f"\ntask mutation limit: {2 if info.repair_enabled else 1}"
+                f"\nstructural checks: {info.structural_completeness_mode}"
+                f"\nwrites: {_permission_label(info.write_permission)}"
+                f"\ntask mutation limit: "
+                f"{2 if info.repair_enabled else 1 if info.assist_mode else 0}"
             )
             if info.agent_mode:
                 rendered += (
@@ -226,16 +230,19 @@ def _approval_prompt(
     ) -> bool:
         if isinstance(preview, MultiFileMutationPreview):
             output_fn(f"[proposed] {invocation.tool_name}: {preview.proposal_identity}")
+            output_fn("Approval required: this action changes multiple files.")
             output_fn(preview.diff)
             prompt = "Approve grouped write? [y/N] "
             rejection = "Grouped write rejected."
         elif isinstance(preview, MutationPreview):
             output_fn(f"[proposed] {invocation.tool_name}: {preview.path}")
+            output_fn("Approval required: this action changes a repository file.")
             output_fn(preview.diff)
             prompt = "Approve? [y/N] "
             rejection = "Write rejected."
         else:
             output_fn(f"[proposed] {invocation.tool_name}")
+            output_fn("Approval required: this action runs a project command.")
             output_fn(f"Workspace: {preview.workspace}")
             output_fn("Command argv:")
             for argument in preview.argv:
@@ -259,6 +266,26 @@ def _approval_prompt(
         return False
 
     return approve
+
+
+def _present_error(error: Exception) -> str:
+    message = str(error)
+    presentations = {
+        "DUPLICATE_TOOL_CALL_ID": (
+            "The model repeated an internal action identifier in this turn. "
+            "No repeated action was executed."
+        ),
+        "STRUCTURAL_COMPLETENESS_REJECTED": (
+            "The proposed change did not satisfy the required file structure."
+        ),
+        "EXECUTABLE_CHECK_FAILURE": (
+            "The change failed a trusted behavior check after normal verification."
+        ),
+    }
+    for classification, rendered in presentations.items():
+        if classification in message:
+            return rendered
+    return message
 
 
 def _ephemeral_review_prompt(

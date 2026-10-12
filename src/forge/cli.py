@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -55,6 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="forge",
         description="Forge local-first AI coding assistant",
+        epilog=(
+            "Preferred shortcuts: forge repo [PATH], forge assist [PATH], "
+            "forge agent [PATH]. A bare forge opens the startup chooser."
+        ),
     )
     parser.add_argument(
         "--version",
@@ -202,7 +207,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the Forge CLI and return its process exit status."""
-    args = build_parser().parse_args(argv)
+    raw_arguments = list(sys.argv[1:] if argv is None else argv)
+    if not raw_arguments:
+        if not sys.stdin.isatty():
+            build_parser().print_help()
+            return 2
+        raw_arguments = _interactive_startup()
+        if not raw_arguments:
+            return 0
+    args = build_parser().parse_args(_normalize_primary_command(raw_arguments))
     config = ForgeConfig.from_environment()
     if args.verbose:
         config = config.with_verbose(True)
@@ -436,6 +449,59 @@ def main(argv: Sequence[str] | None = None) -> int:
                 LOGGER.debug("Evaluation failed", exc_info=True)
             return 2
     return 0
+
+
+def _normalize_primary_command(arguments: list[str]) -> list[str]:
+    """Map concise UX aliases onto the single existing chat implementation."""
+    arguments = list(arguments)
+    prefix: list[str] = []
+    while arguments and arguments[0] in {"-v", "--verbose"}:
+        prefix.append(arguments.pop(0))
+    if not arguments or arguments[0] not in {"repo", "assist", "agent"}:
+        return [*prefix, *arguments]
+    command = arguments[0]
+    remaining = arguments[1:]
+    workspace = "."
+    if remaining and not remaining[0].startswith("-"):
+        workspace = remaining.pop(0)
+    mode = {"repo": "read", "assist": "assist", "agent": "agent"}[command]
+    return [
+        *prefix,
+        "chat",
+        "--mode",
+        mode,
+        "--workspace",
+        workspace,
+        *remaining,
+    ]
+
+
+def _interactive_startup() -> list[str]:
+    print("Forge — choose a mode")
+    print("  1. Chat")
+    print("  2. Repository chat (read-only)")
+    print("  3. Coding assist (approval required)")
+    print("  4. Agent (bounded, approval required)")
+    try:
+        choice = input("Mode [1-4, q to quit]: ").strip().casefold()
+    except (EOFError, KeyboardInterrupt):
+        print("\nGoodbye.")
+        return []
+    if choice in {"q", "quit", "exit"}:
+        return []
+    modes = {"1": "chat", "2": "repo", "3": "assist", "4": "agent"}
+    command = modes.get(choice)
+    if command is None:
+        print("Invalid selection. Run `forge --help` for commands.")
+        return []
+    if command == "chat":
+        return ["chat"]
+    try:
+        workspace = input("Repository path [.]: ").strip() or "."
+    except (EOFError, KeyboardInterrupt):
+        print("\nGoodbye.")
+        return []
+    return [command, workspace]
 
 
 def _resolve_chat_mode(args: argparse.Namespace) -> AutonomyMode:

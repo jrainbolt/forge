@@ -515,6 +515,7 @@ class RepositorySessionInfo:
     write_permission: PermissionDecision
     build_permission: PermissionDecision
     test_permission: PermissionDecision
+    structural_completeness_mode: str
 
 
 class RepositoryChatSession:
@@ -1147,6 +1148,7 @@ class RepositoryChatSession:
             write_permission=self._interaction_policy.permission_profile.write,
             build_permission=self._interaction_policy.permission_profile.build,
             test_permission=self._interaction_policy.permission_profile.test,
+            structural_completeness_mode=self._structural_completeness_mode.value,
         )
 
     def set_approval_callback(
@@ -1220,6 +1222,7 @@ class RepositoryChatSession:
             raise RepositoryOrchestrationError(
                 "coding tasks require explicit assist mode"
             )
+        self._model_invocation_ids.clear()
         self._authorized_create_invocation = None
         self._authorized_mixed_invocation = None
         self._active_coding_task = CodingTaskState(
@@ -1363,6 +1366,7 @@ class RepositoryChatSession:
         """Run the shared repository orchestration transaction."""
         if self._closed:
             raise RepositoryOrchestrationError("repository chat session is closed")
+        self._model_invocation_ids.clear()
         self._last_activity = ()
         transcript: list[Message] = []
         context_planner = ContextPlanner(

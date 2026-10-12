@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from forge import __version__
-from forge.cli import main
+from forge.cli import _normalize_primary_command, main
 from forge.evaluation import EvaluationRun
 from forge.models import MockModel, ModelSelectionError
 
@@ -20,6 +20,51 @@ def test_help_succeeds(capsys: pytest.CaptureFixture[str]) -> None:
 
     assert exit_info.value.code == 0
     assert "Forge local-first AI coding assistant" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "source,expected",
+    (
+        (
+            ["repo", "/tmp/project", "--model", "qwen-small"],
+            [
+                "chat",
+                "--mode",
+                "read",
+                "--workspace",
+                "/tmp/project",
+                "--model",
+                "qwen-small",
+            ],
+        ),
+        (
+            ["assist", "."],
+            ["chat", "--mode", "assist", "--workspace", "."],
+        ),
+        (
+            ["agent"],
+            ["chat", "--mode", "agent", "--workspace", "."],
+        ),
+        (
+            ["--verbose", "assist", "."],
+            ["--verbose", "chat", "--mode", "assist", "--workspace", "."],
+        ),
+    ),
+)
+def test_primary_command_aliases_use_existing_chat_path(
+    source: list[str], expected: list[str]
+) -> None:
+    assert _normalize_primary_command(source) == expected
+
+
+def test_bare_noninteractive_forge_shows_help(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("forge.cli.sys.stdin.isatty", lambda: False)
+    assert main([]) == 2
+    output = capsys.readouterr().out
+    assert "usage: forge" in output
+    assert "forge assist [PATH]" in output
 
 
 def test_version_succeeds(capsys: pytest.CaptureFixture[str]) -> None:
