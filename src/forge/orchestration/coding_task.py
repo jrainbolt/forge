@@ -38,6 +38,7 @@ class CodingTaskStatus(Enum):
     COMPLETED_VERIFIED = "completed_verified"
     COMPLETED_UNVERIFIED = "completed_unverified"
     COMPLETED_READ_ONLY = "completed_read_only"
+    COMPLETED_NO_CHANGE = "completed_no_change"
     REJECTED = "rejected"
     FAILED_BEFORE_MUTATION = "failed_before_mutation"
     MUTATED_VERIFICATION_FAILED = "mutated_verification_failed"
@@ -357,6 +358,7 @@ class CodingTaskState:
         repair_enabled: bool = False,
         transition_required: bool = True,
         mutation_representation: str = "exact_text",
+        conditional_no_change: bool = False,
     ) -> None:
         if mutation_representation not in {"exact_text", "line_range"}:
             raise ValueError("unsupported mutation representation")
@@ -413,6 +415,7 @@ class CodingTaskState:
         self._structured_edit_awaiting_correction = False
         self._no_op_awaiting_correction = False
         self.transition_required = transition_required
+        self.conditional_no_change = conditional_no_change
 
     @property
     def terminal(self) -> bool:
@@ -683,6 +686,20 @@ class CodingTaskState:
         if self._mutation_ready_correction_used:
             return False
         self._mutation_ready_correction_used = True
+        return True
+
+    def complete_no_change(self) -> bool:
+        """Complete a grounded conditional task without consuming mutation authority."""
+        if (
+            not self.conditional_no_change
+            or not self.mutation_ready
+            or self.mutation_count
+            or not self.mutation_candidates
+            or (self.required_candidates and not self.required_sources_ready)
+        ):
+            return False
+        self.phase = CodingTaskPhase.COMPLETED
+        self._terminal_status = CodingTaskStatus.COMPLETED_NO_CHANGE
         return True
 
     def use_targeted_reread(self) -> bool:

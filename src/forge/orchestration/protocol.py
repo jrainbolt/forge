@@ -175,6 +175,16 @@ MULTI_FILE_CHANGE_SCHEMA = {
     "required": ["type", "operations"],
     "additionalProperties": False,
 }
+NO_CHANGE_REASON_MAX_CHARS = 240
+NO_CHANGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {"const": "no_change"},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 240},
+    },
+    "required": ["type", "reason"],
+    "additionalProperties": False,
+}
 REPOSITORY_RESPONSE_SCHEMA = {
     "oneOf": [
         TOOL_CALL_SCHEMA,
@@ -401,6 +411,7 @@ class ToolCallOutcome(Enum):
     CREATE_FILE = "create_file"
     MULTI_FILE_CREATE = "multi_file_create"
     MULTI_FILE_CHANGE = "multi_file_change"
+    NO_CHANGE = "no_change"
 
 
 class ModelOutputClassification(Enum):
@@ -467,6 +478,7 @@ def diagnose_model_output(text: str) -> ModelOutputDiagnostic:
         "create_file",
         "multi_file_create",
         "multi_file_change",
+        "no_change",
     }:
         return ModelOutputDiagnostic(
             ModelOutputClassification.WRONG_ACTION_TYPE, byte_count
@@ -545,6 +557,7 @@ class ParsedModelOutput:
     multi_file_line_range_edit: tuple[Mapping[str, object], ...] | None = None
     creates: tuple[Mapping[str, str], ...] | None = None
     operations: tuple[Mapping[str, object], ...] | None = None
+    no_change_reason: str | None = None
 
     def __post_init__(self) -> None:
         if self.outcome is ToolCallOutcome.FINAL:
@@ -589,6 +602,9 @@ class ParsedModelOutput:
         elif self.outcome is ToolCallOutcome.MULTI_FILE_CHANGE:
             if self.operations is None:
                 raise ValueError("mixed output requires operations")
+        elif self.outcome is ToolCallOutcome.NO_CHANGE:
+            if self.no_change_reason is None or not self.no_change_reason.strip():
+                raise ValueError("no-change output requires a reason")
         else:
             raise TypeError("outcome must be a ToolCallOutcome")
 
@@ -627,6 +643,17 @@ def parse_model_output(text: str) -> ParsedModelOutput:
         if not isinstance(answer, str) or not answer.strip():
             raise ProtocolError("final answer must be non-empty text")
         return ParsedModelOutput(ToolCallOutcome.FINAL, text=answer)
+    if response_type == "no_change":
+        if set(payload) != {"type", "reason"}:
+            raise ProtocolError("no_change requires exactly type and reason")
+        reason = payload["reason"]
+        if not isinstance(reason, str) or not reason.strip():
+            raise ProtocolError("no_change reason must be non-empty text")
+        if len(reason) > NO_CHANGE_REASON_MAX_CHARS:
+            raise ProtocolError(
+                "no_change reason exceeds the 240-character protocol limit"
+            )
+        return ParsedModelOutput(ToolCallOutcome.NO_CHANGE, no_change_reason=reason)
     if response_type == "create_file":
         if set(payload) != {"type", "path", "content"} or not all(
             isinstance(payload[key], str) for key in ("path", "content")
@@ -796,6 +823,7 @@ def build_mutation_ready_output(
     allow_targeted_reread: bool = False,
     reread_schema: dict[str, object] | None = None,
     allow_single_file_subset: bool = False,
+    allow_no_change: bool = False,
 ) -> OutputSpecification:
     """Require one candidate-bound configured mutation representation."""
     if create_paths and candidate_paths:
@@ -812,9 +840,8 @@ def build_mutation_ready_output(
         ]
         children[0]["properties"]["path"]["enum"] = sorted(candidate_paths)
         children[1]["properties"]["path"]["enum"] = sorted(create_paths)
-        return OutputSpecification(
-            ResponseFormat.JSON, {"oneOf": [mixed, FINAL_SCHEMA]}
-        )
+        terminal = NO_CHANGE_SCHEMA if allow_no_change else FINAL_SCHEMA
+        return OutputSpecification(ResponseFormat.JSON, {"oneOf": [mixed, terminal]})
     if create_paths:
         source = (
             CREATE_FILE_SCHEMA if len(create_paths) == 1 else MULTI_FILE_CREATE_SCHEMA
@@ -826,9 +853,8 @@ def build_mutation_ready_output(
             creation["properties"]["creates"]["items"]["properties"]["path"]["enum"] = (
                 sorted(create_paths)
             )
-        return OutputSpecification(
-            ResponseFormat.JSON, {"oneOf": [creation, FINAL_SCHEMA]}
-        )
+        terminal = NO_CHANGE_SCHEMA if allow_no_change else FINAL_SCHEMA
+        return OutputSpecification(ResponseFormat.JSON, {"oneOf": [creation, terminal]})
     grouped = len(candidate_paths) > 1
     source_schema = (
         MULTI_FILE_LINE_RANGE_EDIT_SCHEMA
@@ -858,7 +884,7 @@ def build_mutation_ready_output(
         branches.append(single)
     if allow_targeted_reread and reread_schema is not None:
         branches.append(reread_schema)
-    branches.append(FINAL_SCHEMA)
+    branches.append(NO_CHANGE_SCHEMA if allow_no_change else FINAL_SCHEMA)
     return OutputSpecification(ResponseFormat.JSON, {"oneOf": branches})
 
 

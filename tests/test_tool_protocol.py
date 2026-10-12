@@ -52,6 +52,12 @@ def test_parser_accepts_valid_tool_call_and_final_envelopes() -> None:
     assert final.outcome is ToolCallOutcome.FINAL
     assert final.text == "Grounded."
 
+    no_change = parse_model_output(
+        encoded({"type": "no_change", "reason": "The inspected source is correct."})
+    )
+    assert no_change.outcome is ToolCallOutcome.NO_CHANGE
+    assert no_change.no_change_reason == "The inspected source is correct."
+
 
 @pytest.mark.parametrize(
     "text, message",
@@ -94,6 +100,8 @@ def test_parser_accepts_valid_tool_call_and_final_envelopes() -> None:
         ),
         (encoded({"type": "final"}), "exactly"),
         (encoded({"type": "final", "answer": 3}), "answer"),
+        (encoded({"type": "no_change", "reason": ""}), "non-empty"),
+        (encoded({"type": "no_change", "reason": "x" * 241}), "240-character"),
         (
             '{"type":"final","answer":"one"}{"type":"final","answer":"two"}',
             "valid JSON",

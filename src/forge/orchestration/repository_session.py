@@ -160,6 +160,7 @@ from forge.tools.mixed_transaction import mixed_group_id, preview_mixed_file_tra
 LOGGER = logging.getLogger(__name__)
 DEFAULT_MAX_ORCHESTRATION_STEPS = 12
 DEFAULT_MAX_TOOL_EXECUTIONS = 8
+DEFAULT_MUTATION_MAX_TOKENS = 512
 DEFAULT_MAX_CODING_TOOL_EXECUTIONS = 10
 DEFAULT_MAX_AGENT_ITERATIONS = 16
 DEFAULT_MAX_AGENT_MODEL_CALLS = 16
@@ -210,6 +211,11 @@ MUTATION_READY_GUIDANCE = (
     "structured_edit, copy old_text exactly from the current source and provide "
     "the changed replacement in new_text. new_text must differ from old_text. "
     "Do not return unchanged text or continue repository discovery."
+)
+CONDITIONAL_NO_CHANGE_GUIDANCE = (
+    "This task explicitly permits no change when inspection finds no justified "
+    "modification. If a change is justified, return the offered mutation action. "
+    "Otherwise return one no_change object with a concise evidence-based reason."
 )
 LINE_RANGE_MUTATION_READY_GUIDANCE = (
     "Current source evidence is sufficient for one safe mutation. Choose the "
@@ -287,7 +293,8 @@ MUTATION_READY_SYSTEM_PROMPT = (
     "it against current source and requires an exact diff preview and approval "
     "before any write. Do not claim a mutation or verification succeeded before "
     "Forge confirms it. Do not invent paths, use shell commands, or access the "
-    "network. Use final only if no safe mutation can be proposed."
+    "network. Use no_change only when that action is offered by the schema. Use "
+    "final only when it is offered and no safe mutation can be proposed."
 )
 REPRESENTATION_NEUTRAL_PRIMARY_GUIDANCE = (
     "Current source evidence is sufficient for the primary mutation. Submit the "
@@ -708,6 +715,16 @@ class RepositoryChatSession:
         self._model = model
         self._generation = generation or GenerationConfig(
             max_tokens=256, temperature=0.4
+        )
+        context_capacity = self._model.context_capacity or 4096
+        mutation_max_tokens = min(
+            max(self._generation.max_tokens, DEFAULT_MUTATION_MAX_TOKENS),
+            max(1, context_capacity // 2),
+        )
+        self._mutation_generation_config = GenerationConfig(
+            max_tokens=mutation_max_tokens,
+            temperature=self._generation.temperature,
+            seed=self._generation.seed,
         )
         self._registry = registry or create_readonly_repository_registry()
         if interaction_policy is not None:
@@ -1235,6 +1252,7 @@ class RepositoryChatSession:
                 or (self._minimum_source_files or 1) > 1
             ),
             mutation_representation=self._mutation_representation.value,
+            conditional_no_change=_is_conditional_mutation_request(user_text),
         )
         if self._required_candidate_paths:
             self._active_coding_task.establish_required_candidates(
@@ -1372,7 +1390,10 @@ class RepositoryChatSession:
         transcript: list[Message] = []
         context_planner = ContextPlanner(
             model_capacity=self._model.context_capacity,
-            reserved_output=self._generation.max_tokens,
+            reserved_output=max(
+                self._generation.max_tokens,
+                self._mutation_generation_config.max_tokens,
+            ),
         )
         activities: list[ToolActivity] = []
         call_counts: dict[str, int] = {}
@@ -2188,7 +2209,16 @@ class RepositoryChatSession:
                     allow_targeted_reread=reread_schema is not None,
                     reread_schema=reread_schema,
                     allow_single_file_subset=coding_task.repair_ready,
+                    allow_no_change=(
+                        coding_task.conditional_no_change
+                        and not coding_task.repair_ready
+                    ),
                 )
+            request_generation = (
+                self._mutation_generation_config
+                if structured_edit_ready
+                else self._generation
+            )
             schema_cost = _estimated_schema_cost(output_specification.schema)
             system_cost = (
                 estimator.estimate(self._conversation.system_message)
@@ -2199,7 +2229,7 @@ class RepositoryChatSession:
             maximum_observations = max(
                 0,
                 (self._model.context_capacity or 4096)
-                - self._generation.max_tokens
+                - request_generation.max_tokens
                 - 64
                 - system_cost
                 - task_cost
@@ -2363,6 +2393,8 @@ class RepositoryChatSession:
                     if coding_task.repair_enabled
                     else self._mutation_ready_guidance(grouped=len(candidates) > 1)
                 )
+                if coding_task.conditional_no_change and not repair:
+                    guidance = guidance + " " + CONDITIONAL_NO_CHANGE_GUIDANCE
                 if self._create_paths and not repair:
                     guidance = (
                         self._mixed_ready_guidance()
@@ -2382,9 +2414,24 @@ class RepositoryChatSession:
                     *trusted_group,
                     Message(MessageRole.USER, mutation_correction or guidance),
                 )
+                required_input_tokens = (
+                    system_cost
+                    + task_cost
+                    + sum(estimator.estimate(item) for item in mutation_messages)
+                )
+                available_output_tokens = max(
+                    1,
+                    (self._model.context_capacity or 4096) - 64 - required_input_tokens,
+                )
+                if available_output_tokens < request_generation.max_tokens:
+                    request_generation = GenerationConfig(
+                        max_tokens=available_output_tokens,
+                        temperature=request_generation.temperature,
+                        seed=request_generation.seed,
+                    )
             plan = self._conversation.plan_request(
                 user_text,
-                self._generation,
+                request_generation,
                 context_capacity=self._model.context_capacity,
                 temporary_messages=(
                     mutation_messages
@@ -2395,7 +2442,7 @@ class RepositoryChatSession:
             remaining_context = max(
                 0,
                 (self._model.context_capacity or 4096)
-                - self._generation.max_tokens
+                - request_generation.max_tokens
                 - 64
                 - plan.estimated_input_tokens,
             )
@@ -2420,7 +2467,7 @@ class RepositoryChatSession:
                 )
             structured_request = ModelRequest(
                 request_messages,
-                plan.request.generation,
+                request_generation,
                 output_specification,
             )
             response = self._model.generate(structured_request)
@@ -3381,6 +3428,32 @@ class RepositoryChatSession:
                         validation.arguments,
                     ),
                 )
+            if parsed.outcome is ToolCallOutcome.NO_CHANGE:
+                reason = parsed.no_change_reason or "No justified change was found."
+                if (
+                    structured_edit_ready
+                    and coding_task is not None
+                    and coding_task.complete_no_change()
+                ):
+                    parsed = ParsedModelOutput(ToolCallOutcome.FINAL, text=reason)
+                    structured_edit_ready = False
+                elif structured_edit_ready and coding_task is not None:
+                    if coding_task.note_premature_final():
+                        mutation_correction = (
+                            "This task requires a mutation; no_change is unavailable. "
+                            + self._mutation_ready_guidance(
+                                grouped=len(coding_task.mutation_candidates) > 1
+                            )
+                        )
+                        continue
+                    coding_task.fail_after_mutation()
+                    raise RepositoryOrchestrationError(
+                        "no_change is not permitted for a required mutation task"
+                    )
+                else:
+                    raise RepositoryOrchestrationError(
+                        "no_change is only valid for a grounded conditional task"
+                    )
             if parsed.outcome is ToolCallOutcome.FINAL:
                 if (
                     coding_task is not None
@@ -3482,6 +3555,14 @@ class RepositoryChatSession:
                         f"Incomplete evidence: required goal(s) {failed} failed. "
                         f"{parsed.text}"
                     )
+                task_phase = RepositoryTaskPhase.COMPLETED
+                self._last_plan = plan
+                self._last_activity = tuple(activities)
+                task_result = (
+                    coding_task.finish(parsed.text) if coding_task is not None else None
+                )
+                if task_result is not None:
+                    final_text = _truthful_coding_answer(final_text, task_result)
                 answer_response = ModelResponse(
                     final_text,
                     response.finish_reason,
@@ -3489,12 +3570,6 @@ class RepositoryChatSession:
                     response.usage,
                 )
                 self._conversation.commit(user_text, final_text)
-                task_phase = RepositoryTaskPhase.COMPLETED
-                self._last_plan = plan
-                self._last_activity = tuple(activities)
-                task_result = (
-                    coding_task.finish(parsed.text) if coding_task is not None else None
-                )
                 context_metrics = context_planner.metrics
                 LOGGER.info(
                     "Context plan peak=%d admitted=%d dropped=%d compacted=%d "
@@ -5650,6 +5725,56 @@ def _candidate_search_queries(question: str) -> set[str]:
     if not candidates:
         candidates.add(question.strip())
     return candidates
+
+
+_CONDITIONAL_MUTATION_PATTERNS = (
+    re.compile(r"\bif\s+(?:none|no\s+\w+|nothing)\b.{0,80}\bno\s+change\b", re.I),
+    re.compile(r"\bmake\s+no\s+change\b", re.I),
+    re.compile(
+        r"\b(?:change|fix|modify|update|optimi[sz]e)\b.{0,40}\bif\s+"
+        r"(?:needed|necessary|justified|appropriate)\b",
+        re.I,
+    ),
+    re.compile(r"\bonly\s+if\b", re.I),
+    re.compile(
+        r"\bcheck\s+whether\b.{0,100}\b(?:needs?|requires?)\s+(?:a\s+)?"
+        r"(?:change|modification|update)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\bif\b.{0,80}\b(?:wrong|incorrect|outdated|meaningful improvement)\b",
+        re.I,
+    ),
+)
+
+
+def _is_conditional_mutation_request(user_text: str) -> bool:
+    """Recognize explicit pre-generation permission to complete without mutation."""
+    normalized = " ".join(user_text.split())
+    return any(pattern.search(normalized) for pattern in _CONDITIONAL_MUTATION_PATTERNS)
+
+
+_UNSUPPORTED_VERIFICATION_CLAIM = re.compile(
+    r"\b(?:verified|verification\s+(?:passed|succeeded)|"
+    r"(?:all\s+)?tests?\s+(?:passed|succeeded)|build\s+(?:passed|succeeded))\b",
+    re.IGNORECASE,
+)
+
+
+def _truthful_coding_answer(answer: str, result: CodingTaskResult) -> str:
+    """Prevent generated prose from overstating authoritative verification state."""
+    if not _UNSUPPORTED_VERIFICATION_CLAIM.search(answer):
+        return answer
+    if result.status is CodingTaskStatus.COMPLETED_UNVERIFIED:
+        if result.build.status == result.test.status == "not_run":
+            return "The requested change was applied. Build and tests were not run."
+        return (
+            "The requested change was applied, but production verification did not "
+            "pass."
+        )
+    if result.status is CodingTaskStatus.COMPLETED_NO_CHANGE:
+        return "No justified source change was found. Build and tests were not run."
+    return answer
 
 
 def _update_candidates(

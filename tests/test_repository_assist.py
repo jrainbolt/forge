@@ -84,6 +84,29 @@ def structured_edit(path: str = "src/value.py") -> str:
     )
 
 
+def no_change(reason: str = "The inspected source has no obvious defect.") -> str:
+    return json.dumps({"type": "no_change", "reason": reason})
+
+
+def path_bound_assist_session(
+    model: MockModel,
+    workspace: Path,
+    *,
+    approve=None,  # type: ignore[no-untyped-def]
+) -> RepositoryChatSession:
+    return RepositoryChatSession(
+        "fixture",
+        model,
+        workspace,
+        registry=create_assist_repository_registry(),
+        policy=create_assist_repository_policy(),
+        approval_callback=approve,
+        minimum_source_files=1,
+        require_relevant_source=False,
+        required_candidate_paths=("src/value.py",),
+    )
+
+
 def test_assist_read_patch_preview_approval_and_evidence_invalidation(
     workspace: Path,
 ) -> None:
@@ -112,6 +135,110 @@ def test_assist_read_patch_preview_approval_and_evidence_invalidation(
     assert response.tool_activity[0].current_source is False
     assert response.tool_activity[1].evidence == "patch_success"
     assert "repository.apply_patch" not in str(model.requests[2].output.schema)
+
+
+def test_mutation_ready_generation_uses_bounded_512_token_floor(
+    workspace: Path,
+) -> None:
+    model = MockModel((structured_edit(), final("Applied.")), context_capacity=8192)
+
+    path_bound_assist_session(model, workspace, approve=lambda *_args: True).ask(
+        "Change VALUE to 2."
+    )
+
+    assert model.requests[0].generation.max_tokens == 512
+    assert model.requests[0].generation.max_tokens > 256
+    assert model.requests[0].generation.max_tokens <= model.context_capacity // 2
+
+
+def test_large_complete_structured_response_uses_normal_approval_path(
+    workspace: Path,
+) -> None:
+    replacement = "VALUE = 2\n" + "# bounded explanation\n" * 55
+    response_text = json.dumps(
+        {
+            "type": "structured_edit",
+            "path": "src/value.py",
+            "old_text": "VALUE = 1",
+            "new_text": replacement,
+        }
+    )
+    assert len(response_text.encode()) > 1_024
+    approvals = 0
+
+    def reject(_invocation: object, _preview: object) -> bool:
+        nonlocal approvals
+        approvals += 1
+        return False
+
+    model = MockModel((response_text, final("Not applied.")), context_capacity=8192)
+    response = path_bound_assist_session(model, workspace, approve=reject).ask(
+        "Replace VALUE with the documented expanded value."
+    )
+
+    assert approvals == 1
+    assert response.coding_task is not None
+    assert response.coding_task.status is CodingTaskStatus.REJECTED
+    assert (workspace / "src/value.py").read_bytes() == b"VALUE = 1\n"
+
+
+def test_conditional_no_change_completes_without_mutation_or_approval(
+    workspace: Path,
+) -> None:
+    approvals = 0
+
+    def approve(_invocation: object, _preview: object) -> bool:
+        nonlocal approvals
+        approvals += 1
+        return True
+
+    model = MockModel((no_change(),))
+    response = path_bound_assist_session(model, workspace, approve=approve).ask(
+        "Inspect this file for obvious correctness issues. If none are found, "
+        "make no change and explain why."
+    )
+
+    result = response.coding_task
+    assert result is not None
+    assert result.status is CodingTaskStatus.COMPLETED_NO_CHANGE
+    assert result.mutation_count == 0
+    assert result.build.status == result.test.status == "not_run"
+    assert approvals == 0
+    assert (workspace / "src/value.py").read_bytes() == b"VALUE = 1\n"
+    assert "no_change" in str(model.requests[0].output.schema)
+
+
+def test_required_mutation_rejects_typed_no_change(workspace: Path) -> None:
+    model = MockModel((no_change(), no_change()))
+    session = path_bound_assist_session(model, workspace, approve=lambda *_args: True)
+
+    with pytest.raises(
+        RepositoryOrchestrationError,
+        match="no_change is not permitted for a required mutation task",
+    ):
+        session.ask("Change VALUE to 2. Modify only src/value.py.")
+
+    assert session.last_coding_task.status is CodingTaskStatus.FAILED_BEFORE_MUTATION
+    assert session.last_coding_task.mutation_count == 0
+    assert "no_change" not in str(model.requests[0].output.schema)
+    assert (workspace / "src/value.py").read_bytes() == b"VALUE = 1\n"
+
+
+def test_unverified_mutation_cannot_claim_verified_in_user_prose(
+    workspace: Path,
+) -> None:
+    model = MockModel(
+        (structured_edit(), final("The file was successfully modified and verified."))
+    )
+    response = path_bound_assist_session(
+        model, workspace, approve=lambda *_args: True
+    ).ask("Change VALUE to 2.")
+
+    assert response.coding_task is not None
+    assert response.coding_task.status is CodingTaskStatus.COMPLETED_UNVERIFIED
+    assert response.text == (
+        "The requested change was applied. Build and tests were not run."
+    )
 
 
 def test_assist_read_then_matching_replace_is_approved(workspace: Path) -> None:
