@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import site
 import subprocess
 import sys
 import zipfile
@@ -12,7 +11,6 @@ def test_editable_and_wheel_install_without_pythonpath(tmp_path: Path) -> None:
     project = Path(__file__).resolve().parents[1]
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
-    build_environment = environment | {"PYTHONPATH": site.getsitepackages()[0]}
 
     editable = tmp_path / "editable"
     _run((sys.executable, "-m", "venv", "--system-site-packages", str(editable)))
@@ -23,12 +21,11 @@ def test_editable_and_wheel_install_without_pythonpath(tmp_path: Path) -> None:
             "-m",
             "pip",
             "install",
-            "--no-build-isolation",
             "--no-deps",
             "-e",
             str(project),
         ),
-        environment=build_environment,
+        environment=environment,
     )
     _assert_installed(editable, tmp_path, environment)
 
@@ -40,13 +37,12 @@ def test_editable_and_wheel_install_without_pythonpath(tmp_path: Path) -> None:
             "-m",
             "pip",
             "wheel",
-            "--no-build-isolation",
             "--no-deps",
             "--wheel-dir",
             str(wheelhouse),
             str(project),
         ),
-        environment=build_environment,
+        environment=environment,
     )
     wheel = next(wheelhouse.glob("forge_coding_assistant-*.whl"))
     _assert_wheel_contents(wheel)
