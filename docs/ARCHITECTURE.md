@@ -1608,3 +1608,28 @@ may drive one bounded ordinary lexical-search/read round using production index
 facts. The selected candidate must be an implementation result with maximal
 query-token coverage, and all normal authority, budget, and two-round limits
 still apply.
+
+## Structural completeness production policy
+
+Structural completeness is a narrow, supplementary correctness mechanism. It
+checks only high-confidence structural contracts frozen before mutation; it does
+not establish behavioral, algorithmic, numeric, ordering, policy, edge-case, or
+state-machine correctness.
+
+The modes are deliberately explicit. `off` performs no check. `shadow` evaluates
+available obligations but never blocks and is the default, including for legacy
+configuration. `enforce` is opt-in: only a proven structural `FAIL` rejects a
+candidate. `PARTIAL`, `NOT_APPLICABLE`, checker exceptions, and operational
+uncertainty continue normally. Zero obligations therefore never blocks.
+
+Eligible obligations come from conservative autonomous derivation over trusted
+task/repository evidence or from explicit caller registration using the same
+typed representation, provenance validation, inspection boundary, checker, and
+enforcement semantics. Oracle/reference implementations, evaluator expectations,
+hidden paths, generated output, benchmark truth, and fuzzy inference are not
+eligible sources. Inspection scope remains separate from mutation authority.
+
+Autonomous derivation is intentionally conservative: low coverage is preferable
+to false structural authority. Existing imports, includes, declarations, calls,
+and test usage are evidence, not requirements by themselves. Further expansion is
+deferred unless a genuinely stronger trustworthy evidence source appears.

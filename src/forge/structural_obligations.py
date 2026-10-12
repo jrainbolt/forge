@@ -78,6 +78,9 @@ class StructuralObligationSet:
         return {
             "obligation_set_identity": self.identity,
             "obligation_count": len(self.obligations),
+            "derivation_source_classes": tuple(
+                sorted({item.provenance_class for item in self.obligations})
+            ),
             "obligations": tuple(
                 {
                     "obligation_id": item.obligation_id,

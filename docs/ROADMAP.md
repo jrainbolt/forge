@@ -2509,3 +2509,18 @@ The remaining weakness is semantic rather than selection or transaction plumbing
 Create passed 1/3 despite 3/3 verification, and mixed edit/create passed 0/3 even
 though every required operation role was present and applied. A80 therefore adds no
 routing, fallback, retry, prompt, budget, or production-orchestration change.
+
+## A89 — Structural completeness production positioning
+
+The structural-completeness branch is closed as a narrow supplementary mechanism.
+The production default remains `shadow`; `enforce` remains an explicit opt-in for
+workflows with high-confidence autonomous or caller-registered obligations. Proven
+failure may reject, while absence, ambiguity, partial results, and operational
+uncertainty fail open.
+
+Structural checks do not establish behavioral correctness, and autonomous
+derivation remains intentionally conservative. Coverage expansion is deferred
+unless a new trustworthy production-visible evidence source appears. Subsequent
+roadmap work should return to semantic coding reliability and executable
+verification, especially CREATE and MIXED workflows whose structural shape can be
+healthy while behavior remains incorrect.

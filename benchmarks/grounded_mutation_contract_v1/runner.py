@@ -342,6 +342,9 @@ def run_cell(
             "structural_obligation_metadata": (
                 raw.metrics.structural_obligation_metadata
             ),
+            "structural_derivation_source_classes": (
+                raw.metrics.structural_derivation_source_classes
+            ),
             "structural_obligation_set_identity": (
                 raw.metrics.structural_obligation_set_identity
             ),

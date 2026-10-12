@@ -299,6 +299,29 @@ class CodingTaskResult:
 
     @property
     def footer(self) -> str:
+        structural = ""
+        if self.structural_completeness.enforced_rejection:
+            kinds = sorted(
+                {
+                    str(item.get("kind"))
+                    for item in self.structural_obligations.get("obligations", ())
+                    if isinstance(item, Mapping) and item.get("kind")
+                }
+            )
+            identities = sorted(
+                {
+                    str(item.get("symbol_identity") or item.get("target_identity"))[:12]
+                    for item in self.structural_obligations.get("obligations", ())
+                    if isinstance(item, Mapping)
+                    and (item.get("symbol_identity") or item.get("target_identity"))
+                }
+            )
+            structural = (
+                "\nStructural rejection: proven failure"
+                f" ({len(self.structural_completeness.failed_check_ids)} checks)"
+                f"\nRelationship kinds: {', '.join(kinds) or 'unknown'}"
+                f"\nComponent identities: {', '.join(identities) or 'unavailable'}"
+            )
         if self.repair_enabled:
             initial = _attempt_label(self.build_attempts, self.test_attempts, 0)
             repair = _attempt_label(self.build_attempts, self.test_attempts, 1)
@@ -310,6 +333,7 @@ class CodingTaskResult:
                 f"Repair #2: {repair_change}\n"
                 f"Repair verification: {repair}\n"
                 f"Status: {self.status.value.upper()}"
+                f"{structural}"
             )
         change = "applied" if self.mutation_count else "not applied"
         return (
@@ -317,6 +341,7 @@ class CodingTaskResult:
             f"Build: {self.build.status}\n"
             f"Tests: {self.test.status}\n"
             f"Status: {self.status.value.upper()}"
+            f"{structural}"
         )
 
 
