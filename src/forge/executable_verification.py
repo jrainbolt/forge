@@ -7,7 +7,7 @@ import json
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
@@ -49,6 +49,24 @@ class ExecutableCheckOutcome(StrEnum):
     CHECK_TIMEOUT = "CHECK_TIMEOUT"
     CHECK_PASS = "CHECK_PASS"
     CHECK_FAIL = "CHECK_FAIL"
+    HARNESS_CONSTRUCTION_ERROR = "HARNESS_CONSTRUCTION_ERROR"
+    HARNESS_COMPILE_ERROR = "HARNESS_COMPILE_ERROR"
+    HARNESS_LINK_ERROR = "HARNESS_LINK_ERROR"
+    CHECK_RUNTIME_ERROR = "CHECK_RUNTIME_ERROR"
+
+
+class CCompiler(StrEnum):
+    CC = "cc"
+    CLANG = "clang"
+    GCC = "gcc"
+
+
+@dataclass(frozen=True, slots=True)
+class CFunctionDeclaration:
+    symbol: str
+    return_type: str
+    parameter_types: tuple[str, ...]
+    header_identity: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +201,9 @@ class ExecutableCheck:
     python_scenario: PythonObjectScenario | None = None
     c_case: CInvocation | None = None
     c_byte_array_case: CByteArrayInvocation | None = None
+    c_declaration: CFunctionDeclaration | None = None
+    compiler: CCompiler = CCompiler.CC
+    derivation_latency_seconds: float = 0.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, ExecutableCheckKind):
@@ -212,6 +233,8 @@ class ExecutableCheck:
             raise ValueError("check must contain exactly one typed execution form")
         if len(self.python_cases) > MAX_CASES:
             raise ValueError("too many executable check cases")
+        if not isinstance(self.compiler, CCompiler):
+            raise TypeError("C compiler must come from the fixed allowlist")
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +248,11 @@ class ExecutableCheckResult:
     duration_seconds: float
     subprocess_count: int
     changed_verification_outcome: bool = False
+    derivation_latency_seconds: float = 0.0
+    construction_latency_seconds: float = 0.0
+    compile_latency_seconds: float = 0.0
+    link_latency_seconds: float = 0.0
+    execution_latency_seconds: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -373,6 +401,123 @@ def derive_python_object_check(
         return None, ExecutableCheckOutcome.CHECK_CONSTRUCTION_ERROR
 
 
+def derive_c_check(
+    workspace: Path,
+    *,
+    check_id: str,
+    kind: ExecutableCheckKind | str,
+    provenance: CheckProvenance | str,
+    component_identity: str,
+    invocation: CInvocation | CByteArrayInvocation,
+    compiler: CCompiler = CCompiler.CC,
+    timeout_seconds: float = 5.0,
+) -> tuple[ExecutableCheck | None, ExecutableCheckOutcome | None]:
+    """Freeze a supported invocation against one trusted public declaration."""
+    started = time.monotonic()
+    try:
+        typed_kind = ExecutableCheckKind(kind)
+        typed_provenance = CheckProvenance(provenance)
+    except (TypeError, ValueError):
+        return None, ExecutableCheckOutcome.CHECK_NOT_DERIVABLE
+    try:
+        root = workspace.resolve(strict=True)
+        header = (root / invocation.header).resolve(strict=True)
+        if root not in header.parents or not header.is_file():
+            return None, ExecutableCheckOutcome.CHECK_NOT_DERIVABLE
+        declaration = extract_c_declaration(header.read_text(), invocation.symbol)
+        if declaration is None or not _invocation_matches(declaration, invocation):
+            return None, ExecutableCheckOutcome.CHECK_NOT_DERIVABLE
+        declaration = replace(
+            declaration, header_identity=hashlib.sha256(header.read_bytes()).hexdigest()
+        )
+        inputs = (
+            {"arguments": invocation.arguments}
+            if isinstance(invocation, CInvocation)
+            else {"byte_count": len(invocation.values)}
+        )
+        check = ExecutableCheck(
+            check_id,
+            typed_kind,
+            typed_provenance,
+            component_identity,
+            identity(inputs),
+            identity({"expected": invocation.expected}),
+            timeout_seconds,
+            c_case=invocation if isinstance(invocation, CInvocation) else None,
+            c_byte_array_case=(
+                invocation if isinstance(invocation, CByteArrayInvocation) else None
+            ),
+            c_declaration=declaration,
+            compiler=compiler,
+            derivation_latency_seconds=time.monotonic() - started,
+        )
+        return check, None
+    except (OSError, TypeError, ValueError):
+        return None, ExecutableCheckOutcome.HARNESS_CONSTRUCTION_ERROR
+
+
+def extract_c_declaration(header: str, symbol: str) -> CFunctionDeclaration | None:
+    """Extract one intentionally small, unambiguous public C function shape."""
+    if _IDENTIFIER.fullmatch(symbol) is None:
+        return None
+    cleaned = re.sub(r"/\*.*?\*/|//[^\n]*", " ", header, flags=re.DOTALL)
+    pattern = re.compile(
+        rf"\b(?P<return>unsigned|int|size_t|uint64_t|bool)\s+{re.escape(symbol)}"
+        r"\s*\((?P<parameters>[^();]*)\)\s*;"
+    )
+    matches = tuple(pattern.finditer(cleaned))
+    if len(matches) != 1:
+        return None
+    parameters = matches[0].group("parameters").strip()
+    types: tuple[str, ...]
+    if not parameters or parameters == "void":
+        types = ()
+    else:
+        parsed = tuple(_c_parameter_type(item) for item in parameters.split(","))
+        if any(item is None for item in parsed):
+            return None
+        types = tuple(item for item in parsed if item is not None)
+    return CFunctionDeclaration(
+        symbol,
+        matches[0].group("return"),
+        types,
+        identity({"declaration": matches[0].group(0)}),
+    )
+
+
+def _c_parameter_type(parameter: str) -> str | None:
+    normalized = " ".join(parameter.strip().replace("*", " * ").split())
+    supported = (
+        "const unsigned char *",
+        "unsigned char const *",
+        "unsigned",
+        "int",
+        "size_t",
+        "uint64_t",
+        "bool",
+    )
+    for value in supported:
+        if normalized == value or normalized.startswith(value + " "):
+            remainder = normalized[len(value) :].strip()
+            if not remainder or _IDENTIFIER.fullmatch(remainder):
+                return "const unsigned char *" if "char" in value else value
+    return None
+
+
+def _invocation_matches(
+    declaration: CFunctionDeclaration,
+    invocation: CInvocation | CByteArrayInvocation,
+) -> bool:
+    if declaration.return_type not in {"unsigned", "int", "size_t", "uint64_t", "bool"}:
+        return False
+    if isinstance(invocation, CByteArrayInvocation):
+        return declaration.parameter_types == ("const unsigned char *", "size_t")
+    return len(declaration.parameter_types) == len(invocation.arguments) and all(
+        item in {"unsigned", "int", "size_t", "uint64_t", "bool"}
+        for item in declaration.parameter_types
+    )
+
+
 def source_free_record(record: ExecutableVerificationRecord) -> dict[str, object]:
     return {
         "derived_checks": record.derived_checks,
@@ -387,6 +532,11 @@ def source_free_record(record: ExecutableVerificationRecord) -> dict[str, object
                 "duration_seconds": item.duration_seconds,
                 "subprocess_count": item.subprocess_count,
                 "changed_verification_outcome": item.changed_verification_outcome,
+                "derivation_latency_seconds": item.derivation_latency_seconds,
+                "construction_latency_seconds": item.construction_latency_seconds,
+                "compile_latency_seconds": item.compile_latency_seconds,
+                "link_latency_seconds": item.link_latency_seconds,
+                "execution_latency_seconds": item.execution_latency_seconds,
             }
             for item in record.results
         ],
@@ -398,31 +548,25 @@ def source_free_record(record: ExecutableVerificationRecord) -> dict[str, object
 
 
 def _execute(check: ExecutableCheck, workspace: Path) -> ExecutableCheckResult:
+    if check.c_case is not None or check.c_byte_array_case is not None:
+        return _execute_c(check, workspace)
     started = time.monotonic()
+    execution_started = started
     try:
-        if check.python_cases or check.python_scenario is not None:
-            argv = (
-                sys.executable,
-                "-I",
-                "-B",
-                "-c",
-                _python_harness(check.python_cases, check.python_scenario),
-            )
-            count = 1
-        else:
-            assert check.c_case is not None or check.c_byte_array_case is not None
-            argv = _compile_c_probe(check, workspace)
-            count = 2
+        argv = (
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            _python_harness(check.python_cases, check.python_scenario),
+        )
+        count = 1
         prepared = PreparedProjectCommand(
             "test",
             argv,
             workspace,
             check.timeout_seconds,
-            ExecutionIsolationPolicy(
-                ExecutionIsolationMode.CONTROLLED_ENV
-                if check.python_cases or check.python_scenario is not None
-                else ExecutionIsolationMode.STRICT
-            ),
+            ExecutionIsolationPolicy(ExecutionIsolationMode.CONTROLLED_ENV),
         )
         execute_prepared_project_command(prepared)
         outcome = ExecutableCheckOutcome.CHECK_PASS
@@ -437,7 +581,7 @@ def _execute(check: ExecutableCheck, workspace: Path) -> ExecutableCheckResult:
             if raw == "nonzero_exit"
             and isinstance(exit_code, int)
             and (exit_code == 10 or exit_code < 0)
-            else ExecutableCheckOutcome.CHECK_EXECUTION_ERROR
+            else ExecutableCheckOutcome.CHECK_RUNTIME_ERROR
         )
         count = locals().get("count", 0)
     except (OSError, TypeError, ValueError):
@@ -462,6 +606,175 @@ def _execute(check: ExecutableCheck, workspace: Path) -> ExecutableCheckResult:
         outcome.value,
         time.monotonic() - started,
         count,
+        False,
+        check.derivation_latency_seconds,
+        0.0,
+        0.0,
+        0.0,
+        time.monotonic() - execution_started,
+    )
+
+
+def _execute_c(check: ExecutableCheck, workspace: Path) -> ExecutableCheckResult:
+    started = time.monotonic()
+    construction = compile_latency = link_latency = execution_latency = 0.0
+    subprocess_count = 0
+    outcome = ExecutableCheckOutcome.HARNESS_CONSTRUCTION_ERROR
+    try:
+        construction_started = time.monotonic()
+        case, harness, binary, sources = _construct_c_harness(check, workspace)
+        construction = time.monotonic() - construction_started
+        objects: list[Path] = []
+        compile_started = time.monotonic()
+        for index, source in enumerate((*sources, harness)):
+            output = harness.parent / f"{check.check_id}-{index}.o"
+            subprocess_count += 1
+            _execute_c_command(
+                check,
+                workspace,
+                (
+                    check.compiler.value,
+                    "-std=c17",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-I",
+                    str(workspace),
+                    "-c",
+                    str(source),
+                    "-o",
+                    str(output),
+                ),
+                phase="compile",
+            )
+            objects.append(output)
+        compile_latency = time.monotonic() - compile_started
+        link_started = time.monotonic()
+        subprocess_count += 1
+        _execute_c_command(
+            check,
+            workspace,
+            (check.compiler.value, *(str(item) for item in objects), "-o", str(binary)),
+            phase="link",
+        )
+        link_latency = time.monotonic() - link_started
+        execution_started = time.monotonic()
+        subprocess_count += 1
+        try:
+            _execute_c_command(check, workspace, (str(binary),))
+            outcome = ExecutableCheckOutcome.CHECK_PASS
+        except ToolError as error:
+            outcome = _runtime_outcome(error)
+        execution_latency = time.monotonic() - execution_started
+    except _CPhaseFailure as failure:
+        if failure.phase == "compile":
+            compile_latency = failure.duration_seconds
+            outcome = (
+                ExecutableCheckOutcome.CHECK_TIMEOUT
+                if failure.timed_out
+                else ExecutableCheckOutcome.HARNESS_COMPILE_ERROR
+            )
+        else:
+            link_latency = failure.duration_seconds
+            outcome = (
+                ExecutableCheckOutcome.CHECK_TIMEOUT
+                if failure.timed_out
+                else ExecutableCheckOutcome.HARNESS_LINK_ERROR
+            )
+    except (OSError, TypeError, ValueError):
+        construction = time.monotonic() - started
+        outcome = ExecutableCheckOutcome.HARNESS_CONSTRUCTION_ERROR
+    return _result(
+        check,
+        outcome,
+        time.monotonic() - started,
+        subprocess_count,
+        construction,
+        compile_latency,
+        link_latency,
+        execution_latency,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _CPhaseFailure(Exception):
+    phase: str
+    timed_out: bool
+    duration_seconds: float
+
+
+def _execute_c_command(
+    check: ExecutableCheck,
+    workspace: Path,
+    argv: tuple[str, ...],
+    *,
+    phase: str | None = None,
+) -> None:
+    prepared = PreparedProjectCommand(
+        "test",
+        argv,
+        workspace,
+        check.timeout_seconds,
+        ExecutionIsolationPolicy(ExecutionIsolationMode.STRICT),
+    )
+    phase_started = time.monotonic()
+    try:
+        execute_prepared_project_command(prepared)
+    except ToolError as error:
+        if phase is None:
+            raise
+        payload = error.output if isinstance(error.output, dict) else {}
+        raise _CPhaseFailure(
+            phase,
+            payload.get("outcome") == "timeout",
+            time.monotonic() - phase_started,
+        ) from error
+
+
+def _runtime_outcome(error: ToolError) -> ExecutableCheckOutcome:
+    payload = error.output if isinstance(error.output, dict) else {}
+    if payload.get("outcome") == "timeout":
+        return ExecutableCheckOutcome.CHECK_TIMEOUT
+    if payload.get("outcome") == "nonzero_exit" and payload.get("exit_code") == 10:
+        return ExecutableCheckOutcome.CHECK_FAIL
+    return ExecutableCheckOutcome.CHECK_RUNTIME_ERROR
+
+
+def _result(
+    check: ExecutableCheck,
+    outcome: ExecutableCheckOutcome,
+    duration: float,
+    subprocess_count: int,
+    construction: float,
+    compile_latency: float,
+    link_latency: float,
+    execution_latency: float,
+) -> ExecutableCheckResult:
+    return ExecutableCheckResult(
+        check.check_id,
+        identity(
+            {
+                "id": check.check_id,
+                "kind": check.kind.value,
+                "provenance": check.provenance.value,
+                "component": check.component_identity,
+                "input": check.input_identity,
+                "expected": check.expected_identity,
+                "timeout": check.timeout_seconds,
+            }
+        ),
+        check.kind.value,
+        check.provenance.value,
+        check.component_identity,
+        outcome.value,
+        duration,
+        subprocess_count,
+        False,
+        check.derivation_latency_seconds,
+        construction,
+        compile_latency,
+        link_latency,
+        execution_latency,
     )
 
 
@@ -537,7 +850,14 @@ def _python_harness(
     )
 
 
-def _compile_c_probe(check: ExecutableCheck, workspace: Path) -> tuple[str, ...]:
+def _construct_c_harness(
+    check: ExecutableCheck, workspace: Path
+) -> tuple[
+    CInvocation | CByteArrayInvocation,
+    Path,
+    Path,
+    tuple[Path, ...],
+]:
     assert check.c_case is not None or check.c_byte_array_case is not None
     case = check.c_case or check.c_byte_array_case
     assert case is not None
@@ -545,47 +865,34 @@ def _compile_c_probe(check: ExecutableCheck, workspace: Path) -> tuple[str, ...]
     header = (workspace / case.header).resolve(strict=True)
     if any(workspace not in path.parents for path in (*paths, header)):
         raise ValueError("C probe path escaped workspace")
+    declaration = check.c_declaration
+    if declaration is None:
+        raise ValueError("C probe lacks frozen header declaration")
+    if hashlib.sha256(header.read_bytes()).hexdigest() != declaration.header_identity:
+        raise ValueError("trusted C header changed after derivation")
+    observed = extract_c_declaration(header.read_text(), case.symbol)
+    if observed is None or (
+        observed.return_type,
+        observed.parameter_types,
+    ) != (declaration.return_type, declaration.parameter_types):
+        raise ValueError("C public declaration changed after derivation")
     scratch = workspace / ".forge-exec"
     scratch.mkdir(mode=0o700, exist_ok=True)
     harness = scratch / f"{check.check_id}.c"
     binary = scratch / f"{check.check_id}.bin"
     if isinstance(case, CByteArrayInvocation):
         values = ",".join(str(value) for value in case.values)
-        declaration = f"const unsigned char data[]={{{values}}};"
+        array_declaration = f"const unsigned char data[]={{{values}}};"
         arguments = f"data,{len(case.values)}"
     else:
-        declaration = ""
+        array_declaration = ""
         arguments = ",".join(str(value) for value in case.arguments)
     harness.write_text(
-        f'#include "{case.header}"\n#include <assert.h>\n'
-        f"int main(void){{{declaration}"
-        f"assert({case.symbol}({arguments})=={case.expected});"
-        "return 0;}\n"
+        f'#include "{case.header}"\n'
+        f"int main(void){{{array_declaration}"
+        f"return {case.symbol}({arguments})=={case.expected}?0:10;}}\n"
     )
-    compile_command = PreparedProjectCommand(
-        "test",
-        (
-            "cc",
-            "-std=c11",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-I",
-            str(workspace),
-            *(str(path) for path in paths),
-            str(harness),
-            "-o",
-            str(binary),
-        ),
-        workspace,
-        check.timeout_seconds,
-        ExecutionIsolationPolicy(ExecutionIsolationMode.STRICT),
-    )
-    try:
-        execute_prepared_project_command(compile_command)
-    except ToolError as error:
-        raise ValueError("C probe could not be constructed") from error
-    return (str(binary),)
+    return case, harness, binary, paths
 
 
 def _safe_relative(value: str) -> bool:

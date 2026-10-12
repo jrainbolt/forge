@@ -9,6 +9,7 @@ import pytest
 from forge.evaluation.mutation_ready import atomic_checkpoint, resume_checkpoint
 from forge.executable_verification import (
     CByteArrayInvocation,
+    CCompiler,
     CheckProvenance,
     CInvocation,
     ExecutableCheck,
@@ -18,8 +19,10 @@ from forge.executable_verification import (
     PythonInvocation,
     PythonMethodCall,
     PythonObjectScenario,
+    derive_c_check,
     derive_python_check,
     derive_python_object_check,
+    extract_c_declaration,
     source_free_record,
 )
 from forge.interaction import AutonomyMode
@@ -136,7 +139,7 @@ def test_correct_wrong_execution_error_and_timeout_are_distinct(tmp_path: Path) 
     assert outcomes == [
         "CHECK_PASS",
         "CHECK_FAIL",
-        "CHECK_EXECUTION_ERROR",
+        "CHECK_RUNTIME_ERROR",
         "CHECK_TIMEOUT",
     ]
 
@@ -144,6 +147,229 @@ def test_correct_wrong_execution_error_and_timeout_are_distinct(tmp_path: Path) 
 def test_c_probe_paths_are_workspace_confined() -> None:
     with pytest.raises(ValueError, match="confined"):
         CInvocation("../hidden.h", ("source.c",), "run", (), 0)
+
+
+class _PassthroughSandbox:
+    identity = "test-passthrough"
+
+    def available(self) -> bool:
+        return True
+
+    def wrap(self, argv: tuple[str, ...], workspace: Path) -> tuple[str, ...]:
+        return argv
+
+
+def _enable_c_test_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "forge.tools.project.platform_sandbox", lambda: _PassthroughSandbox()
+    )
+
+
+def _write_c_fixture(
+    root: Path, header: str, source: str, *, name: str = "sample"
+) -> None:
+    (root / f"{name}.h").write_text(header)
+    (root / f"{name}.c").write_text(source)
+
+
+def _derive_scalar(root: Path, expected: int = 5):  # type: ignore[no-untyped-def]
+    return derive_c_check(
+        root,
+        check_id="scalar-check",
+        kind=ExecutableCheckKind.EXPLICIT_EXAMPLE_ASSERTION,
+        provenance=CheckProvenance.PUBLIC_API_CONTRACT,
+        component_identity="sample.add",
+        invocation=CInvocation("sample.h", ("sample.c",), "add", (2, 3), expected),
+        compiler=CCompiler.CC,
+    )
+
+
+def test_trusted_header_type_extraction() -> None:
+    scalar = extract_c_declaration("int add(int left, int right);", "add")
+    assert scalar is not None
+    assert scalar.return_type == "int"
+    assert scalar.parameter_types == ("int", "int")
+    byte_array = extract_c_declaration(
+        "unsigned checksum(const unsigned char *data, size_t size);", "checksum"
+    )
+    assert byte_array is not None
+    assert byte_array.parameter_types == ("const unsigned char *", "size_t")
+
+
+def test_integer_and_byte_array_correct_controls_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_c_test_execution(monkeypatch)
+    scalar = tmp_path / "scalar"
+    scalar.mkdir()
+    _write_c_fixture(
+        scalar,
+        "int add(int left, int right);\n",
+        '#include "sample.h"\nint add(int left,int right){return left+right;}\n',
+    )
+    scalar_check, failure = _derive_scalar(scalar)
+    assert failure is None and scalar_check is not None
+    scalar_result = ExecutableVerificationPlan("scalar", (scalar_check,)).execute(
+        scalar, 1
+    )
+    assert scalar_result.results[0].outcome == "CHECK_PASS"
+
+    arrays = tmp_path / "arrays"
+    arrays.mkdir()
+    _write_c_fixture(
+        arrays,
+        (
+            "#include <stddef.h>\n"
+            "unsigned checksum(const unsigned char *data, size_t size);\n"
+        ),
+        (
+            '#include "sample.h"\n'
+            "unsigned checksum(const unsigned char *d,size_t n){"
+            "unsigned r=0;for(size_t i=0;i<n;i++)r+=d[i];return r;}\n"
+        ),
+    )
+    array_check, failure = derive_c_check(
+        arrays,
+        check_id="array-check",
+        kind=ExecutableCheckKind.COMPILE_OR_USE_PROBE,
+        provenance=CheckProvenance.PUBLIC_API_CONTRACT,
+        component_identity="sample.checksum",
+        invocation=CByteArrayInvocation(
+            "sample.h", ("sample.c",), "checksum", (1, 2, 3), 6
+        ),
+    )
+    assert failure is None and array_check is not None
+    array_result = ExecutableVerificationPlan("array", (array_check,)).execute(
+        arrays, 1
+    )
+    assert array_result.results[0].outcome == "CHECK_PASS"
+
+
+def test_two_known_wrong_c_behaviors_are_proven_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_c_test_execution(monkeypatch)
+    scalar = tmp_path / "wrong-scalar"
+    scalar.mkdir()
+    _write_c_fixture(
+        scalar,
+        "int add(int left, int right);\n",
+        '#include "sample.h"\nint add(int left,int right){return left-right;}\n',
+    )
+    scalar_check, _ = _derive_scalar(scalar)
+    assert scalar_check is not None
+    assert (
+        ExecutableVerificationPlan("wrong-scalar", (scalar_check,))
+        .execute(scalar, 1)
+        .results[0]
+        .outcome
+        == "CHECK_FAIL"
+    )
+
+    arrays = tmp_path / "wrong-array"
+    arrays.mkdir()
+    _write_c_fixture(
+        arrays,
+        (
+            "#include <stddef.h>\n"
+            "unsigned checksum(const unsigned char *data, size_t size);\n"
+        ),
+        (
+            '#include "sample.h"\n'
+            "unsigned checksum(const unsigned char *d,size_t n){"
+            "(void)d;(void)n;return 0;}\n"
+        ),
+    )
+    array_check, _ = derive_c_check(
+        arrays,
+        check_id="wrong-array-check",
+        kind=ExecutableCheckKind.INVARIANT_ASSERTION,
+        provenance=CheckProvenance.PUBLIC_API_CONTRACT,
+        component_identity="sample.checksum",
+        invocation=CByteArrayInvocation(
+            "sample.h", ("sample.c",), "checksum", (1, 2, 3), 6
+        ),
+    )
+    assert array_check is not None
+    assert (
+        ExecutableVerificationPlan("wrong-array", (array_check,))
+        .execute(arrays, 1)
+        .results[0]
+        .outcome
+        == "CHECK_FAIL"
+    )
+
+
+def test_unsupported_pointer_graph_is_not_derivable(tmp_path: Path) -> None:
+    _write_c_fixture(
+        tmp_path,
+        "struct item; int inspect(const struct item *value);\n",
+        "int placeholder;\n",
+    )
+    check, failure = _derive_scalar(tmp_path)
+    assert check is None
+    assert failure is ExecutableCheckOutcome.CHECK_NOT_DERIVABLE
+
+
+@pytest.mark.parametrize(
+    "source,expected",
+    (
+        ("this is not C\n", "HARNESS_COMPILE_ERROR"),
+        ("int unrelated(void){return 0;}\n", "HARNESS_LINK_ERROR"),
+        (
+            "#include <stdlib.h>\nint add(int a,int b){(void)a;(void)b;abort();}\n",
+            "CHECK_RUNTIME_ERROR",
+        ),
+    ),
+)
+def test_c_operational_failures_fail_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    expected: str,
+) -> None:
+    _enable_c_test_execution(monkeypatch)
+    _write_c_fixture(tmp_path, "int add(int left, int right);\n", source)
+    check, failure = _derive_scalar(tmp_path)
+    assert failure is None and check is not None
+    result = ExecutableVerificationPlan("operational", (check,)).execute(tmp_path, 1)
+    assert result.results[0].outcome == expected
+    assert not result.proven_failure
+
+
+def test_header_change_becomes_construction_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_c_test_execution(monkeypatch)
+    _write_c_fixture(
+        tmp_path,
+        "int add(int left, int right);\n",
+        "int add(int left,int right){return left+right;}\n",
+    )
+    check, _ = _derive_scalar(tmp_path)
+    assert check is not None
+    (tmp_path / "sample.h").write_text("unsigned add(unsigned, unsigned);\n")
+    result = ExecutableVerificationPlan("changed", (check,)).execute(tmp_path, 1)
+    assert result.results[0].outcome == "HARNESS_CONSTRUCTION_ERROR"
+
+
+def test_c_latency_telemetry_is_source_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enable_c_test_execution(monkeypatch)
+    _write_c_fixture(
+        tmp_path,
+        "int add(int left, int right);\n",
+        "int add(int left,int right){return left+right;}\n",
+    )
+    check, _ = _derive_scalar(tmp_path)
+    assert check is not None and check.derivation_latency_seconds >= 0
+    record = ExecutableVerificationPlan("timing", (check,)).execute(tmp_path, 1)
+    item = source_free_record(record)["results"][0]  # type: ignore[index]
+    assert item["construction_latency_seconds"] >= 0  # type: ignore[index]
+    assert item["compile_latency_seconds"] > 0  # type: ignore[index]
+    assert item["link_latency_seconds"] > 0  # type: ignore[index]
+    assert item["execution_latency_seconds"] > 0  # type: ignore[index]
 
 
 def test_object_invariant_and_c_byte_array_are_typed() -> None:

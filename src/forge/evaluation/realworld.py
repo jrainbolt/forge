@@ -403,7 +403,7 @@ class RealWorldEvaluationRunner:
             StructuralCompletenessEvaluator | None
         ) = None,
         executable_verification_plan_factory: (
-            Callable[[RealWorldTask], ExecutableVerificationPlan | None] | None
+            Callable[[RealWorldTask, Path], ExecutableVerificationPlan | None] | None
         ) = None,
     ) -> None:
         self._profile = model_profile
@@ -581,7 +581,7 @@ class RealWorldEvaluationRunner:
                     self._structural_completeness_evaluator
                 ),
                 executable_verification_plan=(
-                    self._executable_verification_plan_factory(task)
+                    self._executable_verification_plan_factory(task, workspace)
                     if self._executable_verification_plan_factory is not None
                     else None
                 ),

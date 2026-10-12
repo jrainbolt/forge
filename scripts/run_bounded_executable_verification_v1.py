@@ -87,8 +87,8 @@ def main() -> int:
                     model,
                     REPOSITORY,
                     primary_mutation_callback=primary_callback,
-                    executable_verification_plan_factory=lambda task: plan_for(
-                        task.task_id
+                    executable_verification_plan_factory=lambda task, _workspace: (
+                        plan_for(task.task_id)
                     ),
                 )
                 .run(
