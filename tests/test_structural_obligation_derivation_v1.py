@@ -159,7 +159,7 @@ def test_missing_required_symbol_fails_closed_after_mutation(tmp_path: Path) -> 
     assert evaluation.failed_check_ids
 
 
-def test_trusted_python_import_and_test_usage_derive_relationships(
+def test_python_import_and_test_usage_alone_do_not_create_obligations(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "src").mkdir()
@@ -177,13 +177,12 @@ def test_trusted_python_import_and_test_usage_derive_relationships(
         tmp_path,
         mutation_authority=("src/state.py", "tests/test_state.py"),
     )
-    assert {item.kind for item in result.obligations} == {
-        StructuralObligationKind.IMPORT_INCLUDE_RELATION,
-        StructuralObligationKind.REGISTRATION_OR_USAGE_RELATION,
-    }
+    assert result.obligations == ()
 
 
-def test_trusted_c_header_and_test_caller_derive_relationships(tmp_path: Path) -> None:
+def test_incidental_c_header_and_test_caller_do_not_create_obligations(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "src/tests").mkdir(parents=True)
     (tmp_path / "src/window.h").write_text(
         "int window_accepts(int value);\n", encoding="utf-8"
@@ -201,9 +200,4 @@ def test_trusted_c_header_and_test_caller_derive_relationships(tmp_path: Path) -
         tmp_path,
         mutation_authority=("src/window.c", "src/tests/test_window.c"),
     )
-    assert {item.kind for item in result.obligations} == {
-        StructuralObligationKind.DECLARATION_IMPLEMENTATION_RELATION,
-        StructuralObligationKind.IMPORT_INCLUDE_RELATION,
-        StructuralObligationKind.REQUIRED_COMPONENT_ROLE,
-        StructuralObligationKind.CALLER_CALLEE_RELATION,
-    }
+    assert result.obligations == ()

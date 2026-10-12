@@ -38,6 +38,7 @@ class StructuralObligation:
     inspection_scope: tuple[str, ...]
     provenance_identity: str
     provenance_class: str = "TRUSTED_TASK_AND_REPOSITORY_EVIDENCE"
+    obligation_bridge_identity: str | None = None
 
     @property
     def identity(self) -> str:
@@ -53,6 +54,7 @@ class StructuralObligation:
                     "scope": [_hash(path) for path in self.inspection_scope],
                     "provenance": self.provenance_identity,
                     "class": self.provenance_class,
+                    "bridge": self.obligation_bridge_identity,
                 },
                 sort_keys=True,
             ).encode()
@@ -87,6 +89,7 @@ class StructuralObligationSet:
                     "caller_identity": _hash(item.caller),
                     "provenance_identity": item.provenance_identity,
                     "provenance_class": item.provenance_class,
+                    "obligation_bridge_identity": item.obligation_bridge_identity,
                     "inspection_scope_identity": hashlib.sha256(
                         "\0".join(item.inspection_scope).encode()
                     ).hexdigest(),
@@ -135,9 +138,10 @@ def derive_structural_obligations(
     root = workspace.resolve()
     authority = tuple(sorted(set(mutation_authority)))
     explicit_paths = tuple(sorted(set(_PATH.findall(task_text))))
+    task_requirements = _PATH.sub(" ", task_text)
     task_symbols = {
         token
-        for token in _SYMBOL.findall(task_text)
+        for token in _SYMBOL.findall(task_requirements)
         if token not in _STOP and ("_" in token or token[:1].isupper())
     }
     structural_symbols = {
@@ -146,7 +150,7 @@ def derive_structural_obligations(
             r"(?:preserv(?:e|ing)|retain|define|provide|create|implement(?:ing)?|with)"
             r"(?:\s+(?:a|an|the|function|class|symbol|module))*\s+"
             r"([A-Za-z_][A-Za-z0-9_]*)",
-            task_text,
+            task_requirements,
             re.IGNORECASE,
         )
         if match.group(1) not in _STOP
@@ -206,6 +210,17 @@ def derive_structural_obligations(
                 caller,
                 tuple(sorted({source, *(tuple((target,)) if target else ())})),
                 provenance,
+                obligation_bridge_identity=hashlib.sha256(
+                    json.dumps(
+                        {
+                            "task_requirement": _hash(symbol or target or source),
+                            "relationship": kind.value,
+                            "source_evidence": _hash(source),
+                            "target_component": _hash(target or source),
+                        },
+                        sort_keys=True,
+                    ).encode()
+                ).hexdigest(),
             )
         )
 
@@ -240,8 +255,6 @@ def derive_structural_obligations(
             header_text = sources.get(header)
             declared = set(_C_DECL.findall(header_text or ""))
             relevant = declared & task_symbols
-            if not relevant and relative in explicit_paths and len(declared) == 1:
-                relevant = declared
             if relative not in explicit_paths and not relevant:
                 continue
             if header_text is not None and relevant:
@@ -260,83 +273,6 @@ def derive_structural_obligations(
                     symbol,
                 )
 
-    python_definitions: dict[str, set[str]] = {}
-    for path, source in sources.items():
-        if not path.endswith(".py"):
-            continue
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:
-            continue
-        python_definitions[path] = {
-            node.name
-            for node in tree.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-        }
-    for source_path, source in sorted(sources.items()):
-        if source_path not in authority or not source_path.endswith(".py"):
-            continue
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:
-            continue
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ImportFrom) or not node.module:
-                continue
-            target = f"{node.module.replace('.', '/')}.py"
-            if target not in authority or target not in python_definitions:
-                continue
-            for imported in node.names:
-                symbol = imported.name
-                if symbol not in python_definitions[target]:
-                    continue
-                add(
-                    StructuralObligationKind.IMPORT_INCLUDE_RELATION,
-                    source_path,
-                    target,
-                    symbol,
-                )
-                if source_path.startswith("tests/"):
-                    add(
-                        StructuralObligationKind.REGISTRATION_OR_USAGE_RELATION,
-                        source_path,
-                        target,
-                        symbol,
-                    )
-
-    c_implementations: dict[str, tuple[str, str]] = {}
-    for target in authority:
-        if not target.endswith(".c"):
-            continue
-        header = str(Path(target).with_suffix(".h"))
-        declarations = set(_C_DECL.findall(sources.get(header, "")))
-        for symbol in declarations:
-            c_implementations[symbol] = (target, header)
-    for source_path, source in sorted(sources.items()):
-        if source_path not in authority or not source_path.endswith(".c"):
-            continue
-        including = (root / source_path).resolve()
-        for include in re.findall(r'^\s*#\s*include\s*"([^"]+)"', source, re.MULTILINE):
-            included = (including.parent / include).resolve()
-            try:
-                included_path = str(included.relative_to(root))
-            except ValueError:
-                continue
-            for symbol, (target, header) in c_implementations.items():
-                if included_path != header or target == source_path:
-                    continue
-                add(
-                    StructuralObligationKind.IMPORT_INCLUDE_RELATION,
-                    source_path,
-                    header,
-                )
-                if re.search(rf"\b{re.escape(symbol)}\s*\(", source):
-                    add(
-                        StructuralObligationKind.CALLER_CALLEE_RELATION,
-                        source_path,
-                        target,
-                        symbol,
-                    )
     for target in authority:
         if Path(target).suffix != ".py" or target in sources:
             continue
@@ -355,13 +291,6 @@ def derive_structural_obligations(
                     target,
                     symbol,
                 )
-                if re.search(rf"\b{re.escape(symbol)}\s*\(", source):
-                    add(
-                        StructuralObligationKind.CALLER_CALLEE_RELATION,
-                        source_path,
-                        target,
-                        symbol,
-                    )
         if symbol:
             add(
                 StructuralObligationKind.REQUIRED_SYMBOL_PRESENCE,
