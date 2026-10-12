@@ -34,6 +34,7 @@ from forge.evidence_coverage import (
     TaskEvidencePlan,
     decompose_evidence_plan,
 )
+from forge.executable_verification import ExecutableVerificationPlan
 from forge.finalization import (
     FINALIZATION_CORRECTION,
     FinalizationMetrics,
@@ -587,6 +588,7 @@ class RepositoryChatSession:
             StructuralCompletenessEvaluator | None
         ) = None,
         structural_obligations: tuple[StructuralObligation, ...] = (),
+        executable_verification_plan: ExecutableVerificationPlan | None = None,
     ) -> None:
         if not isinstance(model, Model):
             raise TypeError("model must implement Model")
@@ -670,6 +672,13 @@ class RepositoryChatSession:
             verification_plan, VerificationPlan
         ):
             raise TypeError("verification_plan must be a VerificationPlan or None")
+        if executable_verification_plan is not None and not isinstance(
+            executable_verification_plan, ExecutableVerificationPlan
+        ):
+            raise TypeError(
+                "executable_verification_plan must be an "
+                "ExecutableVerificationPlan or None"
+            )
         if not isinstance(mutation_representation, MutationRepresentationPolicy):
             raise TypeError(
                 "mutation_representation must be a MutationRepresentationPolicy"
@@ -830,6 +839,7 @@ class RepositoryChatSession:
         self._skip_verification = skip_verification
         self._verification_baseline = verification_baseline
         self._verification_plan = verification_plan
+        self._executable_verification_plan = executable_verification_plan
         self._activity_callback = activity_callback
         self._proposal_observation_callback = proposal_observation_callback
         self._proposal_evidence_callback = proposal_evidence_callback
@@ -4459,6 +4469,27 @@ class RepositoryChatSession:
                                     if gate_result.status is ToolResultStatus.SUCCESS
                                     else "blocked",
                                     plan.plan_id,
+                                )
+                            if (
+                                gate_result.status is ToolResultStatus.SUCCESS
+                                and self._executable_verification_plan is not None
+                            ):
+                                executable_record = (
+                                    self._executable_verification_plan.execute(
+                                        self._context.workspace,
+                                        self._mutation_generation,
+                                    )
+                                )
+                                coding_task.executable_verification_finished(
+                                    executable_record
+                                )
+                                LOGGER.info(
+                                    "executable_verification_finished plan=%s "
+                                    "checks=%d outcome=%s subprocesses=%d",
+                                    self._executable_verification_plan.plan_id,
+                                    executable_record.derived_checks,
+                                    executable_record.outcome,
+                                    executable_record.subprocess_count,
                                 )
                             if coding_task.repair_eligible:
                                 coding_task.register_repair_diagnostic(

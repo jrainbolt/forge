@@ -14,6 +14,10 @@ from enum import Enum
 from pathlib import Path
 
 from forge.embeddings import EmbeddingModel
+from forge.executable_verification import (
+    ExecutableVerificationPlan,
+    source_free_record,
+)
 from forge.interaction import AutonomyMode, resolve_interaction_policy
 from forge.lexical_index import RepositoryLexicalIndex
 from forge.models import (
@@ -304,6 +308,7 @@ class RealWorldMetrics:
     structural_operational_failures: tuple[str, ...] = ()
     structural_check_latency_seconds: float = 0.0
     structural_subprocess_count: int = 0
+    executable_verification: tuple[Mapping[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -397,6 +402,9 @@ class RealWorldEvaluationRunner:
         structural_completeness_evaluator: (
             StructuralCompletenessEvaluator | None
         ) = None,
+        executable_verification_plan_factory: (
+            Callable[[RealWorldTask], ExecutableVerificationPlan | None] | None
+        ) = None,
     ) -> None:
         self._profile = model_profile
         self._model = model
@@ -412,6 +420,9 @@ class RealWorldEvaluationRunner:
         self._authorize_discovered_sources = authorize_discovered_sources
         self._structural_completeness_mode = structural_completeness_mode
         self._structural_completeness_evaluator = structural_completeness_evaluator
+        self._executable_verification_plan_factory = (
+            executable_verification_plan_factory
+        )
 
     def run(
         self, tasks: Iterable[RealWorldTask], repository: RepositorySnapshot
@@ -568,6 +579,11 @@ class RealWorldEvaluationRunner:
                 structural_completeness_mode=self._structural_completeness_mode,
                 structural_completeness_evaluator=(
                     self._structural_completeness_evaluator
+                ),
+                executable_verification_plan=(
+                    self._executable_verification_plan_factory(task)
+                    if self._executable_verification_plan_factory is not None
+                    else None
                 ),
             )
             response = None
@@ -1127,6 +1143,10 @@ def score_task_result(
         verification_plan_tools=len(getattr(current_plan, "steps", ())),
         verification_plan_duration=getattr(current_plan, "duration_seconds", 0.0),
         verification_plan_model_calls=0,
+        executable_verification=tuple(
+            source_free_record(record)
+            for record in getattr(coding, "executable_verification", ())
+        ),
         verification_build_duration=getattr(
             getattr(coding, "build", None), "duration_seconds", 0.0
         ),

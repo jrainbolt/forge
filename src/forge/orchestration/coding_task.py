@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 
 from forge.ephemeral_acceptance import EphemeralAcceptanceMetrics
+from forge.executable_verification import ExecutableVerificationRecord
 from forge.orchestration.verification_attribution import (
     AttributionResult,
     VerificationAttribution,
@@ -296,6 +297,7 @@ class CodingTaskResult:
         StructuralCompletenessRecord()
     )
     structural_obligations: Mapping[str, object] = field(default_factory=dict)
+    executable_verification: tuple[ExecutableVerificationRecord, ...] = ()
 
     @property
     def footer(self) -> str:
@@ -390,6 +392,7 @@ class CodingTaskState:
         self.ephemeral_acceptance_metrics = EphemeralAcceptanceMetrics()
         self.structural_completeness = StructuralCompletenessRecord()
         self.structural_obligations: Mapping[str, object] = {}
+        self.executable_verification: list[ExecutableVerificationRecord] = []
         self.repair_evidence: RepairEvidence | None = None
         self.repair_grounding_metrics = RepairGroundingMetrics()
         self.verification_baseline: VerificationBaselineEvidence | None = None
@@ -1377,6 +1380,39 @@ class CodingTaskState:
             raise RuntimeError("structural obligations must be frozen before mutation")
         self.structural_obligations = dict(record)
 
+    def executable_verification_finished(
+        self, record: ExecutableVerificationRecord
+    ) -> None:
+        """Record bounded checks; only a proven assertion failure blocks."""
+        changed = record.proven_failure
+        if changed:
+            record = replace(
+                record,
+                results=tuple(
+                    replace(item, changed_verification_outcome=True)
+                    if item.outcome == "CHECK_FAIL"
+                    else item
+                    for item in record.results
+                ),
+            )
+        self.executable_verification.append(record)
+        if not changed:
+            return
+        self.verification_decision = VerificationDecision.COMPLETED
+        if self.repair_enabled and self.mutation_count == 1:
+            self.repair_eligible = True
+            self.repair_eligibility_outcome = "EXECUTABLE_CHECK_FAILURE"
+            self.phase = CodingTaskPhase.DIAGNOSING
+            return
+        self.phase = CodingTaskPhase.FAILED
+        self._terminal_status = (
+            CodingTaskStatus.REPAIR_VERIFICATION_FAILED
+            if self.mutation_count == 2 and self.repair_enabled
+            else CodingTaskStatus.MUTATED_VERIFICATION_FAILED
+            if self.mutation_count
+            else CodingTaskStatus.FAILED_BEFORE_MUTATION
+        )
+
     def decline_verification(self) -> None:
         if self.verification_decision is VerificationDecision.NOT_DECIDED:
             self.verification_decision = VerificationDecision.DECLINED
@@ -1449,6 +1485,7 @@ class CodingTaskState:
             self.ephemeral_acceptance_metrics,
             self.structural_completeness,
             self.structural_obligations,
+            tuple(self.executable_verification),
         )
 
     def _verification(self, operation: str) -> VerificationRecord:
