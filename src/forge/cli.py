@@ -50,6 +50,18 @@ from forge.tools import (
 
 LOGGER = logging.getLogger(__name__)
 
+USER_MODES = ("chat", "plan", "dry-run", "manual", "auto")
+DISPLAY_LEVELS = ("minimal", "normal", "trace")
+PROJECT_MARKERS = (
+    ".git",
+    "pyproject.toml",
+    "package.json",
+    "Cargo.toml",
+    "go.mod",
+    "CMakeLists.txt",
+    "Makefile",
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the Forge argument parser without parsing process state."""
@@ -58,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Forge local-first AI coding assistant",
         epilog=(
             "Preferred shortcuts: forge repo [PATH], forge assist [PATH], "
-            "forge agent [PATH]. A bare forge opens the startup chooser."
+            "forge agent [PATH]. A bare forge uses the current project when detected."
         ),
     )
     parser.add_argument(
@@ -117,8 +129,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     chat.add_argument(
         "--mode",
-        choices=tuple(mode.value for mode in AutonomyMode),
-        help="explicit autonomy mode: chat, read, assist, agent, or repair",
+        choices=tuple(mode.value for mode in AutonomyMode) + USER_MODES[1:],
+        help=(
+            "interaction mode: chat, plan, manual, auto, or legacy "
+            "read/assist/agent/repair (dry-run is reserved but deferred)"
+        ),
+    )
+    chat.add_argument(
+        "--display",
+        choices=DISPLAY_LEVELS,
+        default="normal",
+        help="terminal detail level: minimal, normal, or trace",
     )
     chat.add_argument(
         "--permissions",
@@ -263,6 +284,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         try:
             mode = _resolve_chat_mode(args)
+            user_mode = _user_mode_name(args, mode)
             ephemeral_mode = EphemeralAcceptanceMode(args.ephemeral_acceptance)
             if ephemeral_mode is not EphemeralAcceptanceMode.OFF and (
                 not mode.coding_mode
@@ -293,7 +315,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             profile_name = _resolve_model_profile(catalog, args.model, mode)
             LOGGER.info("Selected model profile %s", profile_name)
             load_started = time.perf_counter()
+            if sys.stdout.isatty():
+                print(f"Loading {profile_name}...")
             model = catalog.create(profile_name)
+            load_elapsed = time.perf_counter() - load_started
+            if sys.stdout.isatty():
+                print(f"{profile_name} ready ({load_elapsed:.1f}s)")
             if bool(args.embedding_config) != bool(args.embedding_profile):
                 raise ValueError(
                     "--embedding-config and --embedding-profile must be "
@@ -312,7 +339,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             LOGGER.debug(
                 "Loaded model profile %s in %.2f seconds",
                 profile_name,
-                time.perf_counter() - load_started,
+                load_elapsed,
             )
             if mode is AutonomyMode.CHAT:
                 session = ChatSession(
@@ -371,7 +398,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     mixed_file_operations=bool(args.edit_path and args.create_path),
                 )
             with model, session:
-                result = run_repl(session)
+                result = run_repl(
+                    session,
+                    display_level=args.display,
+                    user_mode=user_mode,
+                    interactive=sys.stdin.isatty() and sys.stdout.isatty(),
+                )
             if semantic_index is not None:
                 semantic_index.close()
             return result
@@ -476,7 +508,11 @@ def _normalize_primary_command(arguments: list[str]) -> list[str]:
     ]
 
 
-def _interactive_startup() -> list[str]:
+def _interactive_startup(*, cwd: Path | None = None) -> list[str]:
+    project = _detect_current_project(cwd or Path.cwd())
+    if project is not None:
+        print(f"Forge detected project: {project}")
+        return ["chat", "--mode", "plan", "--workspace", str(project)]
     print("Forge — choose a mode")
     print("  1. Chat")
     print("  2. Repository chat (read-only)")
@@ -504,6 +540,21 @@ def _interactive_startup() -> list[str]:
     return [command, workspace]
 
 
+def _detect_current_project(path: Path) -> Path | None:
+    """Return the current directory when it has a common project marker."""
+    try:
+        candidate = path.resolve(strict=True)
+    except OSError:
+        return None
+    if not candidate.is_dir():
+        return None
+    return (
+        candidate
+        if any((candidate / marker).exists() for marker in PROJECT_MARKERS)
+        else None
+    )
+
+
 def _resolve_chat_mode(args: argparse.Namespace) -> AutonomyMode:
     legacy_selected = args.assist or args.agent or args.repair
     if args.mode is not None and legacy_selected:
@@ -511,6 +562,18 @@ def _resolve_chat_mode(args: argparse.Namespace) -> AutonomyMode:
             "--mode cannot be combined with --assist, --agent, or --repair"
         )
     if args.mode is not None:
+        aliases = {
+            "plan": AutonomyMode.READ,
+            "manual": AutonomyMode.ASSIST,
+            "auto": AutonomyMode.AGENT,
+        }
+        if args.mode == "dry-run":
+            raise ValueError(
+                "DRY_RUN is deferred: preview-only transaction execution is not "
+                "yet safely isolated; use --mode plan"
+            )
+        if args.mode in aliases:
+            return aliases[args.mode]
         return AutonomyMode(args.mode)
     if args.repair and not args.agent:
         raise ValueError("--repair requires --agent")
@@ -521,6 +584,18 @@ def _resolve_chat_mode(args: argparse.Namespace) -> AutonomyMode:
     if args.assist:
         return AutonomyMode.ASSIST
     return AutonomyMode.READ if args.workspace is not None else AutonomyMode.CHAT
+
+
+def _user_mode_name(args: argparse.Namespace, mode: AutonomyMode) -> str:
+    if args.mode in USER_MODES:
+        return args.mode.upper().replace("-", "_")
+    return {
+        AutonomyMode.CHAT: "CHAT",
+        AutonomyMode.READ: "PLAN",
+        AutonomyMode.ASSIST: "MANUAL",
+        AutonomyMode.AGENT: "AUTO",
+        AutonomyMode.REPAIR: "AUTO",
+    }[mode]
 
 
 def _resolve_model_profile(

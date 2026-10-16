@@ -9,5 +9,5 @@ DEFAULT_LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
 
 def configure_logging(*, verbose: bool = False) -> None:
     """Configure process logging explicitly for a Forge entry point."""
-    level = logging.DEBUG if verbose else logging.INFO
+    level = logging.DEBUG if verbose else logging.WARNING
     logging.basicConfig(level=level, format=DEFAULT_LOG_FORMAT)

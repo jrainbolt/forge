@@ -64,6 +64,43 @@ def test_repl_ignores_empty_input_and_handles_eof() -> None:
     assert "Goodbye." in "\n".join(output)
 
 
+def test_repl_multiline_preserves_exact_paragraph_text() -> None:
+    output: list[str] = []
+    model = MockModel(("answer",))
+    session = ChatSession("fixture", model)
+    run_repl(
+        session,
+        input_fn=_input(
+            iter(("/multi", "  first line", "second line  ", ".", "/exit"))
+        ),
+        output_fn=output.append,
+    )
+    assert model.requests[-1].messages[-1].content == "  first line\nsecond line  "
+
+
+def test_repl_display_and_read_only_chat_plan_switch_are_safe(
+    tmp_path: Path,
+) -> None:
+    output: list[str] = []
+    session = RepositoryChatSession(
+        "fixture", MockModel(("unused",)), tmp_path, require_relevant_source=False
+    )
+    run_repl(
+        session,
+        input_fn=_input(
+            iter(
+                ("/display trace", "/mode chat", "/mode manual", "/trace off", "/exit")
+            )
+        ),
+        output_fn=output.append,
+    )
+    rendered = "\n".join(output)
+    assert "Display: TRACE" in rendered
+    assert "[READ] Mode: CHAT (zero write authority)" in rendered
+    assert "runtime authority changes never broaden" in rendered
+    assert "Display: NORMAL" in rendered
+
+
 def test_repl_handles_keyboard_interrupt() -> None:
     def interrupt(_prompt: str) -> str:
         raise KeyboardInterrupt
@@ -76,6 +113,24 @@ def test_repl_handles_keyboard_interrupt() -> None:
     )
     assert result == 130
     assert "Goodbye." in "\n".join(output)
+
+
+def test_ctrl_c_during_generation_cancels_only_the_active_turn() -> None:
+    class InterruptingModel(MockModel):
+        def generate(self, request):  # type: ignore[no-untyped-def]
+            self._requests.append(request)
+            raise KeyboardInterrupt
+
+    output: list[str] = []
+    session = ChatSession("fixture", InterruptingModel(("unused",)))
+    result = run_repl(
+        session,
+        input_fn=_input(iter(("long request", "/exit"))),
+        output_fn=output.append,
+    )
+    assert result == 0
+    assert session.info.completed_turns == 0
+    assert "Turn cancelled" in "\n".join(output)
 
 
 def test_repository_repl_shows_workspace_tools_and_extended_info(
@@ -104,7 +159,7 @@ def test_repository_repl_shows_workspace_tools_and_extended_info(
     assert result == 0
     assert f"Workspace: {workspace.resolve()}" in rendered
     assert "Repository access: read-only" in rendered
-    assert "[tool] repository.read_file: evidence.txt (success)" in rendered
+    assert "✓ Read evidence.txt" in rendered
     assert "repository mode: read-only" in rendered
     assert "available tools: 9" in rendered
     assert "last tool count: 1" in rendered
@@ -163,7 +218,7 @@ def test_assist_repl_previews_then_explicit_yes_approves(tmp_path: Path) -> None
     assert "Repository access: assist" in rendered
     assert "[proposed] repository.apply_patch: value.py" in rendered
     assert "-VALUE = 1" in rendered and "+VALUE = 2" in rendered
-    assert "[tool] repository.apply_patch: value.py (success)" in rendered
+    assert "✓ repository.apply_patch value.py" in rendered
     assert target.read_bytes() == b"VALUE = 2\n"
 
 

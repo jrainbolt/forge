@@ -1183,6 +1183,12 @@ class RepositoryChatSession:
         """Attach interactive approval at the application composition boundary."""
         self._approval_callback = callback
 
+    def set_activity_callback(
+        self, callback: Callable[[ToolActivity], None] | None
+    ) -> None:
+        """Attach a source-free operational activity observer."""
+        self._activity_callback = callback
+
     def set_ephemeral_review_callback(
         self, callback: Callable[[EphemeralAcceptancePreview], bool] | None
     ) -> None:

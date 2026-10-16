@@ -9,7 +9,12 @@ from pathlib import Path
 import pytest
 
 from forge import __version__
-from forge.cli import _normalize_primary_command, main
+from forge.cli import (
+    _detect_current_project,
+    _interactive_startup,
+    _normalize_primary_command,
+    main,
+)
 from forge.evaluation import EvaluationRun
 from forge.models import MockModel, ModelSelectionError
 
@@ -65,6 +70,21 @@ def test_bare_noninteractive_forge_shows_help(
     output = capsys.readouterr().out
     assert "usage: forge" in output
     assert "forge assist [PATH]" in output
+
+
+def test_current_project_detection_uses_markers_without_git_commands(
+    tmp_path: Path,
+) -> None:
+    assert _detect_current_project(tmp_path) is None
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='fixture'\n")
+    assert _detect_current_project(tmp_path) == tmp_path.resolve()
+    assert _interactive_startup(cwd=tmp_path) == [
+        "chat",
+        "--mode",
+        "plan",
+        "--workspace",
+        str(tmp_path.resolve()),
+    ]
 
 
 def test_version_succeeds(capsys: pytest.CaptureFixture[str]) -> None:
@@ -198,6 +218,26 @@ def test_invalid_mode_or_permission_is_rejected_by_parser(
     assert "invalid choice" in capsys.readouterr().err
 
 
+def test_dry_run_fails_closed_until_preview_execution_is_isolated(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    assert (
+        main(
+            [
+                "chat",
+                "--config",
+                str(tmp_path / "forge.toml"),
+                "--workspace",
+                str(tmp_path),
+                "--mode",
+                "dry-run",
+            ]
+        )
+        == 2
+    )
+    assert "DRY_RUN is deferred" in caplog.text
+
+
 def test_eval_help_succeeds_without_constructing_model(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -323,7 +363,7 @@ def test_chat_constructs_once_and_closes_model(
             return model
 
     monkeypatch.setattr("forge.cli.load_model_catalog", lambda *_args: Catalog())
-    monkeypatch.setattr("forge.cli.run_repl", lambda _session: 0)
+    monkeypatch.setattr("forge.cli.run_repl", lambda _session, **_kwargs: 0)
     assert (
         main(["chat", "--model", "fixture", "--config", str(tmp_path / "forge.toml")])
         == 0
@@ -345,7 +385,7 @@ def test_chat_workspace_constructs_repository_session_explicitly(
 
     observed: dict[str, object] = {}
 
-    def inspect_session(session: object) -> int:
+    def inspect_session(session: object, **_kwargs: object) -> int:
         observed["session"] = session
         observed["workspace"] = session.info.workspace  # type: ignore[attr-defined]
         return 0
@@ -405,7 +445,7 @@ def test_assist_requires_workspace_and_is_explicitly_write_capable(
 
     observed: dict[str, object] = {}
 
-    def inspect(session: object) -> int:
+    def inspect(session: object, **_kwargs: object) -> int:
         observed["assist"] = session.info.assist_mode  # type: ignore[attr-defined]
         observed["tools"] = session.info.available_tools  # type: ignore[attr-defined]
         return 0
@@ -455,7 +495,7 @@ def test_agent_requires_workspace_and_selects_bounded_agent_mode(
 
     observed: dict[str, object] = {}
 
-    def inspect(session: object) -> int:
+    def inspect(session: object, **_kwargs: object) -> int:
         info = session.info  # type: ignore[attr-defined]
         observed.update(
             agent=info.agent_mode,
@@ -502,7 +542,7 @@ def test_repair_flag_selects_explicit_larger_bounded_mode(
 
     observed: dict[str, object] = {}
 
-    def inspect(session: object) -> int:
+    def inspect(session: object, **_kwargs: object) -> int:
         info = session.info  # type: ignore[attr-defined]
         observed.update(
             repair=info.repair_enabled,
@@ -545,7 +585,7 @@ def test_explicit_mode_and_permission_profile_reach_session_snapshot(
 
     observed: dict[str, object] = {}
 
-    def inspect(session: object) -> int:
+    def inspect(session: object, **_kwargs: object) -> int:
         info = session.info  # type: ignore[attr-defined]
         observed.update(
             mode=info.autonomy_mode.value,

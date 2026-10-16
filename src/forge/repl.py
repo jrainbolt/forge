@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import sys
+import threading
+import time
 from collections.abc import Callable
+from dataclasses import dataclass
+from enum import StrEnum
 
 from forge.ephemeral_acceptance import (
     EphemeralAcceptanceMode,
@@ -29,8 +34,69 @@ HELP_TEXT = (
     "/help  Show commands\n"
     "/clear Clear conversation\n"
     "/info  Show session info\n"
+    "/multi Enter multiline input; finish with a line containing only .\n"
+    "/mode chat|plan  Switch conversational intent in a read-only project\n"
+    "/display minimal|normal|trace  Set terminal detail\n"
+    "/trace on|off  Toggle trace display\n"
     "/exit  Exit Forge"
 )
+
+
+class DisplayLevel(StrEnum):
+    """User-controlled operational visibility, independent of authority."""
+
+    MINIMAL = "minimal"
+    NORMAL = "normal"
+    TRACE = "trace"
+
+
+@dataclass(slots=True)
+class _ReplState:
+    display: DisplayLevel
+    user_mode: str
+
+
+class _Spinner:
+    """Single-line TTY feedback; never used for redirected/test output."""
+
+    def __init__(self, enabled: bool) -> None:
+        self._enabled = enabled
+        self._label = "Thinking..."
+        self._started = 0.0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self, label: str = "Thinking...") -> None:
+        if not self._enabled:
+            return
+        self._label = label
+        self._started = time.perf_counter()
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._animate, daemon=True)
+        self._thread.start()
+
+    def update(self, label: str) -> None:
+        self._label = label
+
+    def finish(self) -> None:
+        if not self._enabled:
+            return
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=0.5)
+        sys.stdout.write("\r\033[2K")
+        sys.stdout.flush()
+
+    def _animate(self) -> None:
+        frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        index = 0
+        while not self._stop.wait(0.1):
+            elapsed = time.perf_counter() - self._started
+            sys.stdout.write(
+                f"\r{frames[index % len(frames)]} {self._label} {elapsed:.1f}s"
+            )
+            sys.stdout.flush()
+            index += 1
 
 
 def run_repl(
@@ -38,9 +104,23 @@ def run_repl(
     *,
     input_fn: InputFunction = input,
     output_fn: OutputFunction = print,
+    display_level: str = "normal",
+    user_mode: str | None = None,
+    interactive: bool | None = None,
 ) -> int:
     """Run a synchronous chat loop against one already-loaded session."""
+    state = _ReplState(
+        display=DisplayLevel(display_level),
+        user_mode=user_mode or _default_user_mode(session),
+    )
+    tty = (
+        sys.stdin.isatty() and sys.stdout.isatty()
+        if interactive is None
+        else interactive
+    )
+    spinner = _Spinner(tty and output_fn is print)
     info = session.info
+    output_fn("Forge ready.")
     output_fn(f"Forge [{info.profile_name}]")
     if isinstance(session, RepositoryChatSession):
         output_fn(f"Workspace: {info.workspace}")
@@ -54,6 +134,10 @@ def run_repl(
             else "read-only"
         )
         output_fn(f"Repository access: {legacy_access}")
+        output_fn(
+            f"[{_permission_badge(info)}] {state.user_mode} · "
+            f"display {state.display.value.upper()} · {_context_gauge(info)}"
+        )
         output_fn(f"Mode: {info.autonomy_mode.value.upper()}")
         output_fn(f"Permissions: {info.permission_profile}")
         output_fn(f"Structural checks: {info.structural_completeness_mode.upper()}")
@@ -79,31 +163,67 @@ def run_repl(
                 session.set_ephemeral_review_callback(
                     _ephemeral_review_prompt(input_fn=input_fn, output_fn=output_fn)
                 )
+        session.set_activity_callback(
+            lambda activity: spinner.update(_activity_progress(activity))
+        )
+    else:
+        output_fn(
+            f"[CHAT] CHAT · display {state.display.value.upper()} · "
+            f"{_context_gauge(info)}"
+        )
     output_fn("Type /help for commands.")
+    output_fn("Use /multi for paragraphs; finish with a line containing only '.'.")
+    output_fn("Ctrl-C cancels an active turn; at the prompt it exits Forge.")
     output_fn("Session history is in memory only; /clear starts a fresh conversation.")
     while True:
         try:
-            text = input_fn("\n> ").strip()
+            text = input_fn("\n> ")
         except EOFError:
             output_fn("\nGoodbye.")
             return 0
         except KeyboardInterrupt:
             output_fn("\nGoodbye.")
             return 130
-        if not text:
+        if not text.strip():
             continue
         if text.startswith("/"):
-            if _run_command(text, session, output_fn):
+            command = text.strip()
+            if command == "/multi":
+                text = _read_multiline(input_fn, output_fn)
+                if text is None:
+                    continue
+            elif _run_command(command, session, output_fn, state):
                 return 0
-            continue
+            else:
+                continue
+        started = time.perf_counter()
+        spinner.start("Thinking...")
         try:
             response = session.ask(text)
+        except KeyboardInterrupt:
+            spinner.finish()
+            output_fn("Turn cancelled; no incomplete conversation turn was committed.")
+            if isinstance(session, RepositoryChatSession):
+                completed_writes = tuple(
+                    item.path
+                    for item in session.last_activity
+                    if item.status == "success"
+                    and item.evidence in {"write_success", "patch_success"}
+                )
+                if completed_writes:
+                    output_fn(
+                        "Already completed approved mutations remain on disk: "
+                        + ", ".join(path for path in completed_writes if path)
+                    )
+            continue
         except AgentCancelled:
+            spinner.finish()
             output_fn("Agent task cancelled.")
             if session.last_agent_task is not None:
                 output_fn(f"\n{session.last_agent_task.footer}")
             continue
         except (ModelError, ValueError, RuntimeError) as error:
+            spinner.finish()
             output_fn(f"Error: {_present_error(error)}")
             if isinstance(session, RepositoryChatSession):
                 for activity in session.last_activity:
@@ -118,11 +238,26 @@ def run_repl(
                 if session.last_coding_task is not None:
                     output_fn(f"\n{session.last_coding_task.footer}")
             continue
+        spinner.finish()
         if isinstance(response, RepositoryResponse):
             for activity in response.tool_activity:
-                path = f": {activity.path}" if activity.path is not None else ""
-                output_fn(f"[tool] {activity.tool_name}{path} ({activity.status})")
+                rendered = _render_activity(activity, state.display)
+                if rendered is not None:
+                    output_fn(rendered)
         output_fn(f"\n{response.text}")
+        if isinstance(response, RepositoryResponse):
+            sources = _trusted_sources(response)
+            if sources and state.display is not DisplayLevel.MINIMAL:
+                output_fn("\nSources: " + ", ".join(sources))
+            if state.display is DisplayLevel.TRACE:
+                output_fn(_task_checklist(response))
+        footer = _performance_footer(response, time.perf_counter() - started)
+        if footer and state.display is not DisplayLevel.MINIMAL:
+            output_fn(footer)
+        if session.info.completed_turns:
+            output_fn(
+                f"{session.info.profile_name} warm · {_context_gauge(session.info)}"
+            )
         if (
             isinstance(response, RepositoryResponse)
             and response.coding_task is not None
@@ -137,6 +272,7 @@ def _run_command(
     command: str,
     session: ChatSession | RepositoryChatSession,
     output_fn: OutputFunction,
+    state: _ReplState,
 ) -> bool:
     if command == "/help":
         output_fn(HELP_TEXT)
@@ -199,12 +335,199 @@ def _run_command(
                     f"\ntest: {info.test_permission.value}"
                 )
         output_fn(rendered)
+    elif command.startswith("/display "):
+        value = command.removeprefix("/display ").strip().casefold()
+        try:
+            state.display = DisplayLevel(value)
+        except ValueError:
+            output_fn("Display must be minimal, normal, or trace.")
+        else:
+            output_fn(f"Display: {state.display.value.upper()}")
+    elif command in {"/trace on", "/trace off"}:
+        state.display = (
+            DisplayLevel.TRACE if command.endswith("on") else DisplayLevel.NORMAL
+        )
+        output_fn(f"Display: {state.display.value.upper()}")
+    elif command.startswith("/mode "):
+        _switch_runtime_mode(command, session, output_fn, state)
     elif command == "/exit":
         output_fn("Goodbye.")
         return True
     else:
         output_fn(f"Unknown command: {command}. Type /help for commands.")
     return False
+
+
+def _read_multiline(input_fn: InputFunction, output_fn: OutputFunction) -> str | None:
+    output_fn("Multiline input: enter text exactly as intended; '.' submits.")
+    lines: list[str] = []
+    while True:
+        try:
+            line = input_fn("... ")
+        except (EOFError, KeyboardInterrupt):
+            output_fn("Multiline input cancelled.")
+            return None
+        if line == ".":
+            return "\n".join(lines)
+        lines.append(line)
+
+
+def _switch_runtime_mode(
+    command: str,
+    session: ChatSession | RepositoryChatSession,
+    output_fn: OutputFunction,
+    state: _ReplState,
+) -> None:
+    requested = command.removeprefix("/mode ").strip().casefold()
+    if requested not in {"chat", "plan", "dry-run", "manual", "auto"}:
+        output_fn("Mode must be chat, plan, dry-run, manual, or auto.")
+        return
+    if requested == "dry-run":
+        output_fn("DRY_RUN is deferred; preview-only execution is not safely isolated.")
+        return
+    if not isinstance(session, RepositoryChatSession):
+        if requested == "chat":
+            state.user_mode = "CHAT"
+            output_fn("[CHAT] Mode: CHAT")
+        else:
+            output_fn("That mode requires restarting Forge in a project workspace.")
+        return
+    if session.info.autonomy_mode.value == "read" and requested in {"chat", "plan"}:
+        state.user_mode = requested.upper()
+        badge = "PLAN" if requested == "plan" else "READ"
+        output_fn(f"[{badge}] Mode: {state.user_mode} (zero write authority)")
+        return
+    current = state.user_mode
+    output_fn(
+        f"Mode remains {current}. Restart with --mode {requested}; "
+        "runtime authority changes never broaden or simulate revocation."
+    )
+
+
+def _default_user_mode(session: ChatSession | RepositoryChatSession) -> str:
+    if not isinstance(session, RepositoryChatSession):
+        return "CHAT"
+    return {
+        "read": "PLAN",
+        "assist": "MANUAL",
+        "agent": "AUTO",
+        "repair": "AUTO",
+    }[session.info.autonomy_mode.value]
+
+
+def _permission_badge(info: object) -> str:
+    mode = getattr(getattr(info, "autonomy_mode", None), "value", "chat")
+    return {
+        "read": "PLAN",
+        "assist": "ASK WRITE",
+        "agent": "AUTO",
+        "repair": "AUTO",
+    }.get(mode, "READ")
+
+
+def _context_gauge(info: object) -> str:
+    used = getattr(info, "last_estimated_input_tokens", None)
+    capacity = getattr(info, "context_capacity", None)
+    if capacity is None:
+        return "ctx unavailable"
+    if used is None:
+        return f"ctx ? / {_compact_number(capacity)}"
+    return f"ctx {_compact_number(used)} / {_compact_number(capacity)}"
+
+
+def _compact_number(value: int) -> str:
+    if value < 1000:
+        return str(value)
+    rendered = f"{value / 1000:.1f}".rstrip("0").rstrip(".")
+    return f"{rendered}k"
+
+
+def _activity_progress(activity: object) -> str:
+    tool = getattr(activity, "tool_name", "tool")
+    path = getattr(activity, "path", None)
+    if tool.endswith("search"):
+        return "Searching project..."
+    if tool.endswith("read_file"):
+        return f"Reading {path}..." if path else "Reading source..."
+    if tool in {"project.test", "project.build"}:
+        return "Running tests..." if tool.endswith("test") else "Running build..."
+    if "patch" in tool or "write" in tool:
+        return "Generating change..."
+    return f"Running {tool}..."
+
+
+def _render_activity(activity: object, display: DisplayLevel) -> str | None:
+    if display is DisplayLevel.MINIMAL:
+        return None
+    tool = getattr(activity, "tool_name", "tool")
+    status = getattr(activity, "status", "unknown")
+    path = getattr(activity, "path", None)
+    if display is DisplayLevel.TRACE:
+        suffix = f": {path}" if path else ""
+        evidence = getattr(activity, "evidence", "unknown")
+        return f"[tool] {tool}{suffix} ({status}; {evidence})"
+    mark = "✓" if status == "success" else "!"
+    action = {
+        "repository.read_file": "Read",
+        "repository.search": "Searched repository",
+        "project.test": "Ran tests",
+        "project.build": "Ran build",
+    }.get(tool, tool)
+    return f"{mark} {action}{f' {path}' if path else ''}"
+
+
+def _trusted_sources(response: RepositoryResponse) -> tuple[str, ...]:
+    sources: list[str] = []
+    for activity in response.tool_activity:
+        if (
+            activity.status == "success"
+            and activity.current_source
+            and activity.relevant_source
+            and activity.path is not None
+            and activity.path not in sources
+        ):
+            sources.append(activity.path)
+    return tuple(sources[:5])
+
+
+def _performance_footer(response: object, elapsed: float) -> str:
+    fields = [f"{elapsed:.1f}s"]
+    activities = getattr(response, "tool_activity", ())
+    if activities:
+        fields.append(f"{len(activities)} tool calls")
+        read_files = {
+            item.path
+            for item in activities
+            if item.tool_name == "repository.read_file" and item.path is not None
+        }
+        if read_files:
+            fields.append(f"{len(read_files)} files read")
+    usage = getattr(response, "usage", None)
+    output_tokens = getattr(usage, "output_tokens", None)
+    if output_tokens is not None:
+        fields.append(f"{output_tokens} output tokens")
+    return " · ".join(fields)
+
+
+def _task_checklist(response: RepositoryResponse) -> str:
+    activities = response.tool_activity
+    searched = any(item.tool_name == "repository.search" for item in activities)
+    read = any(item.tool_name == "repository.read_file" for item in activities)
+    changed = any(
+        item.evidence in {"write_success", "patch_success"} for item in activities
+    )
+    verified = any(
+        item.current_verification and item.status == "success" for item in activities
+    )
+    return "\n".join(
+        (
+            "Operational progress:",
+            f"{'✓' if searched else '○'} Search repository",
+            f"{'✓' if read else '○'} Inspect relevant source",
+            f"{'✓' if changed else '○'} Apply approved change",
+            f"{'✓' if verified else '○'} Verify",
+        )
+    )
 
 
 def _permission_label(decision: object) -> str:

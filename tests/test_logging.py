@@ -9,7 +9,7 @@ from forge.logging import DEFAULT_LOG_FORMAT, configure_logging
 
 @pytest.mark.parametrize(
     ("verbose", "expected_level"),
-    [(False, logging.INFO), (True, logging.DEBUG)],
+    [(False, logging.WARNING), (True, logging.DEBUG)],
 )
 def test_logging_uses_expected_level(
     monkeypatch: pytest.MonkeyPatch, verbose: bool, expected_level: int
