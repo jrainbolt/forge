@@ -175,6 +175,15 @@ class ContextPlanner:
     def active_estimated_tokens(self) -> int:
         return sum(item.record.estimated_tokens for item in self._active)
 
+    def has_active_observation(self, invocation_id: str, generation: int) -> bool:
+        """Return whether an exact current-generation result remains authoritative."""
+        return any(
+            item.record.observation_id == invocation_id
+            and item.record.generation == generation
+            and not item.record.compacted
+            for item in self._active
+        )
+
     def finalization_messages(
         self, required: tuple[tuple[str, str, str], ...]
     ) -> tuple[tuple[Message, ...], int]:

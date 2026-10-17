@@ -9,6 +9,7 @@ import re
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 
 from forge.context_planner import (
@@ -172,6 +173,29 @@ DEFAULT_MAX_NO_PROGRESS_CYCLES = 3
 DEFAULT_MAX_REPEATED_CALLS = 2
 MAX_REPAIR_MUTATION_DIFF_CHARS = 4096
 DEFAULT_MINIMUM_SOURCE_FILES = 1
+REPEAT_RECOVERY_TOOLS = frozenset(
+    {
+        "repository.semantic_search",
+        "repository.lexical_search",
+        "repository.search_files",
+        "repository.list_directory",
+        "repository.find_symbol",
+        "repository.find_references",
+        "repository.file_outline",
+        "repository.read_file",
+        "repository.read_range",
+    }
+)
+
+
+class RepositoryQueryScope(StrEnum):
+    """Bounded retrieval breadth selected independently from authority/display."""
+
+    NARROW = "narrow"
+    MEDIUM = "medium"
+    BROAD = "broad"
+
+
 EVIDENCE_STOP_WORDS = frozenset(
     {
         "configured",
@@ -415,6 +439,11 @@ PROTOCOL_CORRECTION = (
     "Your previous response did not match the Forge JSON response schema. Return "
     "exactly one valid tool_call or final JSON object and no other text."
 )
+REPEATED_SUCCESSFUL_CALL_CORRECTION = (
+    "That exact tool request already succeeded and its authoritative result remains "
+    "in context. Use the existing result, choose a materially different tool or "
+    "query, or return the final answer. Do not repeat the same request."
+)
 DUPLICATE_TOOL_CALL_ID_CORRECTION = (
     "Tool-call identifiers must be unique within this repository session. Return "
     "the required next action with a new identifier. Do not repeat the prior ID."
@@ -434,6 +463,12 @@ VERIFICATION_DECISION_CORRECTION = (
 
 class RepositoryOrchestrationError(RuntimeError):
     """A repository-aware turn could not produce a safe final answer."""
+
+
+class RepeatedToolCallError(RepositoryOrchestrationError):
+    """The model could not progress beyond an already satisfied lookup."""
+
+    classification = "REPEATED_IDENTICAL_TOOL_CALL"
 
 
 class GroundingInsufficientError(RepositoryOrchestrationError):
@@ -842,6 +877,14 @@ class RepositoryChatSession:
                 semantic_ready=_semantic_ready(semantic_index),
             )
         )
+        self._chat_conversation = Conversation(
+            system_message=(
+                "You are Forge, a local AI assistant. Respond conversationally. "
+                "Do not claim to have inspected repository files in this mode. "
+                "If project-specific evidence is required, ask the user to switch "
+                "to PLAN or explicitly request repository inspection."
+            )
+        )
         self._max_steps = effective_steps
         self._max_model_calls = effective_model_calls
         self._max_tool_executions = effective_tool_limit
@@ -1212,6 +1255,22 @@ class RepositoryChatSession:
             self.execute_task(user_text) if self._assist_mode else self._ask(user_text)
         )
 
+    def ask_conversational(self, user_text: str) -> ModelResponse:
+        """Answer without repository tools while retaining bounded chat context."""
+        if self._closed:
+            raise RepositoryOrchestrationError("repository chat session is closed")
+        plan = self._chat_conversation.plan_request(
+            user_text,
+            self._generation,
+            context_capacity=self._model.context_capacity,
+        )
+        response = self._model.generate(plan.request)
+        self._chat_conversation.discard_oldest_turns(plan.omitted_turns)
+        self._chat_conversation.commit(user_text, response.text)
+        self._last_plan = plan
+        self._last_activity = ()
+        return response
+
     def run_agent_task(self, user_text: str) -> RepositoryResponse:
         """Run one explicit foreground agent task with fresh bounded counters."""
         if not self._agent_mode:
@@ -1403,6 +1462,8 @@ class RepositoryChatSession:
         )
         activities: list[ToolActivity] = []
         call_counts: dict[str, int] = {}
+        successful_calls: dict[str, tuple[str, int]] = {}
+        repeat_corrections: set[str] = set()
         protocol_corrections = 0
         verification_corrections = 0
         response_usages: list[ModelUsage] = []
@@ -1411,6 +1472,8 @@ class RepositoryChatSession:
         candidate_queries = _candidate_search_queries(user_text)
         retrieval_strategy = RetrievalStrategy()
         retrieval_bootstrap = RetrievalBootstrap()
+        query_scope = classify_repository_query_scope(user_text)
+        topic_shift = _is_topic_shift(self._conversation, user_text)
         evidence_plan = self._evidence_plan or decompose_evidence_plan(user_text)
         coverage = EvidenceCoverageState(evidence_plan)
         coverage_required = (
@@ -1440,7 +1503,7 @@ class RepositoryChatSession:
             # A64 gates only discovery-derived edit authority.
             coverage_required = False
         required_source_files = self._minimum_source_files or _required_source_files(
-            user_text
+            user_text, query_scope
         )
         estimator = ConservativeTokenEstimator()
 
@@ -2051,10 +2114,16 @@ class RepositoryChatSession:
                     stale_path, generation=self._mutation_generation
                 )
             evidence_sufficient = _has_completion_evidence(
-                activities, required_source_files, self._require_relevant_source
+                activities,
+                required_source_files,
+                self._require_relevant_source,
+                scope=query_scope,
             ) and (not coverage_required or coverage.complete)
             grounding_satisfied = _has_completion_evidence(
-                activities, required_source_files, self._require_relevant_source
+                activities,
+                required_source_files,
+                self._require_relevant_source,
+                scope=query_scope,
             )
             if (
                 task_phase is RepositoryTaskPhase.RETRIEVING
@@ -2288,12 +2357,23 @@ class RepositoryChatSession:
                         PROTOCOL_CORRECTION,
                         EVIDENCE_CORRECTION,
                         VERIFICATION_DECISION_CORRECTION,
+                        REPEATED_SUCCESSFUL_CALL_CORRECTION,
                     }
                     else []
                 )
                 transcript[:] = (*context_planner.active_messages, *correction_tail)
             goal_guidance = Message(MessageRole.USER, _evidence_goal_guidance(coverage))
-            goal_messages = (goal_guidance,) if len(evidence_plan.goals) > 1 else ()
+            scope_guidance = Message(
+                MessageRole.USER,
+                _repository_scope_guidance(query_scope, topic_shift=topic_shift),
+            )
+            goal_messages = (
+                (goal_guidance, scope_guidance)
+                if len(evidence_plan.goals) > 1
+                else (scope_guidance,)
+                if query_scope is not RepositoryQueryScope.NARROW or topic_shift
+                else ()
+            )
             mutation_messages: tuple[Message, ...] = ()
             if structured_edit_ready and coding_task is not None:
                 candidates = tuple(
@@ -3518,6 +3598,7 @@ class RepositoryChatSession:
                     activities,
                     required_source_files,
                     self._require_relevant_source,
+                    scope=query_scope,
                 )
                 if not has_grounding or (
                     coverage_required
@@ -3723,7 +3804,6 @@ class RepositoryChatSession:
                     )
                 )
                 continue
-            self._model_invocation_ids.add(call.invocation_id)
             signature = _call_signature(
                 call.tool_name,
                 call.arguments,
@@ -3735,12 +3815,37 @@ class RepositoryChatSession:
                 ),
             )
             call_counts[signature] = call_counts.get(signature, 0) + 1
+            prior_success = successful_calls.get(signature)
+            if (
+                call.tool_name in REPEAT_RECOVERY_TOOLS
+                and prior_success is not None
+                and prior_success[1] == self._mutation_generation
+                and context_planner.has_active_observation(*prior_success)
+            ):
+                if signature not in repeat_corrections:
+                    repeat_corrections.add(signature)
+                    transcript.extend(
+                        (
+                            Message(MessageRole.ASSISTANT, response.text),
+                            Message(
+                                MessageRole.USER,
+                                REPEATED_SUCCESSFUL_CALL_CORRECTION,
+                            ),
+                        )
+                    )
+                    continue
+                if agent_task is not None:
+                    self._agent_stop_hint = AgentStopReason.REPEATED_CALL
+                raise RepeatedToolCallError(
+                    "Forge stopped after a repeated lookup could not make progress"
+                )
             if call_counts[signature] > self._max_repeated_calls:
                 if agent_task is not None:
                     self._agent_stop_hint = AgentStopReason.REPEATED_CALL
-                raise RepositoryOrchestrationError(
-                    "repeated identical tool-call limit exceeded"
+                raise RepeatedToolCallError(
+                    "Forge stopped after a repeated lookup could not make progress"
                 )
+            self._model_invocation_ids.add(call.invocation_id)
             if (
                 coding_task is not None
                 and coding_task.mutation_count == 0
@@ -4811,6 +4916,14 @@ class RepositoryChatSession:
                 arguments=call.arguments,
                 generation=self._mutation_generation,
             )
+            if (
+                result.status is ToolResultStatus.SUCCESS
+                and call.tool_name in REPEAT_RECOVERY_TOOLS
+            ):
+                successful_calls[signature] = (
+                    call.invocation_id,
+                    self._mutation_generation,
+                )
             transcript[:] = context_planner.active_messages
         if agent_task is not None:
             self._agent_stop_hint = AgentStopReason.ITERATION_LIMIT
@@ -4990,6 +5103,7 @@ class RepositoryChatSession:
 
     def clear(self) -> None:
         self._conversation.clear()
+        self._chat_conversation.clear()
         self._last_plan = None
         self._last_activity = ()
         self._active_coding_task = None
@@ -5367,6 +5481,8 @@ def _has_completion_evidence(
     activities: list[ToolActivity],
     minimum_source_files: int,
     require_relevant_source: bool,
+    *,
+    scope: RepositoryQueryScope = RepositoryQueryScope.NARROW,
 ) -> bool:
     if any(
         activity.status == ToolResultStatus.SUCCESS.value
@@ -5381,9 +5497,26 @@ def _has_completion_evidence(
         for activity in activities
     ):
         return True
-    return _has_source_evidence(
+    if not _has_source_evidence(
         activities, minimum_source_files, require_relevant_source
-    )
+    ):
+        return False
+    if scope is not RepositoryQueryScope.BROAD:
+        return True
+    paths = {
+        activity.path
+        for activity in activities
+        if activity.status == ToolResultStatus.SUCCESS.value
+        and activity.evidence == ToolEvidence.SOURCE_CONTENT.value
+        and activity.current_source
+        and (activity.relevant_source or not require_relevant_source)
+        and activity.path is not None
+    }
+    areas = {
+        Path(path).parent.name if Path(path).parent.name else Path(path).stem
+        for path in paths
+    }
+    return len(areas) >= min(3, minimum_source_files)
 
 
 def _mutation_provenance_error(
@@ -5713,13 +5846,100 @@ def _source_terms(text: str, *, exclude_stops: bool = True) -> set[str]:
     return terms
 
 
-def _required_source_files(question: str) -> int:
-    normalized = question.casefold()
-    if normalized.startswith("how ") or any(
-        term in normalized for term in (" prevent", " enforc", " safety")
-    ):
-        return 2
+def classify_repository_query_scope(question: str) -> RepositoryQueryScope:
+    """Classify evidence breadth without changing permissions or display behavior."""
+    normalized = " ".join(question.casefold().split())
+    relationship = re.search(
+        r"\b(trace|flow|end[- ]to[- ]end|through|across|callers?|usages?)\b",
+        normalized,
+    )
+    if relationship is not None:
+        return RepositoryQueryScope.MEDIUM
+    comparative = re.search(
+        r"\b(overview|architecture|most developed|least developed|what parts|"
+        r"work on next|project structure|across the project|"
+        r"whole (?:project|codebase))\b",
+        normalized,
+    )
+    if comparative is not None:
+        return RepositoryQueryScope.BROAD
+    return RepositoryQueryScope.NARROW
+
+
+def requires_repository_grounding(question: str) -> bool:
+    """Recognize explicit or concretely project-specific inspection intent."""
+    normalized = " ".join(question.casefold().split())
+    project_reference = re.search(
+        r"\b(project|repo(?:sitory)?|codebase|code|source|implementation|"
+        r"files?|classes?)\b",
+        normalized,
+    )
+    inspection = re.search(
+        r"\b(inspect|search|look (?:at|through|in)|trace|find|read|based on|"
+        r"how (?:does|do|is|are)|where is|implemented)\b",
+        normalized,
+    )
+    concrete_symbol = re.search(r"\b[A-Z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*\b", question)
+    concrete_path = re.search(r"(?:^|\s)[\w.-]+/[\w./-]+", question)
+    project_specific = re.search(r"\b(current|existing|this|local)\b", normalized)
+    return bool(
+        (project_reference is not None and inspection is not None)
+        or (project_reference is not None and project_specific is not None)
+        or (inspection is not None and concrete_symbol is not None)
+        or concrete_path is not None
+    )
+
+
+def _required_source_files(
+    question: str, scope: RepositoryQueryScope | None = None
+) -> int:
+    selected = scope or classify_repository_query_scope(question)
+    if selected is RepositoryQueryScope.BROAD:
+        return 3
+    if selected is RepositoryQueryScope.MEDIUM:
+        normalized = question.casefold()
+        return 3 if "through" in normalized or "end-to-end" in normalized else 2
     return DEFAULT_MINIMUM_SOURCE_FILES
+
+
+def _repository_scope_guidance(
+    scope: RepositoryQueryScope, *, topic_shift: bool
+) -> str:
+    guidance = {
+        RepositoryQueryScope.NARROW: (
+            "Retrieval scope is NARROW. Inspect the targeted symbol or file and only "
+            "follow a related source when needed to answer accurately."
+        ),
+        RepositoryQueryScope.MEDIUM: (
+            "Retrieval scope is MEDIUM. Trace the relationship across distinct "
+            "relevant sources using callers, references, imports, or targeted "
+            "search. Do not claim a complete trace unless the links are observed; "
+            "name any missing link explicitly."
+        ),
+        RepositoryQueryScope.BROAD: (
+            "Retrieval scope is BROAD. Inspect repository structure first, then "
+            "gather representative source evidence from at least three distinct "
+            "paths before making comparative or project-wide claims. Keep the "
+            "survey bounded and do not recursively read the repository."
+        ),
+    }[scope]
+    if topic_shift:
+        guidance += (
+            " The current request introduces a new topic. Perform fresh retrieval "
+            "for it; prior sources are context, not automatically authoritative."
+        )
+    return guidance
+
+
+def _is_topic_shift(conversation: Conversation, question: str) -> bool:
+    if not conversation.turns:
+        return False
+    previous = _source_terms(conversation.turns[-1].user.content)
+    current = _source_terms(question)
+    if not previous or not current:
+        return False
+    overlap = len(previous & current) / min(len(previous), len(current))
+    return overlap < 0.34 and bool(current - previous)
 
 
 def _candidate_search_queries(question: str) -> set[str]:

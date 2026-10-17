@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import termios
 import threading
 import time
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from forge.orchestration import (
     RepositoryChatSession,
     RepositoryResponse,
 )
+from forge.orchestration.repository_session import requires_repository_grounding
 from forge.session import ChatSession
 from forge.tools import (
     MultiFileMutationPreview,
@@ -36,6 +38,7 @@ HELP_TEXT = (
     "/info  Show session info\n"
     "/multi Enter multiline input; finish with a line containing only .\n"
     "/mode chat|plan  Switch conversational intent in a read-only project\n"
+    "/chat, /plan  Switch directly in a read-only project\n"
     "/display minimal|normal|trace  Set terminal detail\n"
     "/trace on|off  Toggle trace display\n"
     "/exit  Exit Forge"
@@ -54,6 +57,7 @@ class DisplayLevel(StrEnum):
 class _ReplState:
     display: DisplayLevel
     user_mode: str
+    warm: bool = False
 
 
 class _Spinner:
@@ -65,6 +69,7 @@ class _Spinner:
         self._started = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._terminal_attributes: list[object] | None = None
 
     def start(self, label: str = "Thinking...") -> None:
         if not self._enabled:
@@ -72,6 +77,17 @@ class _Spinner:
         self._label = label
         self._started = time.perf_counter()
         self._stop.clear()
+        sys.stdout.write("Forge busy — input is not queued; Ctrl-C exits.\n")
+        sys.stdout.flush()
+        try:
+            descriptor = sys.stdin.fileno()
+            attributes = termios.tcgetattr(descriptor)
+            busy_attributes = list(attributes)
+            busy_attributes[3] &= ~termios.ECHO
+            termios.tcsetattr(descriptor, termios.TCSANOW, busy_attributes)
+            self._terminal_attributes = attributes
+        except (AttributeError, OSError, termios.error):
+            self._terminal_attributes = None
         self._thread = threading.Thread(target=self._animate, daemon=True)
         self._thread.start()
 
@@ -84,6 +100,16 @@ class _Spinner:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=0.5)
+        if self._terminal_attributes is not None:
+            try:
+                descriptor = sys.stdin.fileno()
+                termios.tcflush(descriptor, termios.TCIFLUSH)
+                termios.tcsetattr(
+                    descriptor, termios.TCSANOW, self._terminal_attributes
+                )
+            except (AttributeError, OSError, termios.error):
+                pass
+            self._terminal_attributes = None
         sys.stdout.write("\r\033[2K")
         sys.stdout.flush()
 
@@ -173,9 +199,10 @@ def run_repl(
         )
     output_fn("Type /help for commands.")
     output_fn("Use /multi for paragraphs; finish with a line containing only '.'.")
-    output_fn("Ctrl-C cancels an active turn; at the prompt it exits Forge.")
+    output_fn("Ctrl-C or Ctrl-D exits Forge. Esc cancellation is not available.")
     output_fn("Session history is in memory only; /clear starts a fresh conversation.")
     while True:
+        output_fn(_status_line(session, state))
         try:
             text = input_fn("\n> ")
         except EOFError:
@@ -199,10 +226,16 @@ def run_repl(
         started = time.perf_counter()
         spinner.start("Thinking...")
         try:
-            response = session.ask(text)
+            response = (
+                session.ask_conversational(text)
+                if isinstance(session, RepositoryChatSession)
+                and state.user_mode == "CHAT"
+                and not requires_repository_grounding(text)
+                else session.ask(text)
+            )
         except KeyboardInterrupt:
             spinner.finish()
-            output_fn("Turn cancelled; no incomplete conversation turn was committed.")
+            output_fn("\nForge interrupted. Exiting; no incomplete turn was committed.")
             if isinstance(session, RepositoryChatSession):
                 completed_writes = tuple(
                     item.path
@@ -215,7 +248,7 @@ def run_repl(
                         "Already completed approved mutations remain on disk: "
                         + ", ".join(path for path in completed_writes if path)
                     )
-            continue
+            return 130
         except AgentCancelled:
             spinner.finish()
             output_fn("Agent task cancelled.")
@@ -239,6 +272,7 @@ def run_repl(
                     output_fn(f"\n{session.last_coding_task.footer}")
             continue
         spinner.finish()
+        state.warm = True
         if isinstance(response, RepositoryResponse):
             for activity in response.tool_activity:
                 rendered = _render_activity(activity, state.display)
@@ -250,14 +284,10 @@ def run_repl(
             if sources and state.display is not DisplayLevel.MINIMAL:
                 output_fn("\nSources: " + ", ".join(sources))
             if state.display is DisplayLevel.TRACE:
-                output_fn(_task_checklist(response))
+                output_fn(_task_checklist(response, session))
         footer = _performance_footer(response, time.perf_counter() - started)
         if footer and state.display is not DisplayLevel.MINIMAL:
             output_fn(footer)
-        if session.info.completed_turns:
-            output_fn(
-                f"{session.info.profile_name} warm · {_context_gauge(session.info)}"
-            )
         if (
             isinstance(response, RepositoryResponse)
             and response.coding_task is not None
@@ -335,6 +365,8 @@ def _run_command(
                     f"\ntest: {info.test_permission.value}"
                 )
         output_fn(rendered)
+    elif command == "/display":
+        output_fn(f"Display: {state.display.value.upper()}")
     elif command.startswith("/display "):
         value = command.removeprefix("/display ").strip().casefold()
         try:
@@ -348,6 +380,14 @@ def _run_command(
             DisplayLevel.TRACE if command.endswith("on") else DisplayLevel.NORMAL
         )
         output_fn(f"Display: {state.display.value.upper()}")
+    elif command == "/trace":
+        output_fn("Trace: " + ("ON" if state.display is DisplayLevel.TRACE else "OFF"))
+    elif command == "/mode":
+        output_fn(f"Mode: {state.user_mode}")
+    elif command in {"/plan", "/chat"}:
+        _switch_runtime_mode(
+            "/mode " + command.removeprefix("/"), session, output_fn, state
+        )
     elif command.startswith("/mode "):
         _switch_runtime_mode(command, session, output_fn, state)
     elif command == "/exit":
@@ -435,6 +475,17 @@ def _context_gauge(info: object) -> str:
     return f"ctx {_compact_number(used)} / {_compact_number(capacity)}"
 
 
+def _status_line(
+    session: ChatSession | RepositoryChatSession, state: _ReplState
+) -> str:
+    info = session.info
+    residency = "warm" if state.warm else "ready"
+    return (
+        f"Forge · {state.user_mode} · {state.display.value.upper()} · "
+        f"{info.profile_name} {residency} · {_context_gauge(info)}"
+    )
+
+
 def _compact_number(value: int) -> str:
     if value < 1000:
         return str(value)
@@ -509,7 +560,9 @@ def _performance_footer(response: object, elapsed: float) -> str:
     return " · ".join(fields)
 
 
-def _task_checklist(response: RepositoryResponse) -> str:
+def _task_checklist(
+    response: RepositoryResponse, session: RepositoryChatSession
+) -> str:
     activities = response.tool_activity
     searched = any(item.tool_name == "repository.search" for item in activities)
     read = any(item.tool_name == "repository.read_file" for item in activities)
@@ -519,15 +572,21 @@ def _task_checklist(response: RepositoryResponse) -> str:
     verified = any(
         item.current_verification and item.status == "success" for item in activities
     )
-    return "\n".join(
-        (
-            "Operational progress:",
-            f"{'✓' if searched else '○'} Search repository",
-            f"{'✓' if read else '○'} Inspect relevant source",
-            f"{'✓' if changed else '○'} Apply approved change",
-            f"{'✓' if verified else '○'} Verify",
+    lines = [
+        "Operational progress:",
+        f"{'✓' if searched else '○'} Search repository",
+        f"{'✓' if read else '○'} Inspect relevant source",
+    ]
+    if session.info.assist_mode:
+        lines.extend(
+            (
+                f"{'✓' if changed else '○'} Apply approved change",
+                f"{'✓' if verified else '○'} Verify",
+            )
         )
-    )
+    else:
+        lines.append("✓ Synthesize answer or plan")
+    return "\n".join(lines)
 
 
 def _permission_label(decision: object) -> str:
@@ -603,6 +662,13 @@ def _present_error(error: Exception) -> str:
         ),
         "EXECUTABLE_CHECK_FAILURE": (
             "The change failed a trusted behavior check after normal verification."
+        ),
+        "repeated identical tool-call limit exceeded": (
+            "Forge could not make further progress without repeating the same lookup."
+        ),
+        "model response is not one valid JSON object": (
+            "Forge could not determine a safe repository action. Please clarify "
+            "what you want to inspect or change."
         ),
     }
     for classification, rendered in presentations.items():

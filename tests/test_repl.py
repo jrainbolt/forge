@@ -128,9 +128,9 @@ def test_ctrl_c_during_generation_cancels_only_the_active_turn() -> None:
         input_fn=_input(iter(("long request", "/exit"))),
         output_fn=output.append,
     )
-    assert result == 0
+    assert result == 130
     assert session.info.completed_turns == 0
-    assert "Turn cancelled" in "\n".join(output)
+    assert "Forge interrupted" in "\n".join(output)
 
 
 def test_repository_repl_shows_workspace_tools_and_extended_info(

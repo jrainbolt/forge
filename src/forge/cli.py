@@ -229,6 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the Forge CLI and return its process exit status."""
     raw_arguments = list(sys.argv[1:] if argv is None else argv)
+    automatic_interactive_startup = not raw_arguments and sys.stdin.isatty()
     if not raw_arguments:
         if not sys.stdin.isatty():
             build_parser().print_help()
@@ -280,6 +281,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "chat":
         config_path = args.config or config.model_config_path
         if config_path is None:
+            if automatic_interactive_startup:
+                print(
+                    "Forge needs a model configuration before opening this project.\n"
+                    "Set FORGE_CONFIG=/path/to/forge.toml or run:\n"
+                    "  forge chat --config /path/to/forge.toml --workspace . "
+                    "--mode plan"
+                )
+                return 2
             LOGGER.error("chat requires --config or FORGE_CONFIG")
             return 2
         try:
@@ -312,7 +321,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 seed=args.seed,
             )
             catalog = load_model_catalog(config_path, default_backend_registry())
-            profile_name = _resolve_model_profile(catalog, args.model, mode)
+            profile_name = _resolve_model_profile_interactive(
+                catalog,
+                args.model,
+                mode,
+                allow_prompt=automatic_interactive_startup,
+            )
             LOGGER.info("Selected model profile %s", profile_name)
             load_started = time.perf_counter()
             if sys.stdout.isatty():
@@ -616,3 +630,32 @@ def _resolve_model_profile(
             f"no default model profile is configured for {role.value}; use --model"
         )
     return resolver(None, role)
+
+
+def _resolve_model_profile_interactive(
+    catalog: object,
+    explicit: str | None,
+    mode: AutonomyMode,
+    *,
+    allow_prompt: bool,
+) -> str:
+    """Require a deliberate TTY choice when the requested role has no default."""
+    try:
+        return _resolve_model_profile(catalog, explicit, mode)
+    except ModelSelectionError:
+        names = getattr(catalog, "profile_names", ())
+        if explicit is not None or not allow_prompt or not names:
+            raise
+        print("No repository default model is configured.")
+        for index, name in enumerate(names, 1):
+            print(f"  {index}. {name}")
+        try:
+            selected = input("Select model profile [number, q to quit]: ").strip()
+        except (EOFError, KeyboardInterrupt) as error:
+            raise ModelSelectionError("model selection cancelled") from error
+        if selected.casefold() in {"q", "quit", "exit"}:
+            raise ModelSelectionError("model selection cancelled") from None
+        try:
+            return names[int(selected) - 1]
+        except (ValueError, IndexError) as error:
+            raise ModelSelectionError("invalid model profile selection") from error

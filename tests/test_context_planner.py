@@ -331,6 +331,9 @@ def test_read_session_rejects_consecutive_search_after_candidate(
         "fixture", model, tmp_path, require_relevant_source=False
     ).ask("Find VALUE")
 
-    assert response.context_metrics.context_rejections == 1
-    assert response.tool_activity[1].status == "failure"
+    assert response.context_metrics.context_rejections == 0
+    assert [item.invocation_id for item in response.tool_activity] == [
+        "search-1",
+        "range",
+    ]
     assert response.context_metrics.range_reads == 1

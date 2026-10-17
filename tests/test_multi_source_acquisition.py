@@ -328,7 +328,9 @@ def test_tool_call_ids_are_scoped_to_each_user_turn(tmp_path: Path) -> None:
     assert tuple(item.invocation_id for item in second.tool_activity) == ("shared",)
 
 
-def test_same_tool_call_with_different_ids_is_legal(tmp_path: Path) -> None:
+def test_same_successful_tool_call_gets_one_correction_without_reexecution(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "a.py").write_text("A = 1\n")
 
     def listing(identifier: str) -> str:
@@ -359,9 +361,9 @@ def test_same_tool_call_with_different_ids_is_legal(tmp_path: Path) -> None:
     ).ask("Inspect a.py")
     assert tuple(item.invocation_id for item in response.tool_activity) == (
         "first",
-        "second",
         "source",
     )
+    assert len(model.requests) == 4
 
 
 def test_multi_source_acquisition_v1_ten_scenarios_pass(tmp_path: Path) -> None:
