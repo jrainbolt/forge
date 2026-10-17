@@ -85,7 +85,6 @@ FORGE_MARK = (
     "   \\  \\  /    /",
     "    \\  \\/    /",
     "     `.___.'",
-    "",
     "      FORGE",
 )
 
@@ -99,12 +98,8 @@ def render_splash(
     access: str,
     context: str | None,
     theme: Theme,
+    width: int | None = None,
 ) -> tuple[str, ...]:
-    lines = [
-        theme.paint(line, ColorRole.BRAND_PRIMARY) if line else ""
-        for line in FORGE_MARK
-    ]
-    lines.extend(("", theme.paint("Local AI Agent", ColorRole.BRAND_SECONDARY), ""))
     fields = (
         ("Project", project),
         ("Model", model),
@@ -113,6 +108,30 @@ def render_splash(
         ("Access", access),
         ("Context", context),
     )
+    metadata = ["FORGE", "Local AI Agent", ""]
+    metadata.extend(
+        f"{label:<9} {value}" for label, value in fields if value is not None
+    )
+    available = width or shutil.get_terminal_size(fallback=(80, 24)).columns
+    if available >= 68:
+        wide_mark = FORGE_MARK[:-1]
+        height = max(len(wide_mark), len(metadata))
+        rendered: list[str] = []
+        for index in range(height):
+            left = wide_mark[index] if index < len(wide_mark) else ""
+            right = metadata[index] if index < len(metadata) else ""
+            left = theme.paint(f"{left:<27}", ColorRole.BRAND_PRIMARY)
+            role = (
+                ColorRole.BRAND_PRIMARY
+                if index == 0
+                else ColorRole.BRAND_SECONDARY
+                if index == 1
+                else ColorRole.METADATA
+            )
+            rendered.append(left + theme.paint(right, role))
+        return tuple(rendered)
+    lines = [theme.paint(line, ColorRole.BRAND_PRIMARY) for line in FORGE_MARK]
+    lines.append(theme.paint("Local AI Agent", ColorRole.BRAND_SECONDARY))
     lines.extend(f"{label:<9} {value}" for label, value in fields if value is not None)
     return tuple(lines)
 
@@ -127,20 +146,66 @@ def truncate_status(text: str, *, width: int | None = None) -> str:
 
 
 class LoadingFlame:
-    """Finite-frame loading animation with one static non-TTY fallback."""
+    """Finite-frame multi-line Forge flame animation."""
 
-    _FRAMES = ("  .  /\\  ||", "  *  /\\ /||\\", " \\|/  *  /\\  ||")
+    FRAMES = (
+        (
+            "        .'",
+            "      .'  `.",
+            "     /      \\",
+            "    /  /\\    \\",
+            "   /  /  \\    \\",
+            "   \\  \\  /    /",
+            "    \\  \\/    /",
+            "     `.___.'",
+        ),
+        (
+            "       * .",
+            "       .' `.",
+            "      /     \\",
+            "    /   /\\   \\",
+            "   /   /  \\   \\",
+            "   \\   \\ /   /",
+            "    \\   \\/  /",
+            "     `.___.'",
+        ),
+        (
+            "         *",
+            "        `.",
+            "      .'  `.",
+            "     /  /\\  \\",
+            "    /  /  \\  \\",
+            "    \\  \\  /  /",
+            "     \\  \\/  /",
+            "      `.__.'",
+        ),
+        (
+            "       . '",
+            "      .'  `.",
+            "     /      \\",
+            "    /  /\\   \\",
+            "   /  /  \\   \\",
+            "   \\   \\ /   /",
+            "    \\   \\/  /",
+            "     `.___.'",
+        ),
+    )
 
-    def __init__(self, *, enabled: bool, label: str) -> None:
+    def __init__(
+        self, *, enabled: bool, label: str, theme: Theme | None = None
+    ) -> None:
         self.enabled = enabled
         self.label = label
+        self.theme = theme or resolve_theme("mono", interactive=False)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._rendered = False
 
     def start(self) -> None:
         if not self.enabled:
             return
         self._stop.clear()
+        self._render_frame(0, elapsed=0.0)
         self._thread = threading.Thread(target=self._animate, daemon=True)
         self._thread.start()
 
@@ -151,8 +216,13 @@ class LoadingFlame:
         if self._thread is not None:
             self._thread.join(timeout=0.5)
         self._thread = None
-        sys.stdout.write("\r\033[2K")
+        if self._rendered:
+            sys.stdout.write(f"\033[{len(self.FRAMES[0]) + 1}A")
+            for _ in range(len(self.FRAMES[0]) + 1):
+                sys.stdout.write("\r\033[2K\n")
+            sys.stdout.write(f"\033[{len(self.FRAMES[0]) + 1}A")
         sys.stdout.flush()
+        self._rendered = False
 
     @property
     def running(self) -> bool:
@@ -161,9 +231,22 @@ class LoadingFlame:
     def _animate(self) -> None:
         index = 0
         started = time.perf_counter()
-        while not self._stop.wait(0.12):
-            frame = self._FRAMES[index % len(self._FRAMES)]
+        while not self._stop.wait(0.18):
             elapsed = time.perf_counter() - started
-            sys.stdout.write(f"\r{frame}  {self.label} {elapsed:.1f}s")
-            sys.stdout.flush()
+            self._render_frame(index % len(self.FRAMES), elapsed=elapsed)
             index += 1
+
+    def _render_frame(self, index: int, *, elapsed: float) -> None:
+        if self._rendered:
+            sys.stdout.write(f"\033[{len(self.FRAMES[index]) + 1}A")
+        for line_number, line in enumerate(self.FRAMES[index]):
+            role = (
+                ColorRole.BRAND_SECONDARY
+                if "*" in line or line_number in {3, 4}
+                else ColorRole.BRAND_PRIMARY
+            )
+            sys.stdout.write(f"\r\033[2K{self.theme.paint(line, role)}\n")
+        label = self.theme.paint(f"{self.label} {elapsed:.1f}s", ColorRole.METADATA)
+        sys.stdout.write(f"\r\033[2K{label}\n")
+        sys.stdout.flush()
+        self._rendered = True

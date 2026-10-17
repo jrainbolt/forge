@@ -1,36 +1,35 @@
-# A95 terminal-polish dogfood guide
+# A95 interactive-terminal dogfood guide
 
-Run these checks in a normal interactive terminal. Do not set `PYTHONPATH`; use
-the installed `forge` command and the model configuration you ordinarily use.
+Use an installed `forge` command in a normal interactive terminal. Do not set
+`PYTHONPATH`.
 
-1. **A — Project detection:** enter a known project and run bare `forge`. Confirm
-   that Forge detects the project before model selection.
-2. **B — Model selection:** select `qwen-large`. Confirm the selected profile is
-   the one shown later in the splash and status line.
-3. **C — Loading:** observe the compact animated flame while the model loads.
-   Confirm it redraws one line and disappears completely when loading finishes.
-4. **D — Splash:** confirm the compact FORGE mark, “Local AI Agent,” and only
-   known project/model/mode/display/access/context metadata appear once.
-5. **E — Command list:** enter `/`. Confirm all registered commands appear in
-   alphabetical order.
-6. **F — Filtering/completion:** enter `/tr` and confirm only `/trace` is shown.
-   At a fresh prompt, type `/tr` and press Tab; confirm it completes to `/trace`.
-7. **G — Display levels:** run `/minimal`, `/normal`, and `/trace` in that order.
-   Confirm the prompt-adjacent status line immediately reflects each level.
-8. **H — Repository conversation:** ask several repository questions. Confirm
-   the activity spinner clears before answers and the status line remains intact.
-9. **I — Resize:** resize narrower and wider between prompts. Confirm the status
-   text truncates instead of wrapping over the input or conversation.
-10. **J — Themes:** run `/theme mono`, `/theme default`, and `/theme ember`.
-    Confirm wording and status remain understandable in all three themes.
-11. **K — Copy/paste:** copy assistant output from terminal scrollback. Confirm
-    prompt/status content is not interleaved with the assistant response.
-12. **L — Exit:** run `/exit` and confirm Forge exits without a lingering flame,
-    spinner, hidden terminal input, or damaged shell prompt.
+1. **A:** Enter the `aspect-survivor` project and launch bare `forge`.
+2. **B:** Select `qwen-large`.
+3. **C:** Watch the multi-line Forge flame throughout model loading. Confirm its
+   contour visibly flickers without scrolling.
+4. **D:** Confirm the final side-by-side flame and metadata fit in a normal
+   terminal without scrolling or duplicated project/model output.
+5. **E:** Type `/`; confirm the completion popup lists commands alphabetically.
+6. **F:** Use Up/Down to change selection and Tab or Enter to select naturally.
+7. **G:** Type `/tr`; confirm the popup narrows to `/trace`.
+8. **H:** Press Esc; confirm the popup closes without submitting input.
+9. **I:** Run `/trace`; confirm TRACE appears in the bottom toolbar.
+10. **J:** Ask `How does MeleeAttackSystem work?`
+11. **K:** Confirm assistant prose uses the normal foreground while tool verbs,
+    paths, metrics, and toolbar fields use restrained semantic colors.
+12. **L:** Confirm the toolbar remains attached to the prompt instead of entering
+    conversation scrollback.
+13. **M:** Resize through wide, medium, and narrow widths. Confirm splash,
+    completion menu, prompt, and toolbar adapt without corruption.
+14. **N:** Run `/theme mono`, then `/theme ember`; confirm information remains
+    readable and only presentation changes.
+15. **O:** Copy an assistant answer; confirm completion and toolbar content do not
+    contaminate the copied response.
+16. **P:** Press Ctrl-C at an idle prompt and confirm Forge exits cleanly.
 
-Optional compatibility checks:
+Compatibility checks:
 
-- Run with `NO_COLOR=1` and confirm no ANSI color is emitted.
-- Run with `FORGE_NO_ANIMATION=1` and confirm a static loading message appears.
-- Pipe or redirect output and confirm there is no splash, animation, status bar,
-  or control-sequence noise.
+- Set `NO_COLOR=1`; the flame may still animate, but no color should appear.
+- Set `FORGE_NO_ANIMATION=1`; a static loading message should replace animation.
+- Redirect output; no splash, animation, completion UI, toolbar, ANSI, or cursor
+  controls should be emitted.

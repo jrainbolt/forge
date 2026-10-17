@@ -45,7 +45,7 @@ from forge.repl import run_repl
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
 from forge.semantic_index import SemanticIndex, SemanticIndexError
 from forge.session import DEFAULT_SYSTEM_MESSAGE, ChatSession
-from forge.terminal_ui import THEME_NAMES, LoadingFlame
+from forge.terminal_ui import THEME_NAMES, LoadingFlame, resolve_theme
 from forge.tools import (
     create_repository_registry,
 )
@@ -348,9 +348,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 and not args.no_animation
                 and "FORGE_NO_ANIMATION" not in os.environ
             )
+            selected_theme = args.theme or os.environ.get("FORGE_THEME", "default")
             flame = LoadingFlame(
                 enabled=animation_enabled,
                 label=f"Loading {profile_name}",
+                theme=resolve_theme(selected_theme, interactive=presentation_tty),
             )
             if presentation_tty and not animation_enabled:
                 print(f"Loading {profile_name}...")
@@ -442,7 +444,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     display_level=args.display,
                     user_mode=user_mode,
                     interactive=presentation_tty,
-                    theme_name=args.theme or os.environ.get("FORGE_THEME", "default"),
+                    theme_name=selected_theme,
                 )
             if semantic_index is not None:
                 semantic_index.close()

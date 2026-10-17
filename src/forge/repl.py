@@ -16,6 +16,7 @@ from forge.ephemeral_acceptance import (
     EphemeralAcceptanceMode,
     EphemeralAcceptancePreview,
 )
+from forge.interactive_frontend import InteractiveFrontend
 from forge.models import ModelError
 from forge.orchestration import (
     AgentCancelled,
@@ -203,8 +204,22 @@ def run_repl(
         interactive=tty,
     )
     spinner = _Spinner(tty and output_fn is print)
-    restore_completion = _install_command_completion(enabled=tty and input_fn is input)
     info = session.info
+    rich_frontend = tty and input_fn is input and output_fn is print
+    frontend = (
+        InteractiveFrontend(
+            COMMAND_REGISTRY,
+            lambda: _toolbar_fragments(session, state),
+            theme_name=state.theme.name,
+            color_enabled=state.theme.color_enabled,
+        )
+        if rich_frontend
+        else None
+    )
+    read_input = frontend.prompt if frontend is not None else input_fn
+    restore_completion = _install_command_completion(
+        enabled=tty and frontend is None and input_fn is input
+    )
     if tty:
         workspace = getattr(info, "workspace", None)
         project = Path(workspace).name if workspace is not None else None
@@ -221,6 +236,7 @@ def run_repl(
             access=_access_badge(info, long=True),
             context=context,
             theme=state.theme,
+            width=shutil.get_terminal_size(fallback=(80, 24)).columns,
         ):
             output_fn(line)
     else:
@@ -260,14 +276,14 @@ def run_repl(
         if info.assist_mode:
             session.set_approval_callback(
                 _approval_prompt(
-                    input_fn=input_fn,
+                    input_fn=read_input,
                     output_fn=output_fn,
                     cancel_on_interrupt=info.agent_mode,
                 )
             )
             if session.ephemeral_acceptance_mode is not EphemeralAcceptanceMode.OFF:
                 session.set_ephemeral_review_callback(
-                    _ephemeral_review_prompt(input_fn=input_fn, output_fn=output_fn)
+                    _ephemeral_review_prompt(input_fn=read_input, output_fn=output_fn)
                 )
         session.set_activity_callback(
             lambda activity: spinner.update(_activity_progress(activity))
@@ -279,10 +295,10 @@ def run_repl(
         )
     output_fn("Type /help for commands.")
     output_fn("Use /multi for paragraphs; finish with a line containing only '.'.")
-    output_fn("Ctrl-C or Ctrl-D exits Forge. Esc cancellation is not available.")
+    output_fn("Ctrl-C or Ctrl-D exits Forge. Esc closes command completion menus.")
     output_fn("Session history is in memory only; /clear starts a fresh conversation.")
     while True:
-        if tty:
+        if tty and frontend is None:
             width = min(48, shutil.get_terminal_size(fallback=(80, 24)).columns)
             output_fn(state.theme.paint("─" * max(1, width), ColorRole.MUTED))
             output_fn(
@@ -293,7 +309,7 @@ def run_repl(
             )
         try:
             prompt = state.theme.paint("> ", ColorRole.PROMPT) if tty else "\n> "
-            text = input_fn(prompt)
+            text = read_input(prompt)
         except EOFError:
             output_fn("\nGoodbye.")
             restore_completion()
@@ -321,6 +337,11 @@ def run_repl(
                 restore_completion()
                 return 0
             else:
+                if frontend is not None:
+                    frontend.set_theme(
+                        state.theme.name,
+                        color_enabled=state.theme.color_enabled,
+                    )
                 continue
         started = time.perf_counter()
         spinner.start("Thinking...")
@@ -378,16 +399,16 @@ def run_repl(
                 rendered = _render_activity(activity, state.display, state.theme)
                 if rendered is not None:
                     output_fn(rendered)
-        output_fn(f"\n{response.text}")
+        output_fn("\n" + state.theme.paint(response.text, ColorRole.NORMAL_TEXT))
         if isinstance(response, RepositoryResponse):
             sources = _trusted_sources(response)
             if sources and state.display is not DisplayLevel.MINIMAL:
-                output_fn("\nSources: " + ", ".join(sources))
+                output_fn(_render_sources(sources, state.theme))
             if state.display is DisplayLevel.TRACE:
                 output_fn(_task_checklist(response, session))
         footer = _performance_footer(response, time.perf_counter() - started)
         if footer and state.display is not DisplayLevel.MINIMAL:
-            output_fn(footer)
+            output_fn(state.theme.paint(footer, ColorRole.METADATA))
         if (
             isinstance(response, RepositoryResponse)
             and response.coding_task is not None
@@ -613,6 +634,53 @@ def _status_line(
     return " · ".join(fields)
 
 
+def _toolbar_fragments(
+    session: ChatSession | RepositoryChatSession, state: _ReplState
+) -> list[tuple[str, str]]:
+    info = session.info
+    width = shutil.get_terminal_size(fallback=(80, 24)).columns
+    used = getattr(info, "last_estimated_input_tokens", None)
+    capacity = getattr(info, "context_capacity", None)
+    context = None
+    percentage = None
+    if used is not None and capacity:
+        context = f"ctx {_compact_number(used)}/{_compact_number(capacity)}"
+        percentage = f"{round(100 * used / capacity)}%"
+    residency = "warm" if state.warm else "ready"
+    if width >= 72:
+        values = (
+            ("class:toolbar.brand", "Forge"),
+            ("class:toolbar.mode", state.user_mode),
+            ("class:toolbar.display", state.display.value.upper()),
+            ("class:toolbar.model", info.profile_name),
+            ("class:toolbar.warm", residency),
+            ("class:toolbar.access", _access_badge(info)),
+            ("class:toolbar.context", context),
+        )
+    elif width >= 48:
+        values = (
+            ("class:toolbar.mode", state.user_mode),
+            ("class:toolbar.display", state.display.value.upper()),
+            ("class:toolbar.model", info.profile_name),
+            ("class:toolbar.access", _access_badge(info)),
+            ("class:toolbar.context", f"{percentage} ctx" if percentage else None),
+        )
+    else:
+        values = (
+            ("class:toolbar.mode", state.user_mode),
+            ("class:toolbar.model", info.profile_name),
+            ("class:toolbar.context", percentage),
+        )
+    fragments: list[tuple[str, str]] = []
+    for style, value in values:
+        if value is None:
+            continue
+        if fragments:
+            fragments.append(("class:toolbar.separator", " | "))
+        fragments.append((style, value))
+    return fragments
+
+
 def _render_suggestions(command: str) -> str:
     matches = command_suggestions(command)
     width = max((len(item.name) for item in matches), default=0)
@@ -673,9 +741,10 @@ def _render_activity(
     if display is DisplayLevel.TRACE:
         suffix = f": {path}" if path else ""
         evidence = getattr(activity, "evidence", "unknown")
-        return theme.paint(
-            f"[tool] {tool}{suffix} ({status}; {evidence})", ColorRole.TOOL
-        )
+        rendered = theme.paint(f"[tool] {tool}", ColorRole.TOOL)
+        if suffix:
+            rendered += theme.paint(suffix, ColorRole.PATH)
+        return rendered + theme.paint(f" ({status}; {evidence})", ColorRole.METADATA)
     mark = "✓" if status == "success" else "!"
     action = {
         "repository.read_file": "Read",
@@ -683,9 +752,17 @@ def _render_activity(
         "project.test": "Ran tests",
         "project.build": "Ran build",
     }.get(tool, tool)
-    rendered = f"{mark} {action}{f' {path}' if path else ''}"
     role = ColorRole.SUCCESS if status == "success" else ColorRole.WARNING
-    return theme.paint(rendered, role)
+    rendered = theme.paint(mark, role) + " " + theme.paint(action, ColorRole.TOOL)
+    if path:
+        rendered += " " + theme.paint(path, ColorRole.PATH)
+    return rendered
+
+
+def _render_sources(sources: tuple[str, ...], theme: Theme) -> str:
+    label = theme.paint("Sources:", ColorRole.MUTED)
+    paths = ", ".join(theme.paint(path, ColorRole.PATH) for path in sources)
+    return f"\n{label} {paths}"
 
 
 def _trusted_sources(response: RepositoryResponse) -> tuple[str, ...]:

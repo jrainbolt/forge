@@ -20,7 +20,7 @@ def test_src_layout_discovery_and_extras_are_explicit() -> None:
     assert config["tool"]["setuptools"]["dynamic"]["version"] == {
         "attr": "forge.__version__"
     }
-    assert config["project"]["dependencies"] == []
+    assert config["project"]["dependencies"] == ["prompt-toolkit>=3.0.50,<4"]
     assert any(
         item.startswith("llama-cpp-python")
         for item in config["project"]["optional-dependencies"]["llama"]
