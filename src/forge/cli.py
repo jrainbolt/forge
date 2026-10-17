@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
 from collections.abc import Sequence
@@ -44,6 +45,7 @@ from forge.repl import run_repl
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
 from forge.semantic_index import SemanticIndex, SemanticIndexError
 from forge.session import DEFAULT_SYSTEM_MESSAGE, ChatSession
+from forge.terminal_ui import THEME_NAMES, LoadingFlame
 from forge.tools import (
     create_repository_registry,
 )
@@ -140,6 +142,17 @@ def build_parser() -> argparse.ArgumentParser:
         choices=DISPLAY_LEVELS,
         default="normal",
         help="terminal detail level: minimal, normal, or trace",
+    )
+    chat.add_argument(
+        "--theme",
+        choices=THEME_NAMES,
+        default=None,
+        help="terminal theme (default, ember, or mono; also FORGE_THEME)",
+    )
+    chat.add_argument(
+        "--no-animation",
+        action="store_true",
+        help="disable the interactive model-loading animation",
     )
     chat.add_argument(
         "--permissions",
@@ -329,12 +342,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             LOGGER.info("Selected model profile %s", profile_name)
             load_started = time.perf_counter()
-            if sys.stdout.isatty():
+            presentation_tty = sys.stdin.isatty() and sys.stdout.isatty()
+            animation_enabled = (
+                presentation_tty
+                and not args.no_animation
+                and "FORGE_NO_ANIMATION" not in os.environ
+            )
+            flame = LoadingFlame(
+                enabled=animation_enabled,
+                label=f"Loading {profile_name}",
+            )
+            if presentation_tty and not animation_enabled:
                 print(f"Loading {profile_name}...")
-            model = catalog.create(profile_name)
+            flame.start()
+            try:
+                model = catalog.create(profile_name)
+            finally:
+                flame.stop()
             load_elapsed = time.perf_counter() - load_started
-            if sys.stdout.isatty():
-                print(f"{profile_name} ready ({load_elapsed:.1f}s)")
             if bool(args.embedding_config) != bool(args.embedding_profile):
                 raise ValueError(
                     "--embedding-config and --embedding-profile must be "
@@ -416,7 +441,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     session,
                     display_level=args.display,
                     user_mode=user_mode,
-                    interactive=sys.stdin.isatty() and sys.stdout.isatty(),
+                    interactive=presentation_tty,
+                    theme_name=args.theme or os.environ.get("FORGE_THEME", "default"),
                 )
             if semantic_index is not None:
                 semantic_index.close()

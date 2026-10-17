@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 import termios
 import threading
@@ -9,6 +10,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 
 from forge.ephemeral_acceptance import (
     EphemeralAcceptanceMode,
@@ -22,6 +24,13 @@ from forge.orchestration import (
 )
 from forge.orchestration.repository_session import requires_repository_grounding
 from forge.session import ChatSession
+from forge.terminal_ui import (
+    ColorRole,
+    Theme,
+    render_splash,
+    resolve_theme,
+    truncate_status,
+)
 from forge.tools import (
     MultiFileMutationPreview,
     MutationPreview,
@@ -32,17 +41,58 @@ from forge.tools import (
 InputFunction = Callable[[str], str]
 OutputFunction = Callable[[str], None]
 
-HELP_TEXT = (
-    "/help  Show commands\n"
-    "/clear Clear conversation\n"
-    "/info  Show session info\n"
-    "/multi Enter multiline input; finish with a line containing only .\n"
-    "/mode chat|plan  Switch conversational intent in a read-only project\n"
-    "/chat, /plan  Switch directly in a read-only project\n"
-    "/display minimal|normal|trace  Set terminal detail\n"
-    "/trace on|off  Toggle trace display\n"
-    "/exit  Exit Forge"
+
+@dataclass(frozen=True, slots=True)
+class CommandSpec:
+    name: str
+    description: str
+    arguments: str = ""
+    aliases: tuple[str, ...] = ()
+    availability: str = "all"
+
+    @property
+    def invocation(self) -> str:
+        suffix = f" {self.arguments}" if self.arguments else ""
+        return f"/{self.name}{suffix}"
+
+
+COMMAND_REGISTRY = tuple(
+    sorted(
+        (
+            CommandSpec("chat", "Switch to conversational intent"),
+            CommandSpec("clear", "Clear conversation"),
+            CommandSpec("display", "Set terminal detail", "minimal|normal|trace"),
+            CommandSpec("exit", "Exit Forge"),
+            CommandSpec("help", "Show commands"),
+            CommandSpec("info", "Show session info"),
+            CommandSpec("minimal", "Use minimal terminal detail"),
+            CommandSpec("mode", "Switch interaction intent", "chat|plan"),
+            CommandSpec(
+                "multi", "Enter multiline input; finish with a line containing only ."
+            ),
+            CommandSpec("normal", "Use normal terminal detail"),
+            CommandSpec("plan", "Switch to read-only planning intent"),
+            CommandSpec("theme", "Select terminal theme", "default|ember|mono"),
+            CommandSpec("trace", "Use trace detail (on/off also accepted)"),
+        ),
+        key=lambda item: item.name,
+    )
 )
+
+
+def command_suggestions(command: str) -> tuple[CommandSpec, ...]:
+    prefix = command.strip().removeprefix("/").casefold()
+    return tuple(item for item in COMMAND_REGISTRY if item.name.startswith(prefix))
+
+
+def command_help() -> str:
+    width = max(len(item.invocation) for item in COMMAND_REGISTRY)
+    return "\n".join(
+        f"{item.invocation:<{width}}  {item.description}" for item in COMMAND_REGISTRY
+    )
+
+
+HELP_TEXT = command_help()
 
 
 class DisplayLevel(StrEnum):
@@ -57,6 +107,8 @@ class DisplayLevel(StrEnum):
 class _ReplState:
     display: DisplayLevel
     user_mode: str
+    theme: Theme
+    interactive: bool
     warm: bool = False
 
 
@@ -133,23 +185,50 @@ def run_repl(
     display_level: str = "normal",
     user_mode: str | None = None,
     interactive: bool | None = None,
+    theme_name: str = "default",
 ) -> int:
     """Run a synchronous chat loop against one already-loaded session."""
-    state = _ReplState(
-        display=DisplayLevel(display_level),
-        user_mode=user_mode or _default_user_mode(session),
-    )
     tty = (
         sys.stdin.isatty() and sys.stdout.isatty()
         if interactive is None
         else interactive
     )
+    state = _ReplState(
+        display=DisplayLevel(display_level),
+        user_mode=user_mode or _default_user_mode(session),
+        theme=resolve_theme(
+            theme_name,
+            interactive=tty and output_fn is print,
+        ),
+        interactive=tty,
+    )
     spinner = _Spinner(tty and output_fn is print)
+    restore_completion = _install_command_completion(enabled=tty and input_fn is input)
     info = session.info
-    output_fn("Forge ready.")
-    output_fn(f"Forge [{info.profile_name}]")
+    if tty:
+        workspace = getattr(info, "workspace", None)
+        project = Path(workspace).name if workspace is not None else None
+        context = (
+            _compact_number(info.context_capacity)
+            if info.context_capacity is not None
+            else None
+        )
+        for line in render_splash(
+            project=project,
+            model=info.profile_name,
+            mode=state.user_mode,
+            display=state.display.value.upper(),
+            access=_access_badge(info, long=True),
+            context=context,
+            theme=state.theme,
+        ):
+            output_fn(line)
+    else:
+        output_fn("Forge ready.")
+        output_fn(f"Forge [{info.profile_name}]")
     if isinstance(session, RepositoryChatSession):
-        output_fn(f"Workspace: {info.workspace}")
+        if not tty:
+            output_fn(f"Workspace: {info.workspace}")
         legacy_access = (
             "agent repair"
             if info.repair_enabled
@@ -159,24 +238,25 @@ def run_repl(
             if info.assist_mode
             else "read-only"
         )
-        output_fn(f"Repository access: {legacy_access}")
-        output_fn(
-            f"[{_permission_badge(info)}] {state.user_mode} · "
-            f"display {state.display.value.upper()} · {_context_gauge(info)}"
-        )
-        output_fn(f"Mode: {info.autonomy_mode.value.upper()}")
-        output_fn(f"Permissions: {info.permission_profile}")
-        output_fn(f"Structural checks: {info.structural_completeness_mode.upper()}")
-        output_fn(
-            "Reads: "
-            + _permission_label(info.read_permission)
-            + " | Writes: "
-            + _permission_label(info.write_permission)
-            + " | Build/Test: "
-            + _permission_label(info.build_permission)
-            + "/"
-            + _permission_label(info.test_permission)
-        )
+        if not tty:
+            output_fn(f"Repository access: {legacy_access}")
+            output_fn(
+                f"[{_permission_badge(info)}] {state.user_mode} · "
+                f"display {state.display.value.upper()} · {_context_gauge(info)}"
+            )
+            output_fn(f"Mode: {info.autonomy_mode.value.upper()}")
+            output_fn(f"Permissions: {info.permission_profile}")
+            output_fn(f"Structural checks: {info.structural_completeness_mode.upper()}")
+            output_fn(
+                "Reads: "
+                + _permission_label(info.read_permission)
+                + " | Writes: "
+                + _permission_label(info.write_permission)
+                + " | Build/Test: "
+                + _permission_label(info.build_permission)
+                + "/"
+                + _permission_label(info.test_permission)
+            )
         if info.assist_mode:
             session.set_approval_callback(
                 _approval_prompt(
@@ -192,7 +272,7 @@ def run_repl(
         session.set_activity_callback(
             lambda activity: spinner.update(_activity_progress(activity))
         )
-    else:
+    elif not tty:
         output_fn(
             f"[CHAT] CHAT · display {state.display.value.upper()} · "
             f"{_context_gauge(info)}"
@@ -202,14 +282,25 @@ def run_repl(
     output_fn("Ctrl-C or Ctrl-D exits Forge. Esc cancellation is not available.")
     output_fn("Session history is in memory only; /clear starts a fresh conversation.")
     while True:
-        output_fn(_status_line(session, state))
+        if tty:
+            width = min(48, shutil.get_terminal_size(fallback=(80, 24)).columns)
+            output_fn(state.theme.paint("─" * max(1, width), ColorRole.MUTED))
+            output_fn(
+                state.theme.paint(
+                    truncate_status(_status_line(session, state)),
+                    ColorRole.METADATA,
+                )
+            )
         try:
-            text = input_fn("\n> ")
+            prompt = state.theme.paint("> ", ColorRole.PROMPT) if tty else "\n> "
+            text = input_fn(prompt)
         except EOFError:
             output_fn("\nGoodbye.")
+            restore_completion()
             return 0
         except KeyboardInterrupt:
             output_fn("\nGoodbye.")
+            restore_completion()
             return 130
         if not text.strip():
             continue
@@ -219,7 +310,15 @@ def run_repl(
                 text = _read_multiline(input_fn, output_fn)
                 if text is None:
                     continue
+            elif command == "/" or (
+                " " not in command
+                and command_suggestions(command)
+                and not any(command == f"/{item.name}" for item in COMMAND_REGISTRY)
+            ):
+                output_fn(_render_suggestions(command))
+                continue
             elif _run_command(command, session, output_fn, state):
+                restore_completion()
                 return 0
             else:
                 continue
@@ -248,6 +347,7 @@ def run_repl(
                         "Already completed approved mutations remain on disk: "
                         + ", ".join(path for path in completed_writes if path)
                     )
+            restore_completion()
             return 130
         except AgentCancelled:
             spinner.finish()
@@ -275,7 +375,7 @@ def run_repl(
         state.warm = True
         if isinstance(response, RepositoryResponse):
             for activity in response.tool_activity:
-                rendered = _render_activity(activity, state.display)
+                rendered = _render_activity(activity, state.display, state.theme)
                 if rendered is not None:
                     output_fn(rendered)
         output_fn(f"\n{response.text}")
@@ -375,13 +475,27 @@ def _run_command(
             output_fn("Display must be minimal, normal, or trace.")
         else:
             output_fn(f"Display: {state.display.value.upper()}")
+    elif command in {"/minimal", "/normal"}:
+        state.display = DisplayLevel(command.removeprefix("/"))
+        output_fn(f"Display: {state.display.value.upper()}")
     elif command in {"/trace on", "/trace off"}:
         state.display = (
             DisplayLevel.TRACE if command.endswith("on") else DisplayLevel.NORMAL
         )
         output_fn(f"Display: {state.display.value.upper()}")
     elif command == "/trace":
-        output_fn("Trace: " + ("ON" if state.display is DisplayLevel.TRACE else "OFF"))
+        state.display = DisplayLevel.TRACE
+        output_fn("Display: TRACE")
+    elif command == "/theme":
+        output_fn(f"Theme: {state.theme.name}")
+    elif command.startswith("/theme "):
+        value = command.removeprefix("/theme ").strip().casefold()
+        try:
+            state.theme = resolve_theme(value, interactive=state.interactive)
+        except ValueError:
+            output_fn("Theme must be default, ember, or mono.")
+        else:
+            output_fn(f"Theme: {state.theme.name}")
     elif command == "/mode":
         output_fn(f"Mode: {state.user_mode}")
     elif command in {"/plan", "/chat"}:
@@ -465,6 +579,13 @@ def _permission_badge(info: object) -> str:
     }.get(mode, "READ")
 
 
+def _access_badge(info: object, *, long: bool = False) -> str:
+    mode = getattr(getattr(info, "autonomy_mode", None), "value", "chat")
+    if mode == "read":
+        return "READ ONLY" if long else "READ"
+    return {"assist": "ASK WRITE", "agent": "AUTO", "repair": "AUTO"}.get(mode, "CHAT")
+
+
 def _context_gauge(info: object) -> str:
     used = getattr(info, "last_estimated_input_tokens", None)
     capacity = getattr(info, "context_capacity", None)
@@ -480,10 +601,44 @@ def _status_line(
 ) -> str:
     info = session.info
     residency = "warm" if state.warm else "ready"
-    return (
+    fields = [
         f"Forge · {state.user_mode} · {state.display.value.upper()} · "
-        f"{info.profile_name} {residency} · {_context_gauge(info)}"
-    )
+        f"{info.profile_name} {residency}",
+        _access_badge(info),
+    ]
+    used = getattr(info, "last_estimated_input_tokens", None)
+    capacity = getattr(info, "context_capacity", None)
+    if used is not None and capacity is not None:
+        fields.append(f"ctx {_compact_number(used)} / {_compact_number(capacity)}")
+    return " · ".join(fields)
+
+
+def _render_suggestions(command: str) -> str:
+    matches = command_suggestions(command)
+    width = max((len(item.name) for item in matches), default=0)
+    return "\n".join(f"/{item.name:<{width}}  {item.description}" for item in matches)
+
+
+def _install_command_completion(*, enabled: bool) -> Callable[[], None]:
+    if not enabled:
+        return lambda: None
+    try:
+        import readline
+    except ImportError:
+        return lambda: None
+    previous = readline.get_completer()
+
+    def complete(text: str, state: int) -> str | None:
+        matches = [f"/{item.name} " for item in command_suggestions(text)]
+        return matches[state] if state < len(matches) else None
+
+    readline.set_completer(complete)
+    readline.parse_and_bind("tab: complete")
+
+    def restore() -> None:
+        readline.set_completer(previous)
+
+    return restore
 
 
 def _compact_number(value: int) -> str:
@@ -507,7 +662,9 @@ def _activity_progress(activity: object) -> str:
     return f"Running {tool}..."
 
 
-def _render_activity(activity: object, display: DisplayLevel) -> str | None:
+def _render_activity(
+    activity: object, display: DisplayLevel, theme: Theme
+) -> str | None:
     if display is DisplayLevel.MINIMAL:
         return None
     tool = getattr(activity, "tool_name", "tool")
@@ -516,7 +673,9 @@ def _render_activity(activity: object, display: DisplayLevel) -> str | None:
     if display is DisplayLevel.TRACE:
         suffix = f": {path}" if path else ""
         evidence = getattr(activity, "evidence", "unknown")
-        return f"[tool] {tool}{suffix} ({status}; {evidence})"
+        return theme.paint(
+            f"[tool] {tool}{suffix} ({status}; {evidence})", ColorRole.TOOL
+        )
     mark = "✓" if status == "success" else "!"
     action = {
         "repository.read_file": "Read",
@@ -524,7 +683,9 @@ def _render_activity(activity: object, display: DisplayLevel) -> str | None:
         "project.test": "Ran tests",
         "project.build": "Ran build",
     }.get(tool, tool)
-    return f"{mark} {action}{f' {path}' if path else ''}"
+    rendered = f"{mark} {action}{f' {path}' if path else ''}"
+    role = ColorRole.SUCCESS if status == "success" else ColorRole.WARNING
+    return theme.paint(rendered, role)
 
 
 def _trusted_sources(response: RepositoryResponse) -> tuple[str, ...]:

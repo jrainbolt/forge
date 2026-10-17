@@ -218,7 +218,7 @@ def test_slash_aliases_and_state_queries(tmp_path: Path) -> None:
     assert "[PLAN] Mode: PLAN" in rendered
     assert "Mode: CHAT" in rendered
     assert "Display: NORMAL" in rendered
-    assert "Trace: OFF" in rendered
+    assert "Display: TRACE" in rendered
 
 
 def test_trace_checklist_omits_unreachable_plan_mutation_phases(
