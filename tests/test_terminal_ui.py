@@ -9,7 +9,11 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-from forge.interactive_frontend import CommandCompleter, InteractiveFrontend
+from forge.interactive_frontend import (
+    CommandCompleter,
+    InteractiveFrontend,
+    frontend_style,
+)
 from forge.models import MockModel
 from forge.repl import (
     COMMAND_REGISTRY,
@@ -21,7 +25,7 @@ from forge.repl import (
 from forge.session import ChatSession
 from forge.terminal_ui import (
     ColorRole,
-    LoadingFlame,
+    LoadingIndicator,
     render_splash,
     resolve_theme,
     truncate_status,
@@ -79,7 +83,7 @@ def test_splash_uses_side_by_side_layout_when_wide() -> None:
         theme=resolve_theme("mono", interactive=True),
         width=100,
     )
-    assert len(lines) == len(tuple(LoadingFlame.FRAMES[0])) + 1
+    assert len(lines) == 9
     assert " .'" in lines[0] and "FORGE" in lines[0]
     assert any("Project" in line and "forge" in line for line in lines)
 
@@ -106,23 +110,29 @@ def test_status_truncation_respects_narrow_terminal() -> None:
 
 
 def test_loading_flame_disabled_has_no_background_thread() -> None:
-    flame = LoadingFlame(enabled=False, label="Loading fixture")
-    flame.start()
-    flame.stop()
-    assert not flame.running
+    indicator = LoadingIndicator(enabled=False, label="Loading fixture")
+    indicator.start()
+    indicator.stop()
+    assert not indicator.running
 
 
-def test_flame_frames_and_lifecycle_are_valid(monkeypatch) -> None:
-    assert 3 <= len(LoadingFlame.FRAMES) <= 6
-    assert len({len(frame) for frame in LoadingFlame.FRAMES}) == 1
-    assert all("\\" in "\n".join(frame) for frame in LoadingFlame.FRAMES)
+def test_loading_indicator_is_one_line_and_has_no_vertical_cursor_motion(
+    monkeypatch,
+) -> None:
     stream = io.StringIO()
     monkeypatch.setattr(sys, "stdout", stream)
-    flame = LoadingFlame(enabled=True, label="Loading fixture")
-    flame.start()
-    flame.stop()
-    assert not flame.running
-    assert "Loading fixture" in stream.getvalue()
+    indicator = LoadingIndicator(enabled=True, label="Loading fixture")
+    indicator.start()
+    indicator.stop()
+    rendered = stream.getvalue()
+    assert not indicator.running
+    assert "Loading fixture" in rendered
+    assert "\n" not in rendered
+    assert not any(
+        f"\033[{count}{direction}" in rendered
+        for count in range(1, 20)
+        for direction in "AB"
+    )
 
 
 def test_command_completer_reads_registry_and_filters_prefix() -> None:
@@ -152,6 +162,40 @@ def test_interactive_frontend_tab_completion_and_escape() -> None:
         worker.join(timeout=2)
         assert not worker.is_alive()
         assert result == ["/trace"]
+
+
+def test_toolbar_uses_foreground_styles_only() -> None:
+    for theme_name in ("default", "ember", "mono"):
+        rules = dict(
+            frontend_style(theme_name, color_enabled=theme_name != "mono").style_rules
+        )
+        toolbar_rules = {
+            name: value
+            for name, value in rules.items()
+            if name == "bottom-toolbar" or name.startswith("toolbar.")
+        }
+        assert toolbar_rules.get("bottom-toolbar", "") == ""
+        assert all("bg:" not in value for value in toolbar_rules.values())
+
+
+def test_frontend_instances_keep_independent_theme_state() -> None:
+    first = InteractiveFrontend(
+        COMMAND_REGISTRY,
+        lambda: [],
+        theme_name="default",
+        color_enabled=True,
+        output=DummyOutput(),
+    )
+    second = InteractiveFrontend(
+        COMMAND_REGISTRY,
+        lambda: [],
+        theme_name="mono",
+        color_enabled=False,
+        output=DummyOutput(),
+    )
+    first.set_theme("ember", color_enabled=True)
+    assert first.theme_name == "ember"
+    assert second.theme_name == "mono"
 
 
 def test_toolbar_responsively_uses_semantic_spans(monkeypatch) -> None:
@@ -222,3 +266,6 @@ def test_noninteractive_repl_uses_legacy_plain_header_without_status_bar() -> No
     assert "Local AI Agent" not in rendered
     assert "Forge ·" not in rendered
     assert "\x1b[" not in rendered
+    assert "/help commands · Ctrl-C exit" in rendered
+    assert "Use /multi" not in rendered
+    assert "Session history" not in rendered

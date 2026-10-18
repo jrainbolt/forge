@@ -45,7 +45,7 @@ from forge.repl import run_repl
 from forge.repository_index import RepositoryIndex, RepositoryIndexError
 from forge.semantic_index import SemanticIndex, SemanticIndexError
 from forge.session import DEFAULT_SYSTEM_MESSAGE, ChatSession
-from forge.terminal_ui import THEME_NAMES, LoadingFlame, resolve_theme
+from forge.terminal_ui import THEME_NAMES, LoadingIndicator, resolve_theme
 from forge.tools import (
     create_repository_registry,
 )
@@ -349,18 +349,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 and "FORGE_NO_ANIMATION" not in os.environ
             )
             selected_theme = args.theme or os.environ.get("FORGE_THEME", "default")
-            flame = LoadingFlame(
+            loading_indicator = LoadingIndicator(
                 enabled=animation_enabled,
                 label=f"Loading {profile_name}",
                 theme=resolve_theme(selected_theme, interactive=presentation_tty),
             )
             if presentation_tty and not animation_enabled:
                 print(f"Loading {profile_name}...")
-            flame.start()
+            loading_indicator.start()
             try:
                 model = catalog.create(profile_name)
             finally:
-                flame.stop()
+                loading_indicator.stop()
             load_elapsed = time.perf_counter() - load_started
             if bool(args.embedding_config) != bool(args.embedding_profile):
                 raise ValueError(

@@ -293,10 +293,7 @@ def run_repl(
             f"[CHAT] CHAT · display {state.display.value.upper()} · "
             f"{_context_gauge(info)}"
         )
-    output_fn("Type /help for commands.")
-    output_fn("Use /multi for paragraphs; finish with a line containing only '.'.")
-    output_fn("Ctrl-C or Ctrl-D exits Forge. Esc closes command completion menus.")
-    output_fn("Session history is in memory only; /clear starts a fresh conversation.")
+    output_fn("/help commands · Ctrl-C exit")
     while True:
         if tty and frontend is None:
             width = min(48, shutil.get_terminal_size(fallback=(80, 24)).columns)
@@ -372,13 +369,15 @@ def run_repl(
             return 130
         except AgentCancelled:
             spinner.finish()
-            output_fn("Agent task cancelled.")
+            output_fn(state.theme.paint("Agent task cancelled.", ColorRole.WARNING))
             if session.last_agent_task is not None:
                 output_fn(f"\n{session.last_agent_task.footer}")
             continue
         except (ModelError, ValueError, RuntimeError) as error:
             spinner.finish()
-            output_fn(f"Error: {_present_error(error)}")
+            output_fn(
+                state.theme.paint(f"Error: {_present_error(error)}", ColorRole.ERROR)
+            )
             if isinstance(session, RepositoryChatSession):
                 for activity in session.last_activity:
                     if activity.status == "success" and activity.evidence in {

@@ -100,6 +100,10 @@ class InteractiveFrontend:
         self._theme_name = theme_name
         self._color_enabled = color_enabled
 
+    @property
+    def theme_name(self) -> str:
+        return self._theme_name
+
 
 def frontend_style(theme_name: str, *, color_enabled: bool) -> Style:
     if not color_enabled:
@@ -113,13 +117,13 @@ def frontend_style(theme_name: str, *, color_enabled: bool) -> Style:
             "completion-menu.completion.current": "bg:#875f00 #ffffff bold",
             "completion-menu.meta.completion": "bg:#303030 #aaaaaa",
             "completion-menu.meta.completion.current": "bg:#875f00 #ffffff",
-            "bottom-toolbar": "bg:#202020 #bcbcbc",
+            "bottom-toolbar": "",
             "toolbar.brand": brand,
             "toolbar.mode": brand,
             "toolbar.display": "ansicyan",
-            "toolbar.model": "#eeeeee",
+            "toolbar.model": "",
             "toolbar.warm": "ansigreen",
-            "toolbar.access": "ansiyellow",
+            "toolbar.access": "ansicyan",
             "toolbar.context": "ansibrightblack",
             "toolbar.separator": "ansibrightblack",
         }
