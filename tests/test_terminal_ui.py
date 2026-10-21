@@ -145,6 +145,21 @@ def test_command_completer_reads_registry_and_filters_prefix() -> None:
     )
 
 
+def test_command_completer_uses_registry_argument_options() -> None:
+    completer = CommandCompleter(COMMAND_REGISTRY)
+    cases = {
+        "/theme ": ("default", "ember", "mono"),
+        "/theme e": ("ember",),
+        "/display ": ("minimal", "normal", "trace"),
+        "/mode ": ("chat", "plan"),
+    }
+    for text, expected in cases.items():
+        actual = tuple(
+            item.text for item in completer.get_completions(Document(text), None)
+        )
+        assert actual == expected
+
+
 def test_interactive_frontend_tab_completion_and_escape() -> None:
     with create_pipe_input() as pipe:
         frontend = InteractiveFrontend(
@@ -196,6 +211,31 @@ def test_frontend_instances_keep_independent_theme_state() -> None:
     first.set_theme("ember", color_enabled=True)
     assert first.theme_name == "ember"
     assert second.theme_name == "mono"
+
+
+def test_busy_frontend_lifecycle_keeps_toolbar_application_alive() -> None:
+    frontend = InteractiveFrontend(
+        COMMAND_REGISTRY,
+        lambda: [("class:toolbar.mode", "PLAN"), ("", " · busy")],
+        theme_name="mono",
+        color_enabled=False,
+        output=DummyOutput(),
+    )
+    frontend.start_busy("Thinking...")
+    assert frontend.busy
+    frontend.update_busy("Reading repository...")
+    frontend.stop_busy()
+    assert not frontend.busy
+
+
+def test_default_ember_and_mono_styles_are_materially_distinct() -> None:
+    default = dict(frontend_style("default", color_enabled=True).style_rules)
+    ember = dict(frontend_style("ember", color_enabled=True).style_rules)
+    mono = dict(frontend_style("mono", color_enabled=False).style_rules)
+    assert default["prompt"] != ember["prompt"]
+    assert default["toolbar.display"] != ember["toolbar.display"]
+    assert default["toolbar.access"] != ember["toolbar.access"]
+    assert mono == {}
 
 
 def test_toolbar_responsively_uses_semantic_spans(monkeypatch) -> None:

@@ -50,6 +50,7 @@ class CommandSpec:
     arguments: str = ""
     aliases: tuple[str, ...] = ()
     availability: str = "all"
+    options: tuple[str, ...] = ()
 
     @property
     def invocation(self) -> str:
@@ -62,18 +63,33 @@ COMMAND_REGISTRY = tuple(
         (
             CommandSpec("chat", "Switch to conversational intent"),
             CommandSpec("clear", "Clear conversation"),
-            CommandSpec("display", "Set terminal detail", "minimal|normal|trace"),
+            CommandSpec(
+                "display",
+                "Set terminal detail",
+                "minimal|normal|trace",
+                options=("minimal", "normal", "trace"),
+            ),
             CommandSpec("exit", "Exit Forge"),
             CommandSpec("help", "Show commands"),
             CommandSpec("info", "Show session info"),
             CommandSpec("minimal", "Use minimal terminal detail"),
-            CommandSpec("mode", "Switch interaction intent", "chat|plan"),
+            CommandSpec(
+                "mode",
+                "Switch interaction intent",
+                "chat|plan",
+                options=("chat", "plan"),
+            ),
             CommandSpec(
                 "multi", "Enter multiline input; finish with a line containing only ."
             ),
             CommandSpec("normal", "Use normal terminal detail"),
             CommandSpec("plan", "Switch to read-only planning intent"),
-            CommandSpec("theme", "Select terminal theme", "default|ember|mono"),
+            CommandSpec(
+                "theme",
+                "Select terminal theme",
+                "default|ember|mono",
+                options=("default", "ember", "mono"),
+            ),
             CommandSpec("trace", "Use trace detail (on/off also accepted)"),
         ),
         key=lambda item: item.name,
@@ -111,6 +127,7 @@ class _ReplState:
     theme: Theme
     interactive: bool
     warm: bool = False
+    busy: bool = False
 
 
 class _Spinner:
@@ -220,6 +237,28 @@ def run_repl(
     restore_completion = _install_command_completion(
         enabled=tty and frontend is None and input_fn is input
     )
+
+    def start_activity(label: str) -> None:
+        state.busy = True
+        if frontend is not None:
+            frontend.start_busy(label)
+        else:
+            spinner.start(label)
+
+    def update_activity(activity: object) -> None:
+        label = _activity_progress(activity)
+        if frontend is not None:
+            frontend.update_busy(label)
+        else:
+            spinner.update(label)
+
+    def finish_activity() -> None:
+        if frontend is not None:
+            frontend.stop_busy()
+        else:
+            spinner.finish()
+        state.busy = False
+
     if tty:
         workspace = getattr(info, "workspace", None)
         project = Path(workspace).name if workspace is not None else None
@@ -285,9 +324,7 @@ def run_repl(
                 session.set_ephemeral_review_callback(
                     _ephemeral_review_prompt(input_fn=read_input, output_fn=output_fn)
                 )
-        session.set_activity_callback(
-            lambda activity: spinner.update(_activity_progress(activity))
-        )
+        session.set_activity_callback(update_activity)
     elif not tty:
         output_fn(
             f"[CHAT] CHAT · display {state.display.value.upper()} · "
@@ -341,7 +378,7 @@ def run_repl(
                     )
                 continue
         started = time.perf_counter()
-        spinner.start("Thinking...")
+        start_activity("Thinking...")
         try:
             response = (
                 session.ask_conversational(text)
@@ -351,7 +388,7 @@ def run_repl(
                 else session.ask(text)
             )
         except KeyboardInterrupt:
-            spinner.finish()
+            finish_activity()
             output_fn("\nForge interrupted. Exiting; no incomplete turn was committed.")
             if isinstance(session, RepositoryChatSession):
                 completed_writes = tuple(
@@ -368,13 +405,13 @@ def run_repl(
             restore_completion()
             return 130
         except AgentCancelled:
-            spinner.finish()
+            finish_activity()
             output_fn(state.theme.paint("Agent task cancelled.", ColorRole.WARNING))
             if session.last_agent_task is not None:
                 output_fn(f"\n{session.last_agent_task.footer}")
             continue
         except (ModelError, ValueError, RuntimeError) as error:
-            spinner.finish()
+            finish_activity()
             output_fn(
                 state.theme.paint(f"Error: {_present_error(error)}", ColorRole.ERROR)
             )
@@ -391,7 +428,7 @@ def run_repl(
                 if session.last_coding_task is not None:
                     output_fn(f"\n{session.last_coding_task.footer}")
             continue
-        spinner.finish()
+        finish_activity()
         state.warm = True
         if isinstance(response, RepositoryResponse):
             for activity in response.tool_activity:
@@ -403,6 +440,17 @@ def run_repl(
             sources = _trusted_sources(response)
             if sources and state.display is not DisplayLevel.MINIMAL:
                 output_fn(_render_sources(sources, state.theme))
+            if (
+                response.query_scope.value == "broad"
+                and state.display is DisplayLevel.NORMAL
+            ):
+                output_fn(
+                    state.theme.paint(
+                        f"Surveyed {response.tool_budget.source_reads} source files "
+                        f"across {response.survey_areas_sampled} project areas",
+                        ColorRole.METADATA,
+                    )
+                )
             if state.display is DisplayLevel.TRACE:
                 output_fn(_task_checklist(response, session))
         footer = _performance_footer(response, time.perf_counter() - started)
@@ -620,7 +668,7 @@ def _status_line(
     session: ChatSession | RepositoryChatSession, state: _ReplState
 ) -> str:
     info = session.info
-    residency = "warm" if state.warm else "ready"
+    residency = "busy" if state.busy else "warm" if state.warm else "ready"
     fields = [
         f"Forge · {state.user_mode} · {state.display.value.upper()} · "
         f"{info.profile_name} {residency}",
@@ -645,7 +693,7 @@ def _toolbar_fragments(
     if used is not None and capacity:
         context = f"ctx {_compact_number(used)}/{_compact_number(capacity)}"
         percentage = f"{round(100 * used / capacity)}%"
-    residency = "warm" if state.warm else "ready"
+    residency = "busy" if state.busy else "warm" if state.warm else "ready"
     if width >= 72:
         values = (
             ("class:toolbar.brand", "Forge"),
@@ -811,6 +859,11 @@ def _task_checklist(
     )
     lines = [
         "Operational progress:",
+        f"Scope: {response.query_scope.value.upper()}",
+        f"Tool budget: {response.tool_budget.used} / {response.tool_budget.total} used",
+        f"Areas discovered: {response.survey_areas_discovered}",
+        f"Areas sampled: {response.survey_areas_sampled}",
+        f"Source files read: {response.tool_budget.source_reads}",
         f"{'✓' if searched else '○'} Search repository",
         f"{'✓' if read else '○'} Inspect relevant source",
     ]
@@ -906,6 +959,10 @@ def _present_error(error: Exception) -> str:
         "model response is not one valid JSON object": (
             "Forge could not determine a safe repository action. Please clarify "
             "what you want to inspect or change."
+        ),
+        "repository evidence budget exhausted": (
+            "Forge could not gather enough repository evidence within the safe "
+            "tool limit. Try a narrower question or name the most relevant area."
         ),
     }
     for classification, rendered in presentations.items():

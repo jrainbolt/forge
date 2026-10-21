@@ -1,36 +1,69 @@
-# A95 terminal UX reliability dogfood guide
+# A95 repository breadth and terminal-state dogfood
 
-Use an installed `forge` command in a normal interactive terminal without
-setting `PYTHONPATH`.
+Use a disposable or read-only repository. Do not approve mutations during this
+check. Start Forge from an installed environment without relying on
+`PYTHONPATH`.
 
-1. **A:** Enter the `aspect-survivor` project and launch bare `forge`.
-2. **B:** Select `qwen-large`.
-3. **C:** Confirm only a single-line spinner with elapsed time animates during
-   model loading.
-4. **D:** Confirm there is no terminal flicker, vertical cursor jump, duplicated
-   line, or prompt corruption.
-5. **E:** Confirm the static, colored Forge flame appears after loading.
-6. **F:** Confirm the side-by-side startup fits without scrolling in a normal
-   terminal and stacks cleanly at narrow widths.
-7. **G:** Confirm startup guidance is only `/help commands · Ctrl-C exit`.
-8. **H:** Confirm the bottom toolbar uses the terminal background rather than a
-   gray filled rectangle.
-9. **I:** Ask a repository question and confirm assistant prose uses the normal
-   foreground.
-10. **J:** Confirm paths, tools, errors, status fields, and metrics remain visually
-    distinct through restrained foreground colors.
-11. **K:** Open a second Forge terminal simultaneously and confirm both prompts,
-    toolbars, and themes remain independent and stable.
-12. **L:** Type `/`, navigate with Up/Down, filter with `/tr`, complete with Tab,
-    and dismiss with Esc.
-13. **M:** Resize through wide, medium, and narrow terminal widths.
-14. **N:** Run `/theme mono`, then `/theme ember`; confirm only presentation
-    changes and neither theme introduces a toolbar background.
-15. **O:** Exit cleanly with Ctrl-C and confirm the shell prompt is intact.
+## Launch and startup
 
-Compatibility checks:
+1. Launch Forge against the read-only `aspect-survivor` workspace with
+   `qwen-large`, PLAN mode, and TRACE display.
+2. Confirm the startup loading indicator occupies one physical line, changes
+   frames, and its elapsed time advances throughout model initialization.
+3. Confirm the loading line is removed cleanly when initialization finishes or
+   fails, with no orphan renderer or damaged prompt.
 
-- Set `NO_COLOR=1`; spinner shape remains usable without color.
-- Set `FORGE_NO_ANIMATION=1`; a static loading message replaces the spinner.
-- Redirect input/output; no splash, spinner, completion UI, toolbar, ANSI, or
-  cursor-control output should appear.
+## Repository breadth
+
+Submit these prompts in order:
+
+1. `Tell me about this project.`
+   Confirm TRACE classifies it as BROAD and reports real tool-budget, area, and
+   source counts. The answer must use multiple repository areas or explicitly
+   describe the survey as partial.
+2. `Tell me about the swordsman class.`
+   Confirm it remains targeted, is grounded in relevant source, and does not
+   fail with a raw tool-limit message.
+3. `I'm thinking about extending this game to multiplayer. Analyze the entire
+   project and create a plan.`
+   Confirm it is BROAD, samples representative repository-derived areas, cites
+   materially relevant sources, and does not claim to have read every file.
+4. `Trace how melee combat works from player input through damage being applied.`
+   Confirm it follows multiple source boundaries when supported and names any
+   link that could not be established.
+
+For any exhausted evidence budget, confirm the user sees a qualified partial
+answer or a clear message that Forge could not gather enough repository evidence
+within the safe tool limit—not only `tool execution limit exceeded`.
+
+## Active terminal state
+
+1. During each request, confirm the bottom status line remains visible, reports
+   `busy`, and coexists with the transient activity line without presenting a
+   fake editable prompt.
+2. Resize the terminal while idle and again while a request is busy. Check wide,
+   medium, and narrow widths. Confirm fields degrade gracefully, no toolbar is
+   duplicated, and the prompt returns correctly.
+3. Confirm no theme paints a background across the unused remainder of the
+   terminal.
+
+## Completion and themes
+
+1. Type `/theme ` and press Tab. Confirm `default`, `ember`, and `mono` are
+   offered; `/theme e` should narrow to `ember`.
+2. Repeat for `/display ` (`minimal`, `normal`, `trace`) and `/mode ` (`chat`,
+   `plan`). Confirm arrow navigation, Enter/Tab selection, and Esc dismissal.
+3. Compare `/theme default` and `/theme ember`. Ember should have visibly warmer
+   orange/amber brand, prompt, mode, toolbar, and tool accents. Confirm `/theme
+   mono` is unstyled.
+4. Open a second terminal session and confirm its theme, busy state, completion,
+   and resize behavior are independent.
+
+## Exit and non-TTY behavior
+
+1. Exit normally and confirm the terminal cursor and input state are restored.
+2. Pipe a non-interactive invocation where supported and confirm no interactive
+   spinner or footer escape sequences are emitted.
+
+Record the prompt, reported scope, tool budget, sampled areas, source count,
+citations, and any model/backend initialization error for each request.

@@ -500,6 +500,55 @@ class ToolActivity:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolBudgetSnapshot:
+    total: int
+    used: int
+    failed: int
+    discovery: int
+    source_reads: int
+    verification: int
+    mutation: int
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.total - self.used)
+
+
+def tool_budget_snapshot(
+    activities: list[ToolActivity] | tuple[ToolActivity, ...], total: int
+) -> ToolBudgetSnapshot:
+    return ToolBudgetSnapshot(
+        total=total,
+        used=len(activities),
+        failed=sum(
+            item.status != ToolResultStatus.SUCCESS.value for item in activities
+        ),
+        discovery=sum(
+            item.evidence == ToolEvidence.DISCOVERY.value for item in activities
+        ),
+        source_reads=sum(
+            item.status == ToolResultStatus.SUCCESS.value
+            and item.evidence == ToolEvidence.SOURCE_CONTENT.value
+            for item in activities
+        ),
+        verification=sum(
+            item.evidence
+            in {
+                ToolEvidence.CONFIGURE_RESULT.value,
+                ToolEvidence.BUILD_RESULT.value,
+                ToolEvidence.TEST_RESULT.value,
+            }
+            for item in activities
+        ),
+        mutation=sum(
+            item.evidence
+            in {ToolEvidence.WRITE_SUCCESS.value, ToolEvidence.PATCH_SUCCESS.value}
+            for item in activities
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class RepositoryResponse:
     model_response: ModelResponse
     tool_activity: tuple[ToolActivity, ...]
@@ -524,6 +573,10 @@ class RepositoryResponse:
     bootstrap_metrics: BootstrapMetrics = BootstrapMetrics()
     task_phase: RepositoryTaskPhase = RepositoryTaskPhase.COMPLETED
     finalization_metrics: FinalizationMetrics = FinalizationMetrics()
+    query_scope: RepositoryQueryScope = RepositoryQueryScope.NARROW
+    tool_budget: ToolBudgetSnapshot = ToolBudgetSnapshot(0, 0, 0, 0, 0, 0, 0)
+    survey_areas_discovered: int = 0
+    survey_areas_sampled: int = 0
 
     @property
     def text(self) -> str:
@@ -1947,6 +2000,54 @@ class RepositoryChatSession:
                     self._verification_plan.steps,
                     tuple(plan_baseline_steps),
                 )
+        if (
+            query_scope is RepositoryQueryScope.BROAD
+            and any(
+                item.name == "repository.list_directory"
+                for item in self._registry.metadata
+            )
+            and len(activities) < self._max_tool_executions
+        ):
+            structure_invocation = ToolInvocation(
+                "forge-broad-structure-0",
+                "repository.list_directory",
+                {"path": "."},
+            )
+            structure_result = self._executor.execute(
+                structure_invocation, self._context
+            )
+            structure_activity = ToolActivity(
+                structure_invocation.invocation_id,
+                structure_invocation.tool_name,
+                structure_result.status.value,
+                ToolEvidence.DISCOVERY.value,
+                False,
+                ".",
+                generation=self._mutation_generation,
+                acquisition_origin="orchestrator_broad_survey",
+            )
+            activities.append(structure_activity)
+            if self._activity_callback is not None:
+                self._activity_callback(structure_activity)
+            _update_candidates(
+                structure_result,
+                candidate_files=candidate_files,
+                candidate_directories=candidate_directories,
+            )
+            context_planner.register(
+                assistant_text=json.dumps(
+                    {"type": "broad_repository_structure", "path": "."},
+                    sort_keys=True,
+                ),
+                rendered_result=render_tool_result(
+                    structure_result, ToolEvidence.DISCOVERY
+                ),
+                result=structure_result,
+                evidence=ToolEvidence.DISCOVERY,
+                arguments=structure_invocation.arguments,
+                generation=self._mutation_generation,
+                assistant_role=MessageRole.SYSTEM,
+            )
         for _step in range(self._ephemeral_generation_calls, self._max_steps):
             acquire_required_sources()
             acquire_structural_grounding()
@@ -2374,6 +2475,13 @@ class RepositoryChatSession:
                 if query_scope is not RepositoryQueryScope.NARROW or topic_shift
                 else ()
             )
+            budget = tool_budget_snapshot(activities, self._max_tool_executions)
+            if activities:
+                budget_guidance = Message(
+                    MessageRole.USER,
+                    _tool_budget_guidance(budget, query_scope),
+                )
+                goal_messages = (*goal_messages, budget_guidance)
             mutation_messages: tuple[Message, ...] = ()
             if structured_edit_ready and coding_task is not None:
                 candidates = tuple(
@@ -3600,7 +3708,24 @@ class RepositoryChatSession:
                     self._require_relevant_source,
                     scope=query_scope,
                 )
-                if not has_grounding or (
+                budget_at_final = tool_budget_snapshot(
+                    activities, self._max_tool_executions
+                )
+                source_count = len(
+                    {
+                        item.path
+                        for item in activities
+                        if item.status == ToolResultStatus.SUCCESS.value
+                        and item.evidence == ToolEvidence.SOURCE_CONTENT.value
+                        and item.path is not None
+                    }
+                )
+                partial_broad = (
+                    query_scope is RepositoryQueryScope.BROAD
+                    and source_count > 0
+                    and budget_at_final.remaining == 0
+                )
+                if (not has_grounding and not partial_broad) or (
                     coverage_required
                     and not coverage.complete
                     and not coverage.has_required_failure
@@ -3632,6 +3757,13 @@ class RepositoryChatSession:
                     continue
                 self._conversation.discard_oldest_turns(plan.omitted_turns)
                 final_text = parsed.text
+                if partial_broad and not has_grounding:
+                    final_text = (
+                        "Partial repository survey: the bounded evidence budget "
+                        f"covered {source_count} source file(s) across "
+                        f"{len(_sampled_source_areas(activities))} area(s). "
+                        + final_text
+                    )
                 if coverage.has_required_failure:
                     failed = ", ".join(
                         item.goal_id
@@ -3697,6 +3829,12 @@ class RepositoryChatSession:
                     bootstrap_metrics=retrieval_bootstrap.metrics,
                     task_phase=task_phase,
                     finalization_metrics=finalization_metrics,
+                    query_scope=query_scope,
+                    tool_budget=tool_budget_snapshot(
+                        activities, self._max_tool_executions
+                    ),
+                    survey_areas_discovered=len(candidate_directories - {"."}),
+                    survey_areas_sampled=len(_sampled_source_areas(activities)),
                 )
 
             call = parsed.tool_call
@@ -3868,7 +4006,10 @@ class RepositoryChatSession:
             if len(activities) >= self._max_tool_executions:
                 if agent_task is not None:
                     self._agent_stop_hint = AgentStopReason.TOOL_LIMIT
-                raise RepositoryOrchestrationError("tool execution limit exceeded")
+                raise RepositoryOrchestrationError(
+                    "tool execution limit: repository evidence budget exhausted "
+                    "before a grounded answer"
+                )
 
             invocation = ToolInvocation(
                 call.invocation_id, call.tool_name, call.arguments
@@ -5856,9 +5997,11 @@ def classify_repository_query_scope(question: str) -> RepositoryQueryScope:
     if relationship is not None:
         return RepositoryQueryScope.MEDIUM
     comparative = re.search(
-        r"\b(overview|architecture|most developed|least developed|what parts|"
-        r"work on next|project structure|across the project|"
-        r"whole (?:project|codebase))\b",
+        r"\b(overview|architecture|overall architecture|most developed|"
+        r"least developed|what parts|work on next|project structure|"
+        r"across (?:the )?(?:project|codebase)|entire (?:project|codebase)|"
+        r"full (?:project|codebase)|whole (?:project|codebase)|"
+        r"tell me about (?:this|the) project|project-wide)\b",
         normalized,
     )
     if comparative is not None:
@@ -5929,6 +6072,40 @@ def _repository_scope_guidance(
             "for it; prior sources are context, not automatically authoritative."
         )
     return guidance
+
+
+def _tool_budget_guidance(
+    budget: ToolBudgetSnapshot, scope: RepositoryQueryScope
+) -> str:
+    return (
+        f"Tool budget: {budget.used} of {budget.total} calls used; "
+        f"{budget.remaining} remain. Failed calls also count. "
+        + (
+            "Use existing evidence now and return a qualified partial answer; do "
+            "not request another tool."
+            if budget.remaining == 0
+            else "Choose only the highest-value remaining discovery or source reads."
+        )
+        + (
+            " BROAD conclusions require at least three source files from three "
+            "distinct repository-derived areas; otherwise disclose a partial survey."
+            if scope is RepositoryQueryScope.BROAD
+            else ""
+        )
+    )
+
+
+def _sampled_source_areas(
+    activities: list[ToolActivity] | tuple[ToolActivity, ...],
+) -> set[str]:
+    paths = {
+        item.path
+        for item in activities
+        if item.status == ToolResultStatus.SUCCESS.value
+        and item.evidence == ToolEvidence.SOURCE_CONTENT.value
+        and item.path is not None
+    }
+    return {Path(path).parent.as_posix() or Path(path).stem for path in paths}
 
 
 def _is_topic_shift(conversation: Conversation, question: str) -> bool:

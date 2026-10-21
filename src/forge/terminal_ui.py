@@ -5,11 +5,11 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from multiprocessing import Event, Process, get_all_start_methods, get_context
 
 
 class ColorRole(StrEnum):
@@ -54,9 +54,12 @@ _DEFAULT_ROLES = {
 }
 _EMBER_ROLES = {
     **_DEFAULT_ROLES,
-    ColorRole.BRAND_PRIMARY: "\033[38;5;208m",
-    ColorRole.BRAND_SECONDARY: "\033[38;5;196m",
-    ColorRole.MODE: "\033[38;5;208m",
+    ColorRole.BRAND_PRIMARY: "\033[38;5;202m",
+    ColorRole.BRAND_SECONDARY: "\033[38;5;214m",
+    ColorRole.PATH: "\033[38;5;215m",
+    ColorRole.TOOL: "\033[38;5;208m",
+    ColorRole.MODE: "\033[38;5;220m",
+    ColorRole.METADATA: "\033[38;5;180m",
 }
 THEME_NAMES = ("default", "ember", "mono")
 
@@ -167,40 +170,56 @@ class LoadingIndicator:
         self.enabled = enabled
         self.label = label
         self.theme = theme or resolve_theme("mono", interactive=False)
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._stop: Event | None = None
+        self._process: Process | None = None
 
     def start(self) -> None:
         if not self.enabled:
             return
-        self._stop.clear()
         self._render_frame(0, elapsed=0.0)
-        self._thread = threading.Thread(target=self._animate, daemon=True)
-        self._thread.start()
+        context = get_context("fork" if "fork" in get_all_start_methods() else "spawn")
+        self._stop = context.Event()
+        styled_label = self.theme.paint(self.label, ColorRole.BRAND_PRIMARY)
+        self._process = context.Process(
+            target=_animate_loading_line,
+            args=(self._stop, styled_label),
+            daemon=True,
+        )
+        self._process.start()
 
     def stop(self) -> None:
         if not self.enabled:
             return
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=0.5)
-        self._thread = None
+        if self._stop is not None:
+            self._stop.set()
+        if self._process is not None:
+            self._process.join(timeout=0.75)
+            if self._process.is_alive():
+                self._process.terminate()
+                self._process.join(timeout=0.25)
+        self._process = None
+        self._stop = None
         sys.stdout.write("\r\033[2K")
         sys.stdout.flush()
 
     @property
     def running(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
-
-    def _animate(self) -> None:
-        index = 1
-        started = time.perf_counter()
-        while not self._stop.wait(0.1):
-            elapsed = time.perf_counter() - started
-            self._render_frame(index % len(self.FRAMES), elapsed=elapsed)
-            index += 1
+        return self._process is not None and self._process.is_alive()
 
     def _render_frame(self, index: int, *, elapsed: float) -> None:
         label = self.theme.paint(self.label, ColorRole.BRAND_PRIMARY)
         sys.stdout.write(f"\r\033[2K{self.FRAMES[index]} {label}... {elapsed:.1f}s")
         sys.stdout.flush()
+
+
+def _animate_loading_line(stop: Event, styled_label: str) -> None:
+    frames = LoadingIndicator.FRAMES
+    index = 1
+    started = time.perf_counter()
+    while not stop.wait(0.1):
+        elapsed = time.perf_counter() - started
+        sys.stdout.write(
+            f"\r\033[2K{frames[index % len(frames)]} {styled_label}... {elapsed:.1f}s"
+        )
+        sys.stdout.flush()
+        index += 1

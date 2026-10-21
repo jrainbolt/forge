@@ -11,8 +11,10 @@ from forge.models import MockModel, ModelSelectionError
 from forge.orchestration import RepositoryChatSession, RepositoryOrchestrationError
 from forge.orchestration.repository_session import (
     RepositoryQueryScope,
+    ToolActivity,
     classify_repository_query_scope,
     requires_repository_grounding,
+    tool_budget_snapshot,
 )
 from forge.repl import run_repl
 
@@ -63,6 +65,28 @@ def test_repository_scope_classification(
     question: str, expected: RepositoryQueryScope
 ) -> None:
     assert classify_repository_query_scope(question) is expected
+
+
+def test_explicit_entire_project_language_is_broad() -> None:
+    assert (
+        classify_repository_query_scope(
+            "Analyze the entire project and create a multiplayer plan."
+        )
+        is RepositoryQueryScope.BROAD
+    )
+
+
+def test_tool_budget_accounts_for_failures_and_categories() -> None:
+    activities = [
+        ToolActivity("d", "repository.search_files", "success", "discovery", False),
+        ToolActivity("r", "repository.read_file", "failure", "source_content", False),
+        ToolActivity("t", "project.test", "success", "test_result", False),
+        ToolActivity("w", "repository.apply_patch", "success", "patch_success", False),
+    ]
+    budget = tool_budget_snapshot(activities, 8)
+    assert (budget.used, budget.remaining, budget.failed) == (4, 4, 1)
+    assert (budget.discovery, budget.source_reads) == (1, 0)
+    assert (budget.verification, budget.mutation) == (1, 1)
 
 
 def test_chat_brainstorming_stays_conversational_without_tools(tmp_path: Path) -> None:
@@ -143,10 +167,13 @@ def test_broad_query_gathers_multiple_repository_areas(tmp_path: Path) -> None:
     response = RepositoryChatSession(
         "fixture", model, tmp_path, require_relevant_source=False
     ).ask("What parts of this project are most developed?")
-    assert (
-        len({Path(item.path).parent for item in response.tool_activity if item.path})
-        == 3
-    )
+    source_areas = {
+        Path(item.path).parent
+        for item in response.tool_activity
+        if item.evidence == "source_content" and item.path
+    }
+    assert len(source_areas) == 3
+    assert response.tool_activity[0].acquisition_origin == "orchestrator_broad_survey"
 
 
 def test_broad_comparison_cannot_finalize_from_one_source(tmp_path: Path) -> None:
@@ -159,7 +186,31 @@ def test_broad_comparison_cannot_finalize_from_one_source(tmp_path: Path) -> Non
     )
     with pytest.raises(RepositoryOrchestrationError, match="source-content"):
         session.ask("What parts of this project are most developed?")
-    assert len(session.last_activity) == 1
+    assert (
+        len(
+            [
+                item
+                for item in session.last_activity
+                if item.evidence == "source_content"
+            ]
+        )
+        == 1
+    )
+
+
+def test_exhausted_broad_survey_is_disclosed_as_partial(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    model = MockModel((_read("one", "combat/attack.py"), _final("bounded observation")))
+    response = RepositoryChatSession(
+        "fixture",
+        model,
+        tmp_path,
+        require_relevant_source=False,
+        max_tool_executions=2,
+    ).ask("Analyze the entire project and propose a plan")
+    assert response.text.startswith("Partial repository survey:")
+    assert response.query_scope is RepositoryQueryScope.BROAD
+    assert response.tool_budget.used == response.tool_budget.total == 2
 
 
 def test_follow_up_topic_shift_adds_fresh_retrieval_guidance(tmp_path: Path) -> None:
