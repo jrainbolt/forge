@@ -3702,14 +3702,22 @@ class RepositoryChatSession:
                         )
                         continue
                     coding_task.decline_verification()
-                has_grounding = _has_completion_evidence(
+                has_ideal_grounding = _has_completion_evidence(
                     activities,
                     required_source_files,
                     self._require_relevant_source,
                     scope=query_scope,
                 )
-                budget_at_final = tool_budget_snapshot(
-                    activities, self._max_tool_executions
+                has_minimum_grounding = _has_source_evidence(
+                    activities,
+                    1,
+                    self._require_relevant_source,
+                )
+                has_grounding = has_ideal_grounding or (
+                    coding_task is None
+                    and self._evidence_plan is None
+                    and self._minimum_source_files is None
+                    and has_minimum_grounding
                 )
                 source_count = len(
                     {
@@ -3720,15 +3728,20 @@ class RepositoryChatSession:
                         and item.path is not None
                     }
                 )
-                partial_broad = (
-                    query_scope is RepositoryQueryScope.BROAD
-                    and source_count > 0
-                    and budget_at_final.remaining == 0
+                partial_read_only = (
+                    coding_task is None
+                    and self._evidence_plan is None
+                    and self._minimum_source_files is None
+                    and query_scope
+                    in {RepositoryQueryScope.MEDIUM, RepositoryQueryScope.BROAD}
+                    and has_minimum_grounding
+                    and not has_ideal_grounding
                 )
-                if (not has_grounding and not partial_broad) or (
+                if not has_grounding or (
                     coverage_required
                     and not coverage.complete
                     and not coverage.has_required_failure
+                    and not partial_read_only
                 ):
                     if protocol_corrections:
                         raise RepositoryOrchestrationError(
@@ -3757,12 +3770,18 @@ class RepositoryChatSession:
                     continue
                 self._conversation.discard_oldest_turns(plan.omitted_turns)
                 final_text = parsed.text
-                if partial_broad and not has_grounding:
+                if partial_read_only and query_scope is RepositoryQueryScope.BROAD:
                     final_text = (
                         "Partial repository survey: the bounded evidence budget "
                         f"covered {source_count} source file(s) across "
                         f"{len(_sampled_source_areas(activities))} area(s). "
                         + final_text
+                    )
+                elif partial_read_only:
+                    final_text = (
+                        "Partial repository trace: the available evidence covered "
+                        f"{source_count} source file(s); one or more requested "
+                        "relationship links remain unverified. " + final_text
                     )
                 if coverage.has_required_failure:
                     failed = ", ".join(
@@ -3839,6 +3858,56 @@ class RepositoryChatSession:
 
             call = parsed.tool_call
             assert call is not None
+            if (
+                coding_task is None
+                and self._evidence_plan is None
+                and self._minimum_source_files is None
+                and (
+                    query_scope
+                    in {RepositoryQueryScope.MEDIUM, RepositoryQueryScope.BROAD}
+                    or not coverage_required
+                )
+            ):
+                requested_evidence = _tool_evidence(
+                    self._registry, call.tool_name, call.arguments
+                )
+                budget_now = tool_budget_snapshot(activities, self._max_tool_executions)
+                useful_sources = len(
+                    {
+                        item.path
+                        for item in activities
+                        if item.status == ToolResultStatus.SUCCESS.value
+                        and item.evidence == ToolEvidence.SOURCE_CONTENT.value
+                        and item.current_source
+                        and (item.relevant_source or not self._require_relevant_source)
+                        and item.path is not None
+                    }
+                )
+                discovery_soft_limit = 2
+                should_synthesize = useful_sources > 0 and (
+                    budget_now.remaining <= 1 or useful_sources >= required_source_files
+                )
+                discovery_must_yield = (
+                    requested_evidence is ToolEvidence.DISCOVERY
+                    and budget_now.discovery >= discovery_soft_limit
+                    and useful_sources < required_source_files
+                )
+                if should_synthesize or discovery_must_yield:
+                    transcript.extend(
+                        (
+                            Message(MessageRole.ASSISTANT, response.text),
+                            Message(
+                                MessageRole.USER,
+                                _budget_transition_guidance(
+                                    query_scope,
+                                    budget_now,
+                                    has_source=useful_sources > 0,
+                                    synthesize=should_synthesize,
+                                ),
+                            ),
+                        )
+                    )
+                    continue
             if (
                 coding_task is not None
                 and call.tool_name == "repository.write_file"
@@ -6106,6 +6175,33 @@ def _sampled_source_areas(
         and item.path is not None
     }
     return {Path(path).parent.as_posix() or Path(path).stem for path in paths}
+
+
+def _budget_transition_guidance(
+    scope: RepositoryQueryScope,
+    budget: ToolBudgetSnapshot,
+    *,
+    has_source: bool,
+    synthesize: bool,
+) -> str:
+    if synthesize and has_source:
+        qualification = (
+            "Label the result as a partial repository survey"
+            if scope is RepositoryQueryScope.BROAD
+            else "Label any unverified relationship as a partial trace"
+            if scope is RepositoryQueryScope.MEDIUM
+            else "Answer from the authoritative source already acquired"
+        )
+        return (
+            f"The bounded lookup budget has {budget.remaining} execution(s) "
+            f"remaining. Stop requesting tools and synthesize now. {qualification}; "
+            "cite only acquired evidence and do not claim broader coverage."
+        )
+    return (
+        "The discovery soft budget is exhausted. Do not perform more broad "
+        "discovery; use the best existing candidate for an authoritative source "
+        "read. One bounded recovery may be used only if that source read fails."
+    )
 
 
 def _is_topic_shift(conversation: Conversation, question: str) -> bool:

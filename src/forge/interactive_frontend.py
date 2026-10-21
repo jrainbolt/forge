@@ -73,6 +73,7 @@ class InteractiveFrontend:
         color_enabled: bool,
         input: Any = None,
         output: Any = None,
+        rich_busy_supported: bool | None = None,
     ) -> None:
         self._toolbar = toolbar
         self._output = output
@@ -83,6 +84,10 @@ class InteractiveFrontend:
         self._busy_thread: threading.Thread | None = None
         self._busy_input = None
         self._busy_input_context = None
+        # The busy application uses a pipe so it cannot queue user input. That
+        # pipe also cannot receive terminal CPR replies, so rich rendering is
+        # safe only when support was independently confirmed by the caller.
+        self._rich_busy_supported = bool(rich_busy_supported)
         bindings = KeyBindings()
 
         @bindings.add("escape")
@@ -137,7 +142,13 @@ class InteractiveFrontend:
     def busy(self) -> bool:
         return self._busy_thread is not None and self._busy_thread.is_alive()
 
+    @property
+    def rich_busy_supported(self) -> bool:
+        return self._rich_busy_supported
+
     def start_busy(self, label: str = "Working...") -> None:
+        if not self._rich_busy_supported:
+            return
         if self.busy:
             self.update_busy(label)
             return

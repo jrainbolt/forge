@@ -8,7 +8,7 @@ import pytest
 from forge.cli import _resolve_model_profile_interactive
 from forge.interaction import AutonomyMode
 from forge.models import MockModel, ModelSelectionError
-from forge.orchestration import RepositoryChatSession, RepositoryOrchestrationError
+from forge.orchestration import RepositoryChatSession
 from forge.orchestration.repository_session import (
     RepositoryQueryScope,
     ToolActivity,
@@ -41,6 +41,17 @@ def _read(identifier: str, path: str) -> str:
 
 def _final(answer: str = "done") -> str:
     return json.dumps({"type": "final", "answer": answer})
+
+
+def _list(identifier: str, path: str = ".") -> str:
+    return json.dumps(
+        {
+            "type": "tool_call",
+            "id": identifier,
+            "tool": "repository.list_directory",
+            "arguments": {"path": path},
+        }
+    )
 
 
 def _workspace(root: Path) -> None:
@@ -154,6 +165,51 @@ def test_narrow_question_can_finish_from_one_targeted_source(tmp_path: Path) -> 
     assert tuple(item.path for item in response.tool_activity) == ("melee.py",)
 
 
+def test_narrow_early_stop_preserves_unused_budget(tmp_path: Path) -> None:
+    (tmp_path / "melee.py").write_text("class MeleeAttackSystem: pass\n")
+    (tmp_path / "other.py").write_text("unrelated = True\n")
+    model = MockModel(
+        (_read("one", "melee.py"), _read("unneeded", "other.py"), _final("targeted"))
+    )
+    response = RepositoryChatSession(
+        "fixture", model, tmp_path, require_relevant_source=False
+    ).ask("How does MeleeAttackSystem work?")
+    assert tuple(item.path for item in response.tool_activity) == ("melee.py",)
+    assert response.tool_budget.remaining == 7
+    assert len(model.requests) == 3
+
+
+def test_discovery_soft_budget_preserves_source_capacity(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    model = MockModel(
+        (
+            _list("discover-two", "combat"),
+            _list("discover-three", "actors"),
+            _read("source", "combat/attack.py"),
+            _final("limited evidence"),
+        )
+    )
+    response = RepositoryChatSession(
+        "fixture", model, tmp_path, require_relevant_source=False
+    ).ask("Tell me about this project")
+    assert response.tool_budget.discovery == 2
+    assert response.tool_budget.source_reads == 1
+    assert response.tool_budget.remaining == 5
+    assert response.text.startswith("Partial repository survey:")
+
+
+def test_medium_one_source_returns_partial_trace(tmp_path: Path) -> None:
+    _workspace(tmp_path)
+    response = RepositoryChatSession(
+        "fixture",
+        MockModel((_read("one", "combat/attack.py"), _final("attack dispatch"))),
+        tmp_path,
+        require_relevant_source=False,
+    ).ask("Trace melee combat from input through damage")
+    assert response.text.startswith("Partial repository trace:")
+    assert "remain unverified" in response.text
+
+
 def test_broad_query_gathers_multiple_repository_areas(tmp_path: Path) -> None:
     _workspace(tmp_path)
     model = MockModel(
@@ -176,26 +232,16 @@ def test_broad_query_gathers_multiple_repository_areas(tmp_path: Path) -> None:
     assert response.tool_activity[0].acquisition_origin == "orchestrator_broad_survey"
 
 
-def test_broad_comparison_cannot_finalize_from_one_source(tmp_path: Path) -> None:
+def test_broad_comparison_from_one_source_is_explicitly_partial(tmp_path: Path) -> None:
     _workspace(tmp_path)
     model = MockModel(
         (_read("one", "combat/attack.py"), _final("combat wins"), _final("still"))
     )
-    session = RepositoryChatSession(
+    response = RepositoryChatSession(
         "fixture", model, tmp_path, require_relevant_source=False
-    )
-    with pytest.raises(RepositoryOrchestrationError, match="source-content"):
-        session.ask("What parts of this project are most developed?")
-    assert (
-        len(
-            [
-                item
-                for item in session.last_activity
-                if item.evidence == "source_content"
-            ]
-        )
-        == 1
-    )
+    ).ask("What parts of this project are most developed?")
+    assert response.text.startswith("Partial repository survey:")
+    assert response.tool_budget.source_reads == 1
 
 
 def test_exhausted_broad_survey_is_disclosed_as_partial(tmp_path: Path) -> None:

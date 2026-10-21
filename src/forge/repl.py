@@ -240,20 +240,20 @@ def run_repl(
 
     def start_activity(label: str) -> None:
         state.busy = True
-        if frontend is not None:
+        if frontend is not None and frontend.rich_busy_supported:
             frontend.start_busy(label)
         else:
             spinner.start(label)
 
     def update_activity(activity: object) -> None:
         label = _activity_progress(activity)
-        if frontend is not None:
+        if frontend is not None and frontend.rich_busy_supported:
             frontend.update_busy(label)
         else:
             spinner.update(label)
 
     def finish_activity() -> None:
-        if frontend is not None:
+        if frontend is not None and frontend.rich_busy_supported:
             frontend.stop_busy()
         else:
             spinner.finish()
@@ -444,9 +444,15 @@ def run_repl(
                 response.query_scope.value == "broad"
                 and state.display is DisplayLevel.NORMAL
             ):
+                quality = (
+                    "Full survey"
+                    if response.tool_budget.source_reads >= 3
+                    and response.survey_areas_sampled >= 3
+                    else "Partial survey"
+                )
                 output_fn(
                     state.theme.paint(
-                        f"Surveyed {response.tool_budget.source_reads} source files "
+                        f"{quality} · {response.tool_budget.source_reads} files "
                         f"across {response.survey_areas_sampled} project areas",
                         ColorRole.METADATA,
                     )
@@ -861,9 +867,21 @@ def _task_checklist(
         "Operational progress:",
         f"Scope: {response.query_scope.value.upper()}",
         f"Tool budget: {response.tool_budget.used} / {response.tool_budget.total} used",
+        f"Discovery: {response.tool_budget.discovery}",
+        f"Failed: {response.tool_budget.failed}",
         f"Areas discovered: {response.survey_areas_discovered}",
         f"Areas sampled: {response.survey_areas_sampled}",
         f"Source files read: {response.tool_budget.source_reads}",
+        "Survey quality: "
+        + (
+            "FULL"
+            if response.query_scope.value != "broad"
+            or (
+                response.tool_budget.source_reads >= 3
+                and response.survey_areas_sampled >= 3
+            )
+            else "PARTIAL"
+        ),
         f"{'✓' if searched else '○'} Search repository",
         f"{'✓' if read else '○'} Inspect relevant source",
     ]

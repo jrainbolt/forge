@@ -4,6 +4,7 @@ import io
 import os
 import sys
 import threading
+import time
 
 from prompt_toolkit.document import Document
 from prompt_toolkit.input.defaults import create_pipe_input
@@ -17,6 +18,7 @@ from forge.interactive_frontend import (
 from forge.models import MockModel
 from forge.repl import (
     COMMAND_REGISTRY,
+    _Spinner,
     _toolbar_fragments,
     command_help,
     command_suggestions,
@@ -220,12 +222,40 @@ def test_busy_frontend_lifecycle_keeps_toolbar_application_alive() -> None:
         theme_name="mono",
         color_enabled=False,
         output=DummyOutput(),
+        rich_busy_supported=True,
     )
     frontend.start_busy("Thinking...")
     assert frontend.busy
     frontend.update_busy("Reading repository...")
     frontend.stop_busy()
     assert not frontend.busy
+
+
+def test_busy_frontend_defaults_to_cpr_safe_fallback() -> None:
+    frontend = InteractiveFrontend(
+        COMMAND_REGISTRY,
+        lambda: [("class:toolbar.mode", "PLAN")],
+        theme_name="mono",
+        color_enabled=False,
+        output=DummyOutput(),
+    )
+    assert not frontend.rich_busy_supported
+    frontend.start_busy("Thinking...")
+    assert not frontend.busy
+
+
+def test_cpr_safe_spinner_advances_elapsed_without_cpr(monkeypatch) -> None:
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stream)
+    spinner = _Spinner(True)
+    spinner.start("Reading repository...")
+    time.sleep(0.24)
+    spinner.finish()
+    rendered = stream.getvalue()
+    assert "Reading repository..." in rendered
+    assert "0.1s" in rendered or "0.2s" in rendered
+    assert "\x1b[6n" not in rendered
+    assert "CPR" not in rendered
 
 
 def test_default_ember_and_mono_styles_are_materially_distinct() -> None:
